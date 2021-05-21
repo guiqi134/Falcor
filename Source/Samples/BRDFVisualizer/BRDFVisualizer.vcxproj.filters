@@ -1,0 +1,71 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="BRDFVisualizer.cpp" />
+    <ClCompile Include="materialBallPass.cpp" />
+    <ClCompile Include="AccumulatePass.cpp">
+      <Filter>AccumulatePass</Filter>
+    </ClCompile>
+    <ClCompile Include="PostProcessingPass.cpp">
+      <Filter>PostProcessingPass</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderSettings.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ResourceManager.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="BRDFVisualizationPass.cpp" />
+    <ClCompile Include="sdfConstructionPass.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="BRDFVisualizer.h" />
+    <ClInclude Include="materialBallPass.h" />
+    <ClInclude Include="AccumulatePass.h">
+      <Filter>AccumulatePass</Filter>
+    </ClInclude>
+    <ClInclude Include="PostProcessingPass.h">
+      <Filter>PostProcessingPass</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderSettings.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ResourceManager.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Json.hpp">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Utils.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="BRDFVisualizationPass.h" />
+    <ClInclude Include="sdfConstructionPass.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="materialBallPass.slang" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="AccumulatePass">
+      <UniqueIdentifier>{f01f325f-b15f-4560-bea9-9e277e77b6cc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="PostProcessingPass">
+      <UniqueIdentifier>{8e49f900-eb8a-4892-b30a-86fcfcb8e76f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core">
+      <UniqueIdentifier>{7e92200f-7036-4fb7-b0bb-b26238b800b8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="Accumulate.cs.slang">
+      <Filter>AccumulatePass</Filter>
+    </ShaderSource>
+    <ShaderSource Include="PostProcessingPass.ps.slang">
+      <Filter>PostProcessingPass</Filter>
+    </ShaderSource>
+    <ShaderSource Include="sdfConstructionPass.cs.slang" />
+  </ItemGroup>
+  <ItemGroup>
+    <CopyFileToFolders Include="settings.json" />
+  </ItemGroup>
+</Project>
