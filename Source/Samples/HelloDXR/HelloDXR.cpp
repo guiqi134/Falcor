@@ -28,6 +28,7 @@
 #include "HelloDXR.h"
 
 static const float4 kClearColor(0.38f, 0.52f, 0.10f, 1);
+//static const std::string kDefaultScene = "VPLMedia/materialBall/materialBall.pyscene";
 static const std::string kDefaultScene = "Arcade/Arcade.pyscene";
 
 void HelloDXR::onGuiRender(Gui* pGui)
@@ -89,7 +90,7 @@ void HelloDXR::onLoad(RenderContext* pRenderContext)
 
 void HelloDXR::setPerFrameVars(const Fbo* pTargetFbo)
 {
-    PROFILE("setPerFrameVars");
+    PROFILE("setPerFrameVars"); // ???
     auto cb = mpRtVars["PerFrameCB"];
     cb["invView"] = glm::inverse(mpCamera->getViewMatrix());
     cb["viewportDims"] = float2(pTargetFbo->getWidth(), pTargetFbo->getHeight());
@@ -107,7 +108,7 @@ void HelloDXR::renderRT(RenderContext* pContext, const Fbo* pTargetFbo)
 
     pContext->clearUAV(mpRtOut->getUAV().get(), kClearColor);
     mpScene->raytrace(pContext, mpRaytraceProgram.get(), mpRtVars, uint3(pTargetFbo->getWidth(), pTargetFbo->getHeight(), 1));
-    pContext->blit(mpRtOut->getSRV(), pTargetFbo->getRenderTargetView(0));
+    pContext->blit(mpRtOut->getSRV(), pTargetFbo->getRenderTargetView(0)); // src -> dst
 }
 
 void HelloDXR::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
@@ -116,6 +117,7 @@ void HelloDXR::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr
 
     if(mpScene)
     {
+        // Update the scene. Call this once per frame to update the camera location, animations, etc.
         mpScene->update(pRenderContext, gpFramework->getGlobalClock().getTime());
         if (mRayTrace) renderRT(pRenderContext, pTargetFbo.get());
         else mpRasterPass->renderScene(pRenderContext, pTargetFbo);

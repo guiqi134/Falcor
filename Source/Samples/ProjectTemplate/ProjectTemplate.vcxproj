@@ -11,15 +11,32 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="AccumulationPass.cpp" />
+    <ClCompile Include="AmbientOcclusionPass.cpp" />
+    <ClCompile Include="diffuseGIPass.cpp" />
+    <ClCompile Include="GBufferPass.cpp" />
     <ClCompile Include="ProjectTemplate.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AccumulationPass.h" />
+    <ClInclude Include="AmbientOcclusionPass.h" />
+    <ClInclude Include="diffuseGIPass.h" />
+    <ClInclude Include="GBufferPass.h" />
     <ClInclude Include="ProjectTemplate.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Falcor\Falcor.vcxproj">
       <Project>{2c535635-e4c5-4098-a928-574f0e7cd5f9}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="accumulate.ps.slang" />
+    <ShaderSource Include="aoTracing.rt.slang" />
+    <ShaderSource Include="aoTracingUtils.slang" />
+    <ShaderSource Include="diffuseGI.rt.slang" />
+    <ShaderSource Include="diffuseGIUtils.slang" />
+    <ShaderSource Include="GBufferPackLinearZAndNormal.ps.slang" />
+    <ShaderSource Include="GBufferPass.3d.slang" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{605856E4-34D4-40DF-B859-EEA3A7D52A7B}</ProjectGuid>

@@ -25,29 +25,35 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#pragma once
-#include "Falcor.h"
+import Scene.ShadingData;
+import Utils.Helpers;
+import Utils.Math.MathHelpers;
 
-using namespace Falcor;
-
-class AccumulationPass;
-//class AmbientOcclusionPass;
-
-class ProjectTemplate : public IRenderer
+struct FullScreenPassVsOut
 {
-public:
-    void onLoad(RenderContext* pRenderContext) override;
-    void onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo) override;
-    void onShutdown() override;
-    void onResizeSwapChain(uint32_t width, uint32_t height) override;
-    bool onKeyEvent(const KeyboardEvent& keyEvent) override;
-    bool onMouseEvent(const MouseEvent& mouseEvent) override;
-    void onHotReload(HotReloadFlags reloaded) override;
-    void onGuiRender(Gui* pGui) override;
-
-private:
-    std::shared_ptr<AccumulationPass> mpAccumulationPass;
-    //std::shared_ptr<AmbientOcclusionPass> mpAmbientOcclusionPass;
-
-    Scene::SharedPtr mpScene;
+    float2 texC       : TEXCOORD;
+#ifndef _VIEWPORT_MASK
+    float4 posH       : SV_POSITION;
+#else
+    float4 posH       : POSITION;
+#endif
 };
+
+cbuffer PerImageCB
+{
+    Texture2D gLinearZ;
+    Texture2D gNormal;
+};
+
+float4 main(FullScreenPassVsOut vsOut) : SV_TARGET0
+{
+    float4 fragCoord = vsOut.posH;
+    const int2 ipos = int2(fragCoord.xy);
+
+    // pack data from 3D to 2D
+    const float2 nPacked = ndir_to_oct_snorm(gNormal[ipos].xyz);
+
+    // return float4(gLinearZ[ipos].xy, nPacked.x, nPacked.y);
+    return float4(1.0f, 0.0f, 0.0f, 1.0f);
+}
+

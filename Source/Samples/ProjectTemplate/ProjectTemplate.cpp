@@ -26,10 +26,15 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ProjectTemplate.h"
+#include "AccumulationPass.h"
+//#include "AmbientOcclusionPass.h"
+
 uint32_t mSampleGuiWidth = 250;
 uint32_t mSampleGuiHeight = 200;
 uint32_t mSampleGuiPositionX = 20;
 uint32_t mSampleGuiPositionY = 40;
+
+static const float4 kClearColor(0.38f, 0.52f, 0.10f, 1);
 
 void ProjectTemplate::onGuiRender(Gui* pGui)
 {
@@ -40,16 +45,25 @@ void ProjectTemplate::onGuiRender(Gui* pGui)
     {
         msgBox("Now why would you do that?");
     }
+
+    mpAccumulationPass->renderGui(pGui);
+    mpScene->renderUI(w);
 }
 
 void ProjectTemplate::onLoad(RenderContext* pRenderContext)
 {
+    //mpScene = Scene::create("living_room/livingRoom.pyscene");
+    mpScene = Scene::create("VPLMedia/materialBall/materialBall.pyscene");
+    mpAccumulationPass = AccumulationPass::create(1600, 900, mpScene);
 }
 
 void ProjectTemplate::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
 {
-    const float4 clearColor(0.38f, 0.52f, 0.10f, 1);
-    pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
+    pRenderContext->clearFbo(pTargetFbo.get(), kClearColor, 1.0f, 0, FboAttachmentType::All);
+    mpAccumulationPass->execute(pRenderContext);
+
+    pRenderContext->blit(mpAccumulationPass->getOutputTexture()->getSRV(), pTargetFbo->getRenderTargetView(0)); // src -> dst
+    TextRenderer::render(pRenderContext, gpFramework->getFrameRate().getMsg(), pTargetFbo, { 20, 20 });
 }
 
 void ProjectTemplate::onShutdown()
@@ -79,7 +93,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ProjectTemplate::UniquePtr pRenderer = std::make_unique<ProjectTemplate>();
     SampleConfig config;
     config.windowDesc.title = "Falcor Project Template";
-    config.windowDesc.resizableWindow = true;
+    config.windowDesc.resizableWindow = false;
+    config.windowDesc.width = 1600;
+    config.windowDesc.height = 900;
     Sample::run(config, pRenderer);
     return 0;
 }

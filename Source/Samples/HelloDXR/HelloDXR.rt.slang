@@ -66,7 +66,7 @@ void shadowAnyHit(inout ShadowRayData hitData, in BuiltInTriangleIntersectionAtt
 [shader("miss")]
 void primaryMiss(inout PrimaryRayData hitData)
 {
-    hitData.color = float4(0.38f, 0.52f, 0.10f, 1);
+    hitData.color = float4(0.0f, 0.0f, 0.0f, 1);
     hitData.hitT = -1;
 }
 
@@ -164,15 +164,17 @@ void rayGen(
     uint randSeed = rand_init(launchIndex.x + launchIndex.y * viewportDims.x, sampleIndex, 16);
 
     RayDesc ray;
-    if (!useDOF)
-    {
-        ray = gScene.camera.computeRayPinhole(launchIndex.xy, viewportDims).toRayDesc();
-    }
-    else
-    {
-        float2 u = float2(rand_next(randSeed), rand_next(randSeed));
-        ray = gScene.camera.computeRayThinlens(launchIndex.xy, viewportDims, u).toRayDesc();
-    }
+    // if (!useDOF)
+    // {
+    //     ray = gScene.camera.computeRayPinhole(launchIndex.xy, viewportDims).toRayDesc();
+    // }
+    // else
+    // {
+    //     float2 u = float2(rand_next(randSeed), rand_next(randSeed));
+    //     ray = gScene.camera.computeRayThinlens(launchIndex.xy, viewportDims, u).toRayDesc();
+    // }
+    float2 u = float2(rand_next(randSeed), rand_next(randSeed)); // offset 
+    ray = gScene.camera.computeRayThinlens(launchIndex.xy, viewportDims, u).toRayDesc();
 
     PrimaryRayData hitData;
     hitData.depth = 0;
