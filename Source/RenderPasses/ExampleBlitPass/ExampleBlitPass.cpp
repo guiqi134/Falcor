@@ -25,12 +25,64 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#pragma once
+#include "ExampleBlitPass.h"
 
-#define _LOG_ENABLED        1 // Set this to 0 to disable logging and most error checks
 
-#define _PROFILING_ENABLED  1 // Set this to 1 to enable CPU/GPU profiling
+namespace
+{
+    const char kDesc[] = "Blits a texture into another texture";    
+}
 
-#define _ENABLE_NVAPI       1 // Set this to 1 to enable NVIDIA specific DX extensions. Make sure you have the NVAPI package in your 'Externals' directory. View the readme for more information.
-#define _ENABLE_CUDA        0 // Set this to 1 to enable CUDA use and CUDA/DX interoperation. Make sure you have the CUDA SDK package in your 'Externals' directory. View the readme for more information.
-#define _ENABLE_OPTIX       0 // Set this to 1 to enable OptiX. Make sure you have the OptiX SDK package in your 'Externals' directory. View the readme for more information.
+// Don't remove this. it's required for hot-reload to function properly
+extern "C" __declspec(dllexport) const char* getProjDir()
+{
+    return PROJECT_DIR;
+}
+
+extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
+{
+    lib.registerClass("ExampleBlitPass", kDesc, ExampleBlitPass::create);
+}
+
+ExampleBlitPass::SharedPtr ExampleBlitPass::create(RenderContext* pRenderContext, const Dictionary& dict)
+{
+    SharedPtr pPass = SharedPtr(new ExampleBlitPass);
+    return pPass;
+}
+
+std::string ExampleBlitPass::getDesc() { return kDesc; }
+
+Dictionary ExampleBlitPass::getScriptingDictionary()
+{
+    return Dictionary();
+}
+
+RenderPassReflection ExampleBlitPass::reflect(const CompileData& compileData)
+{
+    // Define the required resources here
+    RenderPassReflection reflector;
+    reflector.addInput("input", "the source texture");
+    reflector.addOutput("output", "the destination texture");
+    return reflector;
+}
+
+void ExampleBlitPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    // renderData holds the requested resources
+    // auto& pTexture = renderData["src"]->asTexture();
+    const auto& pSrcTex = renderData["input"]->asTexture();
+    const auto& pDstTex = renderData["output"]->asTexture();
+
+    if (pSrcTex && pDstTex)
+    {
+        pRenderContext->blit(pSrcTex->getSRV(), pDstTex->getRTV());
+    }
+    else
+    {
+        logWarning("ExampleBlitPass::execute() - missing an input or output resource");
+    }
+}
+
+void ExampleBlitPass::renderUI(Gui::Widgets& widget)
+{
+}

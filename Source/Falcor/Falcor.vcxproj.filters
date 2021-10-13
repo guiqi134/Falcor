@@ -717,6 +717,9 @@
     <Filter Include="Utils\SDF">
       <UniqueIdentifier>{8252692b-95b4-4793-8709-3fb8f9a590a9}</UniqueIdentifier>
     </Filter>
+    <Filter Include="RenderPasses\Shared\ReSTIR">
+      <UniqueIdentifier>{3a12a508-ff46-4a9c-a6c1-fc7e80ab6e54}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Core\API\D3D12\D3D12DescriptorHeap.cpp">
@@ -1757,5 +1760,7 @@
     <ShaderSource Include="Utils\SDF\SDFOperations.slang">
       <Filter>Utils\SDF</Filter>
     </ShaderSource>
+    <ShaderSource Include="RenderPasses\Shared\ReSTIR\ReSTIRUtils.slang" />
+    <ShaderSource Include="RenderPasses\Shared\ReSTIR\GBufferUtils.slang" />
   </ItemGroup>
 </Project>

@@ -66,8 +66,8 @@ struct PathTracerParams
     // General
     uint    samplesPerPixel = 1;            ///< Number of samples (paths) per pixel. Use compile-time constant kSamplesPerPixel in shader.
     uint    lightSamplesPerVertex = 1;      ///< Number of light samples per path vertex. Use compile-time constant kLightSamplesPerVertex in shader.
-    uint    maxBounces = 3;                 ///< Max number of indirect bounces (0 = none), up to kMaxPathLength. Use compile-time constant kMaxBounces in shader.
-    uint    maxNonSpecularBounces = 3;      ///< Max number of non-specular indirect bounces (0 = none), up to kMaxPathLength. Use compile-time constant kMaxNonSpecularBounces in shader.
+    uint    maxBounces = 0;                 ///< Max number of indirect bounces (0 = none), up to kMaxPathLength. Use compile-time constant kMaxBounces in shader.
+    uint    maxNonSpecularBounces = 0;      ///< Max number of non-specular indirect bounces (0 = none), up to kMaxPathLength. Use compile-time constant kMaxNonSpecularBounces in shader.
 
     int     useVBuffer = 1;                 ///< Use a V-buffer as input. Use compile-time constant kUseVBuffer (or preprocessor define USE_VBUFFER) in shader.
     int     useAlphaTest = 1;               ///< Use alpha testing on non-opaque triangles. Use compile-time constant kUseAlphaTest (or preprocessor define USE_ALPHA_TEST) in shader.

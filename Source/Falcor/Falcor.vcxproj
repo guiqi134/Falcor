@@ -185,6 +185,8 @@
     <ShaderSource Include="RenderPasses\Shared\PathTracer\RayFootprintData.slang" />
     <ShaderSource Include="RenderPasses\Shared\PathTracer\RayFootprintModes.slangh" />
     <ShaderSource Include="RenderPasses\Shared\PathTracer\StaticParams.slang" />
+    <ShaderSource Include="RenderPasses\Shared\ReSTIR\GBufferUtils.slang" />
+    <ShaderSource Include="RenderPasses\Shared\ReSTIR\ReSTIRUtils.slang" />
     <ShaderSource Include="Scene\Animation\Skinning.slang" />
     <ShaderSource Include="Scene\Animation\UpdateAABBs.slang" />
     <ShaderSource Include="Scene\Animation\UpdateVertices.slang" />

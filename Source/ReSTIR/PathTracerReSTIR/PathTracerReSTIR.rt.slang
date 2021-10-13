@@ -26,32 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
-/** Minimal path tracer.
-
-    The purpose is to use it for validation of more complex renderers.
-    The implementation here should be kept as simple/naive as possible.
-
-    At each hit point (including the primary hit loaded from the G-buffer),
-    analytic light sources (point, directional) are sampled uniformly using
-    1 shadow ray, and 1 scatter ray is traced to sample the hemisphere.
-    At hit/miss the scatter ray includes light from emissive surface and
-    the environment map, respectively. Traversal stops at a fixed path length.
-
-    Each type of light (analytic, emissive, env map) can be individually
-    enabled/disabled from the host. This clutters the code a bit, but it is
-    important as not all other renderes may support all three light types.
-
-    The host sets the following defines:
-
-    MAX_BOUNCES         Maximum number of indirect bounces (0 means no indirect).
-    COMPUTE_DIRECT      Nonzero if direct illumination should be included.
-    USE_ANALYTIC_LIGHTS Nonzero if Falcor's analytic lights should be used.
-    USE_EMISSIVE_LIGHTS Nonzero if emissive geometry should be used as lights.
-    USE_ENV_LIGHT       Nonzero if env map is available and should be used as light source.
-    USE_ENV_BACKGROUND  Nonzero if env map is available and should be used as background.
-    is_valid_<name>     1 if optional I/O buffer with this name should be used.
-*/
-
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Raytracing;
@@ -60,11 +34,21 @@ import Utils.Sampling.SampleGenerator;
 import Experimental.Scene.Material.StandardMaterial;
 import Experimental.Scene.Material.MaterialHelpers;
 import Experimental.Scene.Lights.LightHelpers;
+import Utils.Color.ColorHelpers;
+import Experimental.Scene.Lights.EmissiveLightSampler; // need to set _EMISSIVE_LIGHT_SAMPLER_TYPE define
+import Experimental.Scene.Lights.EmissiveLightSamplerHelpers;
+import Utils.Debug.PixelDebug;
+
+import RenderPasses.Shared.ReSTIR.ReSTIRUtils;
+import RenderPasses.Shared.ReSTIR.GBufferUtils;
 
 cbuffer CB
 {
-    uint        gFrameCount;        // Frame count since scene was loaded.
-    uint        gPRNGDimension;     // First available PRNG dimension.
+    uint gFrameCount;        // Frame count since scene was loaded.
+    uint gPRNGDimension;     // First available PRNG dimension.
+    bool gTemporalReuse;
+    bool gSpatialReuse;
+    bool gUnbiased;
 }
 
 static struct Data
@@ -73,24 +57,18 @@ static struct Data
     StandardMaterial standardMaterial;
 } gData;
 
-// Inputs
-Texture2D<float4> gWorldPosition;
-Texture2D<float4> gWorldShadingNormal;
-Texture2D<float4> gWorldShadingTangent; // Optional
-Texture2D<float4> gWorldFaceNormal;
-Texture2D<float4> gWorldView; // Optional
-Texture2D<float4> gMaterialDiffuseOpacity;
-Texture2D<float4> gMaterialSpecularRoughness;
-Texture2D<float4> gMaterialEmissive;
-Texture2D<float4> gMaterialExtraParams;
-
 // Outputs
 RWTexture2D<float4> gOutputColor;
+
+// Temporal data
+RWStructuredBuffer<Reservoir> gLastFrameReservoirs;
+RWStructuredBuffer<GBuffer> gLastFrameGBuffer;
 
 // Static configuration based on defines set from the host.
 #define is_valid(name) (is_valid_##name != 0)
 static const uint kMaxBounces = MAX_BOUNCES;
 static const bool kComputeDirect = COMPUTE_DIRECT;
+static const bool kUseReSTIR = USE_RESTIR;
 static const bool kUseAnalyticLights = USE_ANALYTIC_LIGHTS;
 static const bool kUseEmissiveLights = USE_EMISSIVE_LIGHTS;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
@@ -136,35 +114,19 @@ struct ScatterRayData
     }
 };
 
-/** Helper to load the material attributes.
+/** Traces a scatter ray based on ray parameters stored in the ray payload.
+    \param[in] rayData Describes the ray parameters. The struct is modified based on the result.
 */
-MaterialParams loadMaterialParams(uint2 pixelPos)
+void traceScatterRay(inout ScatterRayData rayData)
 {
-    MaterialParams matParams;
-    matParams.diffuseOpacity = gMaterialDiffuseOpacity[pixelPos];
-    matParams.specularRoughness = gMaterialSpecularRoughness[pixelPos];
-    matParams.emissive = gMaterialEmissive[pixelPos];
-    matParams.extraParams = gMaterialExtraParams[pixelPos];
+    RayDesc ray;
+    ray.Origin = rayData.origin;
+    ray.Direction = rayData.direction;
+    ray.TMin = 0.f;
+    ray.TMax = kRayTMax;
 
-    return matParams;
-}
-
-/** Returns the primary ray's direction.
-*/
-float3 getPrimaryRayDir(uint2 launchIndex, uint2 launchDim, const Camera camera)
-{
-    if (is_valid(gWorldView))
-    {
-        // If we have the view vector bound as a buffer, just fetch it. No need to compute anything.
-        return -gWorldView[launchIndex].xyz;
-    }
-    else
-    {
-        // Compute the view vector. This must exactly match what the G-buffer pass is doing (jitter etc.).
-        // Note that we do not take depth-of-field into account as it would require exactly matching the
-        // sample generator between the passes, which is error prone. The host side will issue a warning instead.
-        // return camera.computeRayPinhole(launchIndex, launchDim).dir;
-    }
+    uint rayFlags = 0;      // TODO: Set cull mode from the app
+    TraceRay(gScene.rtAccel, rayFlags, 0xff, 0, rayTypeCount, 0, ray, rayData);
 }
 
 /** Traces a shadow ray towards a light source.
@@ -183,24 +145,9 @@ bool traceShadowRay(float3 origin, float3 dir, float distance)
 
     ShadowRayData rayData;
     rayData.visible = false;    // Set to true by miss shader if ray is not terminated before
-    TraceRay(gScene.rtAccel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff /* instanceInclusionMask */, 1 /* hitIdx */, rayTypeCount, 1 /* missIdx */, ray, rayData);
+    TraceRay(gScene.rtAccel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, 1, rayTypeCount, 1, ray, rayData);
 
     return rayData.visible;
-}
-
-/** Traces a scatter ray based on ray parameters stored in the ray payload.
-    \param[in] rayData Describes the ray parameters. The struct is modified based on the result.
-*/
-void traceScatterRay(inout ScatterRayData rayData)
-{
-    RayDesc ray;
-    ray.Origin = rayData.origin;
-    ray.Direction = rayData.direction;
-    ray.TMin = 0.f;
-    ray.TMax = kRayTMax;
-
-    uint rayFlags = 0;      // TODO: Set cull mode from the app
-    TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 }
 
 /** Evaluates the direct illumination from analytic lights.
@@ -228,7 +175,10 @@ float3 evalDirectAnalytic(const ShadingData sd, float3 rayOrigin, inout SampleGe
 
     // Test visibility by tracing a shadow ray.
     bool V = traceShadowRay(rayOrigin, ls.dir, ls.distance);
-    return V ? gData.standardMaterial.eval(sd, ls.dir) * ls.Li * invPdf : float3(0);
+
+    float3 radiance = V ? gData.standardMaterial.eval(sd, ls.dir) * ls.Li * invPdf : float3(0);
+    
+    return radiance;
 }
 
 /** Processes a hit point to generate a scatter ray or terminate.
@@ -278,6 +228,7 @@ void scatterAnyHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTriangle
     if (alphaTest(v, gScene.materials[materialID], gScene.materialResources[materialID], 0.f)) IgnoreHit();
 }
 
+// no need for adding emissive light
 [shader("closesthit")]
 void scatterClosestHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
@@ -288,7 +239,7 @@ void scatterClosestHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTria
     const uint materialID = gScene.getMaterialID(instanceID);
     ShadingData sd = prepareShadingData(v, materialID, gScene.materials[materialID], gScene.materialResources[materialID], -WorldRayDirection(), 0.f);
 
-    // Add emitted light.
+    // Add emitted light if hit it 
     if (kUseEmissiveLights && (kComputeDirect || rayData.pathLength > 0))
     {
         rayData.radiance += rayData.thp * sd.emissive;
@@ -322,7 +273,7 @@ void scatterClosestHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTria
     rayData.pathLength++;
 }
 
-/************************** Ray index 1: Shadow ray ************************ */
+/** ************************ Ray index 1: Shadow ray ************************ */
 
 [shader("miss")]
 void shadowMiss(inout ShadowRayData rayData : SV_RayPayload)
@@ -341,45 +292,210 @@ void shadowAnyHit(inout ShadowRayData rayData : SV_RayPayload, BuiltInTriangleIn
     if (alphaTest(v, gScene.materials[materialID], gScene.materialResources[materialID], 0.f)) IgnoreHit();
 }
 
-/** ******************************** RayGen ******************************** */
+// ReSTIR utility functions
+// -------------------------------------------------------------------
 
-/** This is the entry point for the minimal path tracer.
+float computePHat(const ShadingData sd, const Reservoir r, bool visibility)
+{
+    TriangleLightSample tls;
+    bool valid = sampleTriangle(sd.posW, r.y, r.uv, tls);
+    if (!valid || !length(tls.Le)) return 0.0f;
 
-    One path per pixel is generated, which is traced into the scene.
-    The path tracer is written as a for-loop over path segments.
+    bool V = true;
+    // if (visibility) V = traceShadowRay(rayOrigin, currentTls.dir, currentTls.distance);
 
-    Built-in light sources (point, directional) are sampled explicitly at each
-    path vertex. The contributions from area lights (env map and mesh lights)
-    are explicitly added by the scatter ray hit/miss shaders.
+    float pHat = V ? luminance(gData.standardMaterial.eval(sd, tls.dir) * tls.Le / (tls.pdf)) : 0.0f;
+
+    return pHat;
+}
+
+void combineReservoirs(inout Reservoir current, const Reservoir other, const ShadingData sd, inout SampleGenerator sg, inout uint M)
+{
+    float pHatCurrent = computePHat(sd, other, false);
+    float wi = pHatCurrent * other.W * other.M;
+
+    current.update(other.y, other.uv, wi, sg);
+    M += other.M;
+}
+
+void combineReservoirsUnbiased(inout Reservoir current, const Reservoir other, const ShadingData sd, inout SampleGenerator sg, 
+    inout uint M, inout uint Z, uint bufferIndex, const GBuffer pixelGBuffer)
+{
+    // prepare shading struct for neighbor pixel 
+    ShadingData sdNeighbor = prepareShadingDataHelper(bufferIndex, pixelGBuffer);
+
+    // evaluate neighbor sample at current pixel
+    float pHatCurrent = computePHat(sd, other, false); 
+    float wi = pHatCurrent * other.W * other.M;
+    current.update(other.y, other.uv, wi, sg);
+    M += other.M;
+
+    // TODO: add visibility reuse
+    // evaluate current sample at neighbor pixel
+    float pHatNeighbor = computePHat(sdNeighbor, current, true);
+    if (pHatNeighbor > 0) Z += other.M;
+}
+
+
+/** Calculate screen-space motion vector.
+    \param[in] pixelCrd Sample in current frame expressed in pixel coordinates with origin in the top-left corner.
+    \param[in] prevPosH Sample in previous frame expressed in homogeneous clip space coordinates. Note that the definition differs between D3D12 and Vulkan.
+    \param[in] renderTargetDim Render target dimension in pixels.
+    \return Motion vector pointing from current to previous position expressed in sceen space [0,1] with origin in the top-left corner.
 */
+float2 calcMotionVector(float2 pixelCrd, float4 prevPosH, float2 renderTargetDim)
+{
+    float2 prevCrd = prevPosH.xy / prevPosH.w;
+#ifdef FALCOR_VK
+    prevCrd *= float2(0.5, 0.5);
+#else
+    prevCrd *= float2(0.5, -0.5);
+#endif
+    prevCrd += 0.5f; // screen space 
+    float2 normalizedCrd = pixelCrd / renderTargetDim;
+    return prevCrd - normalizedCrd; // Q: why in [0, 1] range? not [-1, 1]?
+}
+
+
+// Evalute direct illumination from emissive light (no visibility reuse)
+// -------------------------------------------------------------------
+float3 evalDirectLightEmissive(const uint2 pixelPos, const uint2 dims, const ShadingData sd, float3 rayOrigin, 
+    inout SampleGenerator sg, inout Reservoir s)
+{
+    float3 radiance;
+    uint M = s.M;
+    uint Z = 0; 
+    float pHat;
+    const float EPSILON = 0.0001f;
+
+    uint currBufferIndex = getBufferIndex(pixelPos, dims);
+    GBuffer currPixelGBuffer = gGBuffer[currBufferIndex];
+
+    // temporal reuse 
+    // -------------------------------------------------------------------
+    if (gTemporalReuse)
+    {
+        float2 motionVec = currPixelGBuffer.mvec; 
+        // float2 pixelPosNorm = (((pixelPos.xy + 0.5f) / dims.xy) * 2.f - 1.f);
+        float2 pixelPosNorm = (pixelPos.xy + 0.5f) / dims;
+        float2 prevFramePosNorm = clamp(pixelPosNorm + motionVec, float2(0.0f), float2(1.0f)); 
+        uint2 prevFramePos = uint2(prevFramePosNorm * dims);
+        // uint2 prevFramePos = uint2(float2(pixelPos.xy) + motionVec * dims + float2(0.5f));
+
+        uint prevBufferIndex = getBufferIndex(prevFramePos, dims);
+        GBuffer prevPixelGBuffer = gLastFrameGBuffer[prevBufferIndex];
+
+        // get previous frame reservoir and update current
+        Reservoir prevResevoir = gLastFrameReservoirs[prevBufferIndex];
+        if (gUnbiased)
+        {
+            combineReservoirsUnbiased(s, prevResevoir, sd, sg, M, Z, prevBufferIndex, prevPixelGBuffer);
+            s.M = min(M, 20 * s.M); // stops unbounded grow of M
+            pHat = computePHat(sd, s, false);
+            // Z = Z == 0 ? 1 : Z;
+            s.W = pHat == 0 || Z == 0 ? 0.0f : (s.wSum / (pHat * Z));
+        }
+        else
+        {
+            combineReservoirs(s, prevResevoir, sd, sg, M);
+            s.M = min(M, 20 * s.M); // stops unbounded grow of M
+            pHat = computePHat(sd, s, false);
+            s.W = pHat == 0.0f ? 0.0f : (s.wSum / (pHat * s.M));
+        }
+        print("current reservoir M after temporal reuse: ", s.M);
+    }
+
+
+    // spatial reuse
+    // -------------------------------------------------------------------
+    if (gSpatialReuse)
+    {
+        // TODO: use UI to adjust these numbers
+        const uint n = 1; // number of spatial reuse iteration
+        const uint k = 3; // number of spatial neighbors (5 for biased, 3 for unbiased) 
+
+        for (uint i = 1; i <= n; i++)
+        {
+            M = s.M;
+            Z = 0;
+            // combine neighbor reservoirs 
+            for (uint j = 0; j < k; j++)
+            {
+                // TODO: chaneg to low discrepancy sample in 30-pixel radius circle
+                // pick saptial neighbor pixel
+                int2 offset = int2(sampleNext2D(sg) * 60) - 30; // [-30, 30]
+                uint2 neighborIndex = uint2(max(uint2(0), pixelPos + offset));
+
+                uint neighborBufferIndex = getBufferIndex(neighborIndex, dims);
+                GBuffer neighborPixelGBuffer = gGBuffer[neighborBufferIndex];
+
+                // get neighbor reservoir
+                Reservoir neighborReservoir = gReservoirs[neighborBufferIndex];
+
+                // combine neighbor to current pixel
+                if (gUnbiased)
+                    combineReservoirsUnbiased(s, neighborReservoir, sd, sg, M, Z, neighborBufferIndex, neighborPixelGBuffer);
+                else
+                    combineReservoirs(s, neighborReservoir, sd, sg, M);
+            }
+
+            // update current reservoir M and W
+            s.M = M;
+            pHat = computePHat(sd, s, false);
+            if (gUnbiased)
+                s.W = pHat == 0 || Z == 0 ? 0.0f : (s.wSum / (pHat * Z));
+            else
+                s.W = pHat == 0 ? 0.0f : (s.wSum / (pHat * s.M));
+        }
+        print("current reservoir M after spatial reuse: ", s.M);
+    }
+
+
+    // compute pixel color
+    TriangleLightSample tls;
+    bool valid = sampleTriangle(sd.posW, s.y, s.uv, tls);
+    const uint triangleLightCount = gScene.lightCollection.getActiveTriangleCount();
+    float invPdf = triangleLightCount;
+
+    if (!valid || !length(tls.Le)) return float3(0.0f);
+
+    print("light sample dir = ", tls.dir);
+    print("light sample distance = ", tls.distance);
+    print("light sample Le = ", tls.Le);
+    print("light sample pdf = ", tls.pdf);
+
+    bool V = traceShadowRay(rayOrigin, tls.dir, tls.distance);
+
+    float3 f = V ? gData.standardMaterial.eval(sd, tls.dir) * tls.Le / tls.pdf : float3(0.0f);
+    radiance = f * s.W;
+    return radiance;
+}
+
+/** ******************************** RayGen ******************************** */
 [shader("raygeneration")]
 void rayGen()
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchIndex = DispatchRaysIndex().xy; // current pixel
     uint2 launchDim = DispatchRaysDimensions().xy;
+
+    printSetPixel(launchIndex);
 
     float3 outColor = float3(0, 0, 0);
 
-    const float3 rayDir = getPrimaryRayDir(launchIndex, launchDim, gScene.camera);
-    const float4 worldPos = gWorldPosition[launchIndex];
+    // get current pixel's GBuffer. 
+    uint bufferIndex = getBufferIndex(launchIndex, launchDim);
+    GBuffer currentGBuffer = gGBuffer[bufferIndex];
+
+    const float3 rayDir = -currentGBuffer.viewW.xyz;
+    const float4 worldPos = currentGBuffer.posW;
+
+    // current pixel reservoir
+    Reservoir r = gReservoirs[bufferIndex];
 
     if (worldPos.w != 0.f)  // Using w to indicate valid geometry for now
     {
-        // Pixel represents a valid primary hit. Compute its contribution.
-
-        // Load geometry parameters from G-buffer.
-        // TODO: Load (u,v) channel if it exists.
-        float3 normal = gWorldShadingNormal[launchIndex].xyz;
-        // float4 tangent = is_valid(gWorldShadingTangent) ? gWorldShadingTangent[launchIndex] : float4(perp_stark(normal), 1.f);
-        float4 tangent = gWorldShadingTangent[launchIndex];
-        float3 faceNormal = gWorldFaceNormal[launchIndex].xyz;
-        GeometryParams geoParams = prepareGeometryParams(worldPos.xyz, -rayDir, normal, tangent, faceNormal);
-
-        // Load material parameters from G-buffer.
-        MaterialParams matParams = loadMaterialParams(launchIndex);
-
         // Prepare ShadingData struct.
-        ShadingData sd = prepareShadingData(geoParams, matParams);
+        ShadingData sd = prepareShadingDataHelper(bufferIndex, currentGBuffer);
 
         // Create sample generator.
         SampleGenerator sg = SampleGenerator.create(launchIndex, gFrameCount);
@@ -388,35 +504,45 @@ void rayGen()
         // TODO: This is potentially expensive. We may want to store/restore the state from memory if it becomes a problem.
         for (uint i = 0; i < gPRNGDimension; i++) sampleNext1D(sg);
 
-        // Compute ray origin for new rays spawned from the G-buffer.
+        // Compute ray origin for new rays spawned from the G-buffer(posW: hit position).
         const float3 rayOrigin = sd.computeNewRayOrigin();
 
         if (kComputeDirect)
-        {
-            // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
+        {   
+            // Always output directly emitted light from the primary hit.
+            // This is independent of whether emissive materials are treated as light sources or not. (must)
             outColor += sd.emissive;
+
+            if (kUseEmissiveLights)
+            {
+                if (kUseReSTIR && !length(sd.emissive)) 
+                    outColor += evalDirectLightEmissive(launchIndex, launchDim, sd, rayOrigin, sg, r);
+            }
 
             // Add contribution of direct light from analytic lights.
             // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-            outColor += kUseAnalyticLights ? evalDirectAnalytic(sd, rayOrigin, sg) : float3(0, 0, 0);
+            if (kUseAnalyticLights)
+            {
+                outColor += evalDirectAnalytic(sd, rayOrigin, sg);  // change to evalDirectLightAnalytic()
+            }
         }
 
-        // Prepare ray payload.
-        ScatterRayData rayData = ScatterRayData.create(sg);
+        // // Prepare ray payload.
+        // ScatterRayData rayData = ScatterRayData.create(sg);
 
-        // Generate scatter ray.
-        if (!generateScatterRay(sd, rayOrigin, rayData)) rayData.terminated = true;
+        // // Generate scatter ray.
+        // if (!generateScatterRay(sd, rayOrigin, rayData)) rayData.terminated = true;
 
-        // Follow path into the scene and compute its total contribution.
-        for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
-        {
-            // Trace scatter ray. If it hits geometry, the closest hit shader samples
-            // direct illumination and generates the next scatter ray.
-            traceScatterRay(rayData);
-        }
+        // // Follow path into the scene and compute its total contribution.
+        // for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
+        // {
+        //     // Trace scatter ray. If it hits geometry, the closest hit shader samples
+        //     // direct illumination and generates the next scatter ray.
+        //     traceScatterRay(rayData);
+        // }
 
-        // Store contribution from scatter ray.
-        outColor += rayData.radiance;
+        // // Store contribution from scatter ray.
+        // outColor += rayData.radiance;
     }
     else
     {
@@ -424,5 +550,11 @@ void rayGen()
         outColor = kUseEnvBackground ? gScene.envMap.eval(rayDir) : kDefaultBackgroundColor;
     }
 
+    // Update temporal data
+    gLastFrameReservoirs[bufferIndex] = r;
+    gLastFrameGBuffer[bufferIndex] = gGBuffer[bufferIndex];
+
+    print("Color = ", outColor);
+    
     gOutputColor[launchIndex] = float4(outColor, 1);
 }

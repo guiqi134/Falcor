@@ -52,9 +52,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Data\forward_renderer.py">
-      <Filter>Data</Filter>
-    </None>
     <None Include="Data\config.py">
       <Filter>Data</Filter>
     </None>
@@ -62,6 +59,12 @@
       <Filter>Data</Filter>
     </None>
     <None Include="Data\PathTracer.py">
+      <Filter>Data</Filter>
+    </None>
+    <None Include="Data\ForwardRenderer.py">
+      <Filter>Data</Filter>
+    </None>
+    <None Include="Data\ExampleBiltGraph.py">
       <Filter>Data</Filter>
     </None>
   </ItemGroup>

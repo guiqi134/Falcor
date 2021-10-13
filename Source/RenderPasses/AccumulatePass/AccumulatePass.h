@@ -79,7 +79,7 @@ protected:
     // Internal state
     Scene::SharedPtr            mpScene;                        ///< The current scene (or nullptr if no scene).
     std::map<Precision, ComputeProgram::SharedPtr> mpProgram;   ///< Accumulation programs, one per mode.
-    ComputeVars::SharedPtr      mpVars;                         ///< Program variables.
+    ComputeVars::SharedPtr      mpVars;                         ///< Program variableTes.
     ComputeState::SharedPtr     mpState;
     FormatType                  mSrcFormat;                     ///< Format of the source that gets accumulated.
 

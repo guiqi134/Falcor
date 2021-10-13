@@ -194,6 +194,8 @@ void rayGen()
     // DEBUG
     assert(!any(isnan(outColor)));
 
+    print("Color = ", outColor);
+
     // Write outputs.
     // These are all optional so using compile-time checks to decide which ones to write.
     if (is_valid(gOutputColor)) gOutputColor[launchIndex] = float4(outColor, outAlpha);
