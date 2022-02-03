@@ -364,6 +364,20 @@ namespace Falcor
     void PathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
     {
         mpScene = pScene;
+
+        // Adjust rectangle light if exist
+        auto pLight = mpScene->getLightByName("Rect Light").get();
+        if (pLight)
+        {
+            auto translation = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.549f, 0.0f));
+            auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            //auto scaling = glm::scale(glm::mat4(1.0f), glm::vec3(0.13f));
+            auto model = translation * rotation;
+            auto pRectLight = dynamic_cast<RectLight*>(pLight);
+            pRectLight->setScaling(float3(0.13f));
+            pRectLight->setTransformMatrix(model);
+        }
+
         mSharedParams.frameCount = 0;
 
         // Lighting setup. This clears previous data if no scene is given.

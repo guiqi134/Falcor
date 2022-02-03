@@ -16,8 +16,9 @@ import Experimental.Scene.Material.MaterialHelpers;
 import Experimental.Scene.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
 import Experimental.Scene.Lights.EmissiveLightSampler; // need to set _EMISSIVE_LIGHT_SAMPLER_TYPE define
-import Experimental.Scene.Lights.EmissiveLightSamplerHelpers;
 import Utils.Debug.PixelDebug;
+import Utils.Geometry.GeometryHelpers;
+
 
 import RenderPasses.Shared.ReSTIR.ReSTIRUtils;
 import RenderPasses.Shared.ReSTIR.GBufferUtils;
@@ -26,6 +27,7 @@ cbuffer CB
 {
     uint gFrameCount;
     uint gPRNGDimension;
+    EmissiveLightSampler gEmissiveSampler;
 }
 
 static struct Data
@@ -103,55 +105,45 @@ void generateCandidates(const ShadingData sd, float3 rayOrigin, inout SampleGene
     LightCollection lc = gScene.lightCollection;
 
     if (lc.isEmpty()) return;
+
     const uint triangleLightCount = lc.getActiveTriangleCount();
 
     // Use RIS (Algo.3)
     // ------------------------------------------------------------------
     uint M = min(triangleLightCount, 32);
-    float invPdf = triangleLightCount;
     float pHat = 0.0f;
     float pHatSelect = 0.0f;
+    TriangleLightSample currentTls;
 
     for (uint i = 0; i < M; i++)
     {
-        // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
-        uint xi = min(uint(sampleNext1D(sg) * triangleLightCount), triangleLightCount - 1); 
-        // uint xi = 10;
-        uint triangleIndex = lc.activeTriangles[xi]; // get the actual global triangle index
-
-        // get light sample data
         TriangleLightSample tls;
-        float2 uv = sampleNext2D(sg); 
-        bool valid = sampleTriangle(sd.posW, triangleIndex, uv, tls);
+        bool valid = gEmissiveSampler.sampleLight(rayOrigin, sd.N, true, sg, tls);
 
         // Emitted radiance. This is zero if the light is back-facing or sample is invalid.
         // tls.pdf would be 0, and we will get NaN, so we need to remove invaild sample
-        if (!valid || !length(tls.Le))
+        if (!valid || dot(sd.N, tls.dir) < kMinCosTheta)
         {  
-            r.update(triangleIndex, uv, 0.0f, sg);
+            updateReservoir(r, tls.triangleIndex, tls.uv, 0.0f, sg);
             continue;
         }
 
-        // eval() already contain cosine term
+        float invPdf = 1.0f / tls.pdf;
         pHat = luminance(gData.standardMaterial.eval(sd, tls.dir) * tls.Le / tls.pdf); 
 
         float wi = pHat * invPdf;
 
-        if (r.update(triangleIndex, uv, wi, sg)) 
+        if (updateReservoir(r, tls.triangleIndex, tls.uv, wi, sg)) 
         {
             pHatSelect = pHat;
+            currentTls = tls;
         }
     }
 
     // calculate Equation (6)
-    TriangleLightSample currentTls;
-    bool vaild = sampleTriangle(sd.posW, r.y, r.uv, currentTls);
-    r.W = vaild ? r.wSum / (pHatSelect * r.M) : 0.0f;
+    r.W = pHatSelect == 0 ? 0.0f : r.wSum / (pHatSelect * r.M);
 
-    print("light sample dir = ", currentTls.dir);
-    print("light sample distance = ", currentTls.distance);
-    print("light sample Le = ", currentTls.Le);
-    print("light sample pdf = ", currentTls.pdf);
+    if (r.y = 0) return;
 
     // Evaluate visibility for initial candidates
     bool V = traceShadowRay(rayOrigin, currentTls.dir, currentTls.distance);

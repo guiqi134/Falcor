@@ -229,7 +229,7 @@ void SpatialReusePass::prepareVars(const RenderData& renderData)
     bool success = mpSampleGenerator->setShaderData(var);
     if (!success) throw std::exception("Failed to bind sample generator");
 
-    success = mpEmissiveSampler->setShaderData(var);
+    success = mpEmissiveSampler->setShaderData(var["CB"]["gEmissiveSampler"]);
     if (!success) throw std::exception("Failed to bind emissive light generator");
 
 }

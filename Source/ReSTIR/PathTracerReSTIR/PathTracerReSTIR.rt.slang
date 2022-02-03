@@ -38,6 +38,7 @@ import Utils.Color.ColorHelpers;
 import Experimental.Scene.Lights.EmissiveLightSampler; // need to set _EMISSIVE_LIGHT_SAMPLER_TYPE define
 import Experimental.Scene.Lights.EmissiveLightSamplerHelpers;
 import Utils.Debug.PixelDebug;
+import Utils.Geometry.GeometryHelpers;
 
 import RenderPasses.Shared.ReSTIR.ReSTIRUtils;
 import RenderPasses.Shared.ReSTIR.GBufferUtils;
@@ -228,51 +229,6 @@ void scatterAnyHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTriangle
     if (alphaTest(v, gScene.materials[materialID], gScene.materialResources[materialID], 0.f)) IgnoreHit();
 }
 
-// no need for adding emissive light
-[shader("closesthit")]
-void scatterClosestHit(inout ScatterRayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
-{
-    // Evaluate Falcor's material parameters at the hit point.
-    // TODO: Implement texLOD to enable texture filtering in prepareShadingData().
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    ShadingData sd = prepareShadingData(v, materialID, gScene.materials[materialID], gScene.materialResources[materialID], -WorldRayDirection(), 0.f);
-
-    // Add emitted light if hit it 
-    if (kUseEmissiveLights && (kComputeDirect || rayData.pathLength > 0))
-    {
-        rayData.radiance += rayData.thp * sd.emissive;
-    }
-
-    // Check whether to terminate based on max depth.
-    if (rayData.pathLength >= kMaxBounces)
-    {
-        rayData.terminated = true;
-        return;
-    }
-
-    // Compute ray origin for new rays spawned from the hit.
-    float3 rayOrigin = sd.computeNewRayOrigin();
-
-    // Add contribution of direct light from analytic lights.
-    if (kUseAnalyticLights)
-    {
-        float3 Lr = evalDirectAnalytic(sd, rayOrigin, rayData.sg);
-        rayData.radiance += rayData.thp * Lr;
-    }
-
-    // Generate scatter ray for the next path segment.
-    // The raygen shader will continue the path based on the returned payload.
-    if (!generateScatterRay(sd, rayOrigin, rayData))
-    {
-        rayData.terminated = true;
-        return;
-    }
-
-    rayData.pathLength++;
-}
-
 /** ************************ Ray index 1: Shadow ray ************************ */
 
 [shader("miss")]
@@ -304,7 +260,7 @@ float computePHat(const ShadingData sd, const Reservoir r, bool visibility)
     bool V = true;
     // if (visibility) V = traceShadowRay(rayOrigin, currentTls.dir, currentTls.distance);
 
-    float pHat = V ? luminance(gData.standardMaterial.eval(sd, tls.dir) * tls.Le / (tls.pdf)) : 0.0f;
+    float pHat = V ? luminance(gData.standardMaterial.eval(sd, tls.dir) * tls.Le) : 0.0f;
 
     return pHat;
 }
@@ -314,7 +270,7 @@ void combineReservoirs(inout Reservoir current, const Reservoir other, const Sha
     float pHatCurrent = computePHat(sd, other, false);
     float wi = pHatCurrent * other.W * other.M;
 
-    current.update(other.y, other.uv, wi, sg);
+    updateReservoir(current, other.y, other.uv, wi, sg);
     M += other.M;
 }
 
@@ -327,7 +283,7 @@ void combineReservoirsUnbiased(inout Reservoir current, const Reservoir other, c
     // evaluate neighbor sample at current pixel
     float pHatCurrent = computePHat(sd, other, false); 
     float wi = pHatCurrent * other.W * other.M;
-    current.update(other.y, other.uv, wi, sg);
+    updateReservoir(current, other.y, other.uv, wi, sg);
     M += other.M;
 
     // TODO: add visibility reuse
@@ -366,7 +322,6 @@ float3 evalDirectLightEmissive(const uint2 pixelPos, const uint2 dims, const Sha
     uint M = s.M;
     uint Z = 0; 
     float pHat;
-    const float EPSILON = 0.0001f;
 
     uint currBufferIndex = getBufferIndex(pixelPos, dims);
     GBuffer currPixelGBuffer = gGBuffer[currBufferIndex];
@@ -453,16 +408,9 @@ float3 evalDirectLightEmissive(const uint2 pixelPos, const uint2 dims, const Sha
 
     // compute pixel color
     TriangleLightSample tls;
-    bool valid = sampleTriangle(sd.posW, s.y, s.uv, tls);
-    const uint triangleLightCount = gScene.lightCollection.getActiveTriangleCount();
-    float invPdf = triangleLightCount;
+    bool valid = sampleTriangle(rayOrigin, s.y, s.uv, tls);
 
     if (!valid || !length(tls.Le)) return float3(0.0f);
-
-    print("light sample dir = ", tls.dir);
-    print("light sample distance = ", tls.distance);
-    print("light sample Le = ", tls.Le);
-    print("light sample pdf = ", tls.pdf);
 
     bool V = traceShadowRay(rayOrigin, tls.dir, tls.distance);
 
@@ -527,22 +475,22 @@ void rayGen()
             }
         }
 
-        // // Prepare ray payload.
-        // ScatterRayData rayData = ScatterRayData.create(sg);
+        // Prepare ray payload.
+        ScatterRayData rayData = ScatterRayData.create(sg);
 
-        // // Generate scatter ray.
-        // if (!generateScatterRay(sd, rayOrigin, rayData)) rayData.terminated = true;
+        // Generate scatter ray.
+        if (!generateScatterRay(sd, rayOrigin, rayData)) rayData.terminated = true;
 
-        // // Follow path into the scene and compute its total contribution.
-        // for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
-        // {
-        //     // Trace scatter ray. If it hits geometry, the closest hit shader samples
-        //     // direct illumination and generates the next scatter ray.
-        //     traceScatterRay(rayData);
-        // }
+        // Only compute the contribution from the environment map
+        for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
+        {
+            // Trace scatter ray. If it hits geometry, the closest hit shader samples
+            // direct illumination and generates the next scatter ray.
+            traceScatterRay(rayData);
+        }
 
-        // // Store contribution from scatter ray.
-        // outColor += rayData.radiance;
+        // Store contribution from scatter ray.
+        outColor += rayData.radiance;
     }
     else
     {
@@ -554,7 +502,5 @@ void rayGen()
     gLastFrameReservoirs[bufferIndex] = r;
     gLastFrameGBuffer[bufferIndex] = gGBuffer[bufferIndex];
 
-    print("Color = ", outColor);
-    
     gOutputColor[launchIndex] = float4(outColor, 1);
 }

@@ -147,6 +147,9 @@
     <ClInclude Include="Raytracing\ShaderTable.h" />
     <ClInclude Include="RenderGraph\RenderPassHelpers.h" />
     <ClInclude Include="RenderPasses\ResolvePass.h" />
+    <ClInclude Include="RenderPasses\Shared\AreaLight\SceneHelpers.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugD3D12|x64'">false</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="RenderPasses\Shared\PathTracer\PixelStats.h" />
     <ClInclude Include="RenderPasses\Shared\PathTracer\PathTracer.h" />
     <ClInclude Include="Scene\Animation\Animatable.h" />
@@ -185,8 +188,6 @@
     <ShaderSource Include="RenderPasses\Shared\PathTracer\RayFootprintData.slang" />
     <ShaderSource Include="RenderPasses\Shared\PathTracer\RayFootprintModes.slangh" />
     <ShaderSource Include="RenderPasses\Shared\PathTracer\StaticParams.slang" />
-    <ShaderSource Include="RenderPasses\Shared\ReSTIR\GBufferUtils.slang" />
-    <ShaderSource Include="RenderPasses\Shared\ReSTIR\ReSTIRUtils.slang" />
     <ShaderSource Include="Scene\Animation\Skinning.slang" />
     <ShaderSource Include="Scene\Animation\UpdateAABBs.slang" />
     <ShaderSource Include="Scene\Animation\UpdateVertices.slang" />

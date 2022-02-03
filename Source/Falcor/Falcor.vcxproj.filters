@@ -556,6 +556,7 @@
     <ClInclude Include="Scene\Animation\AnimatedVertexCache.h">
       <Filter>Scene\Animation</Filter>
     </ClInclude>
+    <ClInclude Include="RenderPasses\Shared\AreaLight\SceneHelpers.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Core">
@@ -1760,7 +1761,5 @@
     <ShaderSource Include="Utils\SDF\SDFOperations.slang">
       <Filter>Utils\SDF</Filter>
     </ShaderSource>
-    <ShaderSource Include="RenderPasses\Shared\ReSTIR\ReSTIRUtils.slang" />
-    <ShaderSource Include="RenderPasses\Shared\ReSTIR\GBufferUtils.slang" />
   </ItemGroup>
 </Project>
