@@ -149,7 +149,7 @@ struct PCSS
         out float3 lightSpaceView, float NdotL, float3 posW, float2 poissonOffset)
     {
         float bias = max(0.006 * (1.0 - NdotL), 0.0005);
-        // bias = 0.0005;
+        bias = 0.0005;
 
         float4 lightSpacePosH = mul(float4(posW, 1.0f), gLightSpaceMat);
         float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
