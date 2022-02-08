@@ -54,13 +54,14 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         float3 posWOrigin = sd.computeNewRayOrigin();
 
         // Compute average blocker depth (how can we use slope-scale bias here?)
-        // float avgBlockerDepth, zReceiver;
-        // float3 projCoords, lightSpaceView;
+        float avgBlockerDepth, zReceiver;
+        float2 minMaxBlockerDepth;
+        float3 projCoords, lightSpaceView;
         
-        // float3 L = normalize(gPCSS.gLightPos - posWOrigin);
-        // float NdotL = dot(sd.N, L);
-        // bool hasBlocker = gPCSS.blockerSearch(avgBlockerDepth, projCoords, zReceiver, lightSpaceView, NdotL, 
-        //     sd.posW, sampleNext2D(sg));
+        float3 L = normalize(gPCSS.gLightPos - posWOrigin);
+        float NdotL = dot(sd.N, L);
+        bool hasBlocker = gPCSS.blockerSearch(avgBlockerDepth, minMaxBlockerDepth, projCoords, zReceiver, lightSpaceView, NdotL, 
+            sd.posW, sampleNext2D(sg));
 
 #if !_BRUTE_FORCE
         // Reservoir Shading
@@ -90,13 +91,13 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     res += Le * gData.standardMaterial.eval(sd, ray.Direction) * getReservoirInvPdf(r); // f * r.W
                     finalVisbility = 1.0f;
                 } 
-// #elif _SHADING_MODE == 1
-//                 finalVisbility = hasBlocker ? gPCSS.shadowMapPCSSModified(samplePos, avgBlockerDepth, projCoords, zReceiver, 
-//                         lightSpaceView) : 1.0f;
-//                 res += Le * gData.standardMaterial.eval(sd, toLight / distance) * finalVisbility * getReservoirInvPdf(r);
-// #else
-//                 finalVisbility = gPCSS.shadowMapPCSS(sd.posW, sd.N, toLight / distance, sampleNext2D(sg));
-//                 res += Le * gData.standardMaterial.eval(sd, toLight / distance) * finalVisbility * getReservoirInvPdf(r);
+#elif _SHADING_MODE == 1
+                finalVisbility = hasBlocker ? gPCSS.shadowMapPCSSModified(samplePos, avgBlockerDepth, projCoords, zReceiver, 
+                        lightSpaceView) : 1.0f;
+                res += Le * gData.standardMaterial.eval(sd, toLight / distance) * finalVisbility * getReservoirInvPdf(r);
+#else
+                finalVisbility = gPCSS.shadowMapPCSS(sd.posW, sd.N, toLight / distance, sampleNext2D(sg));
+                res += Le * gData.standardMaterial.eval(sd, toLight / distance) * finalVisbility * getReservoirInvPdf(r);
 #endif
 
 #if _STORE_FINAL_VISIBILITY

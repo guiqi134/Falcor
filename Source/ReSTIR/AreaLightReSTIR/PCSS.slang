@@ -99,39 +99,40 @@ struct PCSS
 
     // Reference: https://developer.download.nvidia.com/whitepapers/2008/PCSS_Integration.pdf
     // All calculation should be performed in light view space!
-    // float shadowMapPCSS(float3 posW, float3 N, float3 L, float2 poissonOffset)
-    // {
-    //     // Self-shadowing bias
-    //     float bias = max(0.006 * (1.0 - dot(N, L)), 0.0005); // TODO: better bias selecting algorithm 
+    float shadowMapPCSS(float3 posW, float3 N, float3 L, float2 poissonOffset)
+    {
+        // Self-shadowing bias
+        float bias = max(0.006 * (1.0 - dot(N, L)), 0.0005); // TODO: better bias selecting algorithm 
 
-    //     float4 lightSpacePosH = mul(float4(posW, 1.0f), gLightSpaceMat);
-    //     float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w;
-    //     lightSpacePos.y *= -1;
-    //     float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // screen space
-    //     float zView = abs(mul(float4(posW, 1.0f), gLightView).z); // Depth is negative in -z direction, for length we need to use absolute value
+        float4 lightSpacePosH = mul(float4(posW, 1.0f), gLightSpaceMat);
+        float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w;
+        lightSpacePos.y *= -1;
+        float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // screen space
+        float zView = abs(mul(float4(posW, 1.0f), gLightView).z); // Depth is negative in -z direction, for length we need to use absolute value
 
-    //     // 1. blocker search
-    //     float avgBlockerDepth = 0;
-    //     uint numBlockers = 0;
-    //     findBlocker(avgBlockerDepth, numBlockers, projCoords, zView, poissonOffset);
+        // 1. blocker search
+        float avgBlockerDepth = 0;
+        float2 minMaxBlockerDepth;
+        uint numBlockers = 0;
+        findBlocker(avgBlockerDepth, minMaxBlockerDepth, numBlockers, projCoords, zView, poissonOffset);
 
-    //     // no occluders -> no shadow
-    //     if (numBlockers < 1) return 1.0f;
+        // no occluders -> no shadow
+        if (numBlockers < 1) return 1.0f;
 
-    //     // 2. penumbra size
-    //     float penumbraSize = LIGHT_WORLD_SIZE * (zView - avgBlockerDepth) / avgBlockerDepth; // depth in light view space
+        // 2. penumbra size
+        float penumbraSize = LIGHT_WORLD_SIZE * (zView - avgBlockerDepth) / avgBlockerDepth; // depth in light view space
 
-    //     // Mapping penumbra size to the shadow map (divide by frustum size) using similar triangle to determine the filter size
-    //     // The similar triangle takes sample point in area light as upper vertex and penumbra size as bottom edge
-    //     float2 filterRadiusUV = float2(penumbraSize * NEAR_PLANE / zView);
-    //     filterRadiusUV /= LIGHT_FRUSTUM_SIZE;
+        // Mapping penumbra size to the shadow map (divide by frustum size) using similar triangle to determine the filter size
+        // The similar triangle takes sample point in area light as upper vertex and penumbra size as bottom edge
+        float2 filterRadiusUV = float2(penumbraSize * NEAR_PLANE / zView);
+        filterRadiusUV /= LIGHT_FRUSTUM_SIZE;
 
-    //     print("penumbraSize = ", penumbraSize);
-    //     print("filterRadiusUV = ", filterRadiusUV);
+        print("penumbraSize = ", penumbraSize);
+        print("filterRadiusUV = ", filterRadiusUV);
 
-    //     // 3. PCF filtering
-    //     return shadowMapPCF(projCoords, filterRadiusUV, poissonOffset);
-    // }
+        // 3. PCF filtering
+        return shadowMapPCF(projCoords, filterRadiusUV, poissonOffset);
+    }
 
     // New idea for PCSS: instead of using PCF, we just use the mapped light sample
     float shadowMapPCSSModified(float3 samplePos, float avgBlockerDepth, float3 projCoords, float zReceiver,
