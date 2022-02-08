@@ -29,6 +29,7 @@
 #include "Falcor.h"
 #include "FalcorExperimental.h"
 #include "RenderPasses/Shared/AreaLight/SceneHelpers.h"
+#include "Utils/Sampling/SampleGenerator.h"
 
 using namespace Falcor;
 
@@ -60,23 +61,34 @@ private:
     void updateDefines();
 
     PixelDebug::SharedPtr mpPixelDebug;
+    SampleGenerator::SharedPtr mpSampleGenerator;
 
     Scene::SharedPtr mpScene;
     Texture::SharedPtr mpShadowMap;
 
     float4x4 mLightSpaceMat; // light space transform matrix, it is static now
     float4x4 mLightView;
-    float3 mLightPos = float3(0.0f, 6.0f, -9.0f);
+    float3 mLightUp = float3(0.0f, 0.0f, -1.0f);
+    float3 mLightPos = float3(14.5f, 50.0f, 15.0f);
+    float4 mRotation = float4(100.0f, 1.0f, 0.0f, 0.0f);
+    float mLightSize = 10.0f;
+    float mFovY = 26.0f;
+    float mLightNearPlane = mLightPos.y - 20.0f;
+
+    /*float3 mLightPos = float3(0.0f, 2.0f, -10.0f);
     float3 mLightUp = float3(0.0f, 1.0f, 0.0f);
-    float mLightSize = 1.0f;
+    float4 mRotation = float4(10.0f, 1.0f, 0.0f, 0.0f);
+    float mLightSize = 1.5f;
     float mLightNearPlane = 8.0f;
-    float mFovY = 45.0f;
-    float4 mRotation = float4(30.0f, 1.0f, 0.0f, 0.0f);
+    float mFovY = 45.0;*/
 
     bool mNeedUpdate = false;
     bool mEnableShadow = true;
+
     uint mBlockerSearchSamples = 32u;
     uint mPCFSamples = 64u;
+    uint mLightSamples = 32u;
+    float mDepthBias = -1.0f;
 
     struct
     {

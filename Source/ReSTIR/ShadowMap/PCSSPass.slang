@@ -9,22 +9,20 @@ cbuffer PerFrameCB
     float farZ;
 };
 
-struct VertexOut
+//struct VertexOut
+//{
+//    nointerpolation GeometryInstanceID instanceID : INSTANCE_ID;  ///< Geometry instance ID.
+//
+//    float4 posH : SV_POSITION; // similar to gl_Position, must be binded which will be used by rasterizer
+//};
+
+VSOut vsMain(VSIn vIn)
 {
-    nointerpolation GeometryInstanceID instanceID : INSTANCE_ID;  ///< Geometry instance ID.
+    VSOut vsOut;
+    vsOut = defaultVS(vIn);
 
-    float4 posH : SV_POSITION; // similar to gl_Position, must be binded which will be used by rasterizer
-};
-
-VertexOut vsMain(VSIn vIn)
-{
-    VertexOut vsOut;
-    const GeometryInstanceID instanceID = { vIn.meshInstanceID };
-
-    float4x4 worldMat = gScene.getWorldMatrix(instanceID);
-    float3 posW = mul(float4(vIn.pos, 1.f), worldMat).xyz;
+    float3 posW = vsOut.posW;
     vsOut.posH = mul(float4(posW.xyz, 1.0f), gLightSpaceMat);
-    vsOut.instanceID = instanceID;
 
     return vsOut;
 }
@@ -41,10 +39,14 @@ float LinearizeDepth(float depth)
     return (nearZ * farZ) / (farZ + depth * (nearZ - farZ));
 }
 
-float4 psMain(VertexOut vsOut) : SV_Target0
+float4 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
 {
-    // Discard the pixel on the plane mesh
-    if (vsOut.instanceID.index == 0) discard;
+    // Use explicit lod
+    float3 faceNormal = gScene.getFaceNormalW(vsOut.instanceID, triangleIndex);
+    VertexData v = prepareVertexData(vsOut, faceNormal);
+    float lod = 0.0f;
+
+    if (alphaTest(v, gScene.materials[vsOut.materialID], gScene.materialResources[vsOut.materialID], lod)) discard;
 
     float depth = vsOut.posH.z;
     float linearDepth = LinearizeDepth(depth) / farZ;

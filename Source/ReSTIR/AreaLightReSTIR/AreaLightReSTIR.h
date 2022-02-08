@@ -82,6 +82,14 @@ private:
         Fbo::SharedPtr pFbo;
     } mShadowMapPass;
 
+    struct
+    {
+        GraphicsProgram::SharedPtr pProgram;
+        GraphicsVars::SharedPtr pVars;
+        GraphicsState::SharedPtr pState;
+        Fbo::SharedPtr pFbo;
+    } mPCSSShadingPass;
+
     ComputePass::SharedPtr              mpInitialSamplingPass;
     ComputePass::SharedPtr              mpTemporalResamplingPass;
     ComputePass::SharedPtr              mpSpatialResamplingPass;
@@ -103,26 +111,31 @@ private:
     bool                                mNeedUpdateDefines = false;
 
     uint mInitialAreaLightSamples = 32u; // M candiates 
-    uint mBlockerSearchSamples = 32u;
+    uint mBlockerSearchSamples = 8u;
     uint mPCFSamples = 64u;
+    uint mNewPCSSSamples = 1u;
     uint mActiveTargetPdf = 1;
     uint mActiveShadingMode = 0;
     uint mRasterAlphaTest = 1;
 
-    float mMinVisibility = 0.001f; 
+    float mMinVisibility = 0.01f;
+    float mDepthBias = -1.0f; // slope-scale depth bias
+    SceneName mCurrentScene = SceneName::SanMiguel;
 
     // Area light parameters
     float3 mLightUp = float3(0.0f, 0.0f, -1.0f);
-    float3 mLightPos = float3(14.1f, 1500.0f, 15.0f);
-    float4 mRotation = float4(0.3f, 1.0f, 0.0f, 0.0f);
-    float mLightSize = 250.0f; // for diameter
-    float mFovY = 0.8f;
-    float mLightNearPlane = mLightPos.y - 20.0f;
+    //float3 mLightPos = float3(14.1f, 1500.0f, 15.0f);
+    //float4 mRotation = float4(0.3f, 1.0f, 0.0f, 0.0f);
+    //float mLightSize = 250.0f; // for diameter
+    //float mFovY = 0.8f;
 
-    /*float3 mLightPos = float3(14.1f, 50.0f, 15.0f);
-    float4 mRotation = float4(0.3f, 1.0f, 0.0f, 0.0f);
+    float3 mLightPos = float3(14.5f, 50.0f, 15.0f);
+    float4 mRotation = float4(100.0f, 1.0f, 0.0f, 0.0f);
     float mLightSize = 10.0f;
-    float mFovY = 30.0f;*/
+    float mFovY = 30.0f;
+
+    float mLightNearPlane = mLightPos.y - 20.0f;
+    float mLightFarPlane = 1e5;
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;

@@ -40,6 +40,8 @@ namespace
 
     const char kPCSSPassFile[] = "RenderPasses/ShadowMap/PCSSPass.slang";
     const char kShadingPassFile[] = "RenderPasses/ShadowMap/ShadingPass.slang";
+
+    const uint kShadowMapSize = 1 >> 14;
 }
 
 // Don't remove this. it's required for hot-reload to function properly
@@ -70,7 +72,8 @@ RenderPassReflection ShadowMap::reflect(const CompileData& compileData)
 {
     // Define the required resources here
     RenderPassReflection reflector;
-    reflector.addOutput(kDepthName, "Depth value").format(ResourceFormat::D32Float).bindFlags(Resource::BindFlags::DepthStencil | Resource::BindFlags::ShaderResource).texture2D(1024, 1024, 0);
+    reflector.addOutput(kDepthName, "Depth value").format(ResourceFormat::D32Float).bindFlags(Resource::BindFlags::DepthStencil | Resource::BindFlags::ShaderResource).texture2D(
+        kShadowMapSize, kShadowMapSize, 0);
     reflector.addOutput(kColorName, "Output color");
     reflector.addOutput(kLinearDepthName, "Linear depth value");
 
@@ -86,7 +89,7 @@ void ShadowMap::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     if (mNeedUpdate)
     {
-        setSceneAreaLight(mpScene, SceneName::TestScene, mLightPos, mLightSize, mRotation);
+        setSceneAreaLight(mpScene, SceneName::SanMiguel, mLightPos, mLightSize, mRotation);
         updateDefines();
         calcLightSpaceMatrix();
 
@@ -109,6 +112,7 @@ void ShadowMap::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     // Shadow map pass
     {
+        PROFILE("Shadow Map");
         auto& pFbo = mPCSSPass.pFbo;
         pFbo->attachDepthStencilTarget(pDepthTex);
         pFbo->attachColorTarget(pLinearDepthTex, 0);
@@ -121,7 +125,7 @@ void ShadowMap::execute(RenderContext* pRenderContext, const RenderData& renderD
         vars["PerFrameCB"]["farZ"] = mpScene->getCamera()->getFarPlane();
 
         mpPixelDebug->prepareProgram(mPCSSPass.pProgram, mPCSSPass.pVars->getRootVar());
-        mpScene->rasterize(pRenderContext, mPCSSPass.pState.get(), mPCSSPass.pVars.get());
+        mpScene->rasterize(pRenderContext, mPCSSPass.pState.get(), mPCSSPass.pVars.get(), RasterizerState::CullMode::None);
 
     }
 
@@ -130,6 +134,7 @@ void ShadowMap::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     // Use rasterizer to shade the scene
     {
+        PROFILE("PCSS Shading");
         auto& pFbo = mShadingPass.pFbo;
         if (pFbo->getDepthStencilTexture() == nullptr)
         {
@@ -144,10 +149,11 @@ void ShadowMap::execute(RenderContext* pRenderContext, const RenderData& renderD
         vars["PerFrameCB"]["gLightSpaceMat"] = mLightSpaceMat;
         vars["PerFrameCB"]["gLightView"] = mLightView;
         vars["PerFrameCB"]["gLightPos"] = mLightPos;
-        vars["PerFrameCB"]["gShadowMapDim"] = float2(1024);
+        vars["PerFrameCB"]["gShadowMapDim"] = uint2(kShadowMapSize);
         vars["PerFrameCB"]["gEnableShadow"] = mEnableShadow;
         vars["PerFrameCB"]["nearZ"] = mLightNearPlane;
         vars["PerFrameCB"]["farZ"] = 10000.0f;
+        vars["PerFrameCB"]["gFrameIndex"] = (uint)gpFramework->getGlobalClock().getFrame();
         vars["gShadowMap"] = mpShadowMap;
 
         mpPixelDebug->prepareProgram(mShadingPass.pProgram, mShadingPass.pVars->getRootVar());
@@ -164,6 +170,8 @@ void ShadowMap::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Enable shadow", mEnableShadow);
     dirty |= widget.var("Blocker search samples", mBlockerSearchSamples);
     dirty |= widget.var("PCF samples", mPCFSamples);
+    dirty |= widget.var("Light samples", mLightSamples);
+    dirty |= widget.var("Depth Bias", mDepthBias);
 
     // Light configuration
     if (auto group = widget.group("Area Light"))
@@ -184,9 +192,10 @@ void ShadowMap::renderUI(Gui::Widgets& widget)
 void ShadowMap::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     mpScene = pScene;
+    mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
 
     // Adjust area light in the scene
-    setSceneAreaLight(mpScene, SceneName::TestScene, mLightPos, mLightSize, mRotation);
+    setSceneAreaLight(mpScene, SceneName::SanMiguel, mLightPos, mLightSize, mRotation);
 
     if (mpScene)
     {
@@ -204,8 +213,8 @@ void ShadowMap::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& 
     // Create sampler for sampling shadow map texture
     Sampler::Desc samplerDesc;
     samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(1.0f)); // Outside sample points will not be shadowed
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point); // for comparsion texture
-    samplerDesc.setComparisonMode(Sampler::ComparisonMode::LessEqual); // lessEqual = no occluders
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point); // for comparsion texture
+    samplerDesc.setComparisonMode(Sampler::ComparisonMode::Less); // lessEqual = no occluders
     mShadingPass.pVars["gSamplerCmp"] = Sampler::create(samplerDesc);
 
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
@@ -253,22 +262,42 @@ ShadowMap::ShadowMap()
 
 void ShadowMap::calcLightSpaceMatrix()
 {
-    auto pRectLight = mpScene->getLightByName("Rect Light");
-    auto lightData = pRectLight->getData();
+    auto pLight = mpScene->getLightByName("Area Light");
+    if (!pLight) return;
 
     // light pos and dir in world space
-    float3 posW = mLightPos;
-    float3 dirW = lightData.transMatIT * float4(0.0f, 0.0f, 1.0f, 1.0f);
+    auto lightData = pLight->getData();
+    auto lightType = pLight->getType();
+    float3 posW;
+    float3 dirW;
+    float4x4 lightView;
+    float4x4 lightProj;
+
+    if (lightType == LightType::Rect)
+    {
+        posW = mLightPos;
+        dirW = lightData.transMatIT * float4(0.0f, 0.0f, 1.0f, 1.0f);
+        lightView = glm::lookAt(posW, posW + dirW, mLightUp); // RH camera look direction is -z direction in view space
+        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, float(1e6));
+    }
+    else if (lightType == LightType::Distant)
+    {
+        posW = lightData.posW;
+        dirW = lightData.dirW;
+    }
+    else if (lightType == LightType::Sphere)
+    {
+        logInfo("Sphere Light");
+        posW = mLightPos;
+        dirW = glm::rotate(glm::mat4(1.0f), glm::radians(mRotation.x), float3(mRotation.yzw)) * float4(0.0f, -1.0f, 0.0f, 1.0f);
+        lightView = glm::lookAt(posW, posW + dirW, mLightUp); // RH camera look direction is -z direction in view space
+        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, float(1e6));
+    }
 
     logInfo("light position: " + to_string(posW));
+    logInfo("lightData position: " + to_string(lightData.posW));
     logInfo("light direction: " + to_string(dirW));
-    logInfo("GLM_CONFIG_CLIP_CONTROL = " + std::to_string(GLM_CONFIG_CLIP_CONTROL)); // GLM_CLIP_CONTROL_RH_ZO
-
-    // Build light space transform matrix
-    float4x4 lightView = glm::lookAt(posW, posW + dirW, mLightUp);
-    float4x4 lightProj = mpScene->getCamera()->getProjMatrix(); // use camera projection matrix
-    lightView = glm::lookAt(posW, posW + dirW, glm::vec3(0.0f, 1.0f, 0.0f)); // RH camera look direction is -z direction in view space
-    lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, 10000.0f);
+    logInfo("GLM_CONFIG_CLIP_CONTROL = " + std::to_string(GLM_CONFIG_CLIP_CONTROL)); // GLM_CLIP_CONTROL_RH_ZO   
 
     mLightSpaceMat = lightProj * lightView;
     mLightView = lightView;
@@ -277,6 +306,9 @@ void ShadowMap::calcLightSpaceMatrix()
 void ShadowMap::updateDefines()
 {
     Shader::DefineList shadingPassDefines;
+    shadingPassDefines.add(mpSampleGenerator->getDefines());
+    shadingPassDefines.add("_LIGHT_SAMPLES", std::to_string(mLightSamples));
+    shadingPassDefines.add("_DEPTH_BIAS", std::to_string(mDepthBias));
     shadingPassDefines.add("BLOCKER_SEARCH_SAMPLES", std::to_string(mBlockerSearchSamples));
     shadingPassDefines.add("PCF_SAMPLES", std::to_string(mPCFSamples));
     shadingPassDefines.add("NEAR_PLANE", std::to_string(mLightNearPlane));

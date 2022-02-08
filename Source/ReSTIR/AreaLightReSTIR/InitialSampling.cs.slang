@@ -54,14 +54,20 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         float3 posWOrigin = sd.computeNewRayOrigin();
 
         // Compute average blocker depth (how can we use slope-scale bias here?)
-        float avgBlockerDepth, zReceiver;
-        float3 projCoords, lightSpaceView;
-        
-        float3 lightPos = gScene.getLight(0).posW;
-        float3 L = normalize(lightPos - posWOrigin);
-        float NdotL = dot(sd.N, L);
-        bool hasBlocker = gPCSS.blockerSearch(avgBlockerDepth, projCoords, zReceiver, lightSpaceView, NdotL, 
-            sd.posW, sampleNext2D(sg));
+        // TODO: compute only once in this shader and pass it to other shaders
+        #if _TARGET_PDF == 1
+            float avgBlockerDepth, zReceiver;
+            float2 minMaxBlockerDepth;
+            float3 projCoords, lightSpaceView;
+            
+            float3 L = normalize(gPCSS.gLightPos - posWOrigin);
+            float NdotL = dot(sd.N, L);
+            bool hasBlocker = gPCSS.blockerSearch(avgBlockerDepth, minMaxBlockerDepth, projCoords, zReceiver, lightSpaceView, 
+                NdotL, sd.posW, sampleNext2D(sg));
+
+            print("avgBlockerDepth = ", avgBlockerDepth);
+            print("minMaxBlockerDepth = ", minMaxBlockerDepth);
+        #endif
 
         // Sampling analytic area light
         Reservoir areaLightReservoir = emptyReservoir();
@@ -85,8 +91,24 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
                 // _TARGET_PDF == 0 -> unshadowed 
                 #if _TARGET_PDF == 1 // Shadow Map
-                    visibility = hasBlocker ? gPCSS.shadowMapPCSSModified(lightSample.posW, avgBlockerDepth, projCoords, zReceiver, 
-                        lightSpaceView) : 1.0f;
+                    if (hasBlocker)
+                    {
+                        float sum = 0.0f;
+                        for (int j = 0; j < _NEW_PCSS_SAMPLES; j++)
+                        {
+                            avgBlockerDepth = _NEW_PCSS_SAMPLES == 1 ? avgBlockerDepth 
+                                : lerp(minMaxBlockerDepth.x, minMaxBlockerDepth.y, 1 - sampleNext1D(sg));
+                            sum += gPCSS.shadowMapPCSSModified(lightSample.posW, avgBlockerDepth, projCoords, zReceiver,
+                                lightSpaceView);
+                        }
+                        visibility = max(_MIN_VISIBILITY, sum / _NEW_PCSS_SAMPLES);
+                    }
+
+                    // visibility = hasBlocker ? gPCSS.shadowMapPCSSModified(lightSample.posW, avgBlockerDepth, projCoords, zReceiver, 
+                    //     lightSpaceView) : 1.0f;
+
+                    print("visibility = ", visibility);
+
                 #elif _TARGET_PDF == 2 // Shadow Ray
                     RayDesc ray;
                     ray.Origin = posWOrigin;

@@ -51,7 +51,7 @@ namespace
     const char kEnableSpatialResampling[] = "enableSpatialResampling";
     const char kStoreFinalVisibility[] = "storeFinalVisibility";
 
-    const uint32_t kShadowMapSize = 1024;
+    const uint32_t kShadowMapSize = 1 << 10;
 }
 
 // Don't remove this. it's required for hot-reload to function properly
@@ -95,7 +95,8 @@ RenderPassReflection AreaLightReSTIR::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
     addRenderPassInputs(reflector, kInputChannels);
     addRenderPassOutputs(reflector, kOutputChannels);
-    reflector.addOutput(kDepthName, "Depth value").format(ResourceFormat::D32Float).bindFlags(Resource::BindFlags::DepthStencil | Resource::BindFlags::ShaderResource).texture2D(kShadowMapSize, kShadowMapSize, 0);
+    reflector.addOutput(kDepthName, "Depth value").format(ResourceFormat::D32Float).bindFlags(Resource::BindFlags::DepthStencil | Resource::BindFlags::ShaderResource)
+        .texture2D(kShadowMapSize, kShadowMapSize, 0);
     reflector.addOutput(kLinearDepthName, "Linear depth value");
     return reflector;
 }
@@ -114,6 +115,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         auto VBuffer = renderData["vbuffer"]->asTexture();
         mpVBufferPrev = Texture::create2D(VBuffer->getWidth(), VBuffer->getHeight(), VBuffer->getFormat(), VBuffer->getArraySize(), VBuffer->getMipCount(), nullptr, Resource::BindFlags::ShaderResource);
         pRenderContext->copyResource(mpVBufferPrev.get(), VBuffer.get());
+    }
+
+    // Update when parameters change
+    if (mNeedUpdateDefines)
+    {
+        setSceneAreaLight(mpScene, mCurrentScene, mLightPos, mLightSize, mRotation);
+        calcLightSpaceMatrix();
+        UpdateDefines();
     }
 
     // Get image width and height
@@ -137,14 +146,6 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpReservoirBuffer->setName("ReSTIR: Reservoir Buffer");
     }
 
-    // Update when parameters change
-    if (mNeedUpdateDefines)
-    {
-        setSceneAreaLight(mpScene, SceneName::SanMiguel, mLightPos, mLightSize, mRotation);
-        calcLightSpaceMatrix();
-        UpdateDefines();
-    }
-
     mLastFrameOutputReservoir = mCurrentFrameOutputReservoir; // 0 
 
     uint32_t initialOutputBufferIndex = !mLastFrameOutputReservoir; // 1
@@ -157,6 +158,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     mCurrentFrameOutputReservoir = shadeInputBufferIndex;
 
     // Shadow pass
+    if (mActiveTargetPdf == 1 || mActiveShadingMode != 0)
     {
         PROFILE("Shadow Map");
         const auto& pDepthTex = renderData[kDepthName]->asTexture();
@@ -170,11 +172,16 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
 
         auto vars = mShadowMapPass.pVars;
         vars["PerFrameCB"]["gLightSpaceMat"] = mLightSpaceMat;
-        vars["PerFrameCB"]["nearZ"] = mpScene->getCamera()->getNearPlane();
-        vars["PerFrameCB"]["farZ"] = mpScene->getCamera()->getFarPlane();
+        vars["PerFrameCB"]["nearZ"] = mLightNearPlane;
+        vars["PerFrameCB"]["farZ"] = mLightFarPlane;
 
         //mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, mShadowMapPass.pVars->getRootVar());
         mpScene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::None);
+    }
+
+    // PCSS shading pass
+    {
+
     }
 
     {
@@ -244,7 +251,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         setPCSSShaderData(cb["gPCSS"]);
         mpShadingPass["gReservoirs"] = mpReservoirBuffer;
         mpShadingPass["gShadingOutput"] = renderData[kOutputChannels[0].name]->asTexture();
-        mpPixelDebug->prepareProgram(mpShadingPass->getProgram(), mpShadingPass->getRootVar());
+        //mpPixelDebug->prepareProgram(mpShadingPass->getProgram(), mpShadingPass->getRootVar());
         mpShadingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
     }
 
@@ -265,6 +272,8 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     dirty |= widget.var("PCF samples", mPCFSamples);
     dirty |= widget.var("Raster Alpha Test", mRasterAlphaTest);
     dirty |= widget.var("Minimum Visibility", mMinVisibility);
+    dirty |= widget.var("Depth Bias", mDepthBias);
+    dirty |= widget.var("New PCSS Samples", mNewPCSSSamples);
     
     const Gui::RadioButtonGroup targetPdfs = {
         {0, "Unshadowed", true},
@@ -287,6 +296,7 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Area Light"))
     {
         dirty |= group.var("Light near plane", mLightNearPlane);
+        dirty |= group.var("Light far plane", mLightFarPlane);
         dirty |= group.var("Light FovY", mFovY);
         dirty |= group.var("Light Size", mLightSize);
         dirty |= group.var("Light center position", mLightPos);
@@ -330,7 +340,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     mpScene->setRenderSettings(renderSettings);
 
     // Adjust rectangle light if exist
-    setSceneAreaLight(mpScene, SceneName::SanMiguel, mLightPos, mLightSize, mRotation);
+    setSceneAreaLight(mpScene, mCurrentScene, mLightPos, mLightSize, mRotation);
 
     mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
 
@@ -403,8 +413,8 @@ void AreaLightReSTIR::CreatePasses()
         defines.add("LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
 
         CreatePass(mpInitialSamplingPass, "RenderPasses/AreaLightReSTIR/InitialSampling.cs.slang", defines);
-        CreatePass(mpTemporalResamplingPass, "RenderPasses/AreaLightReSTIR/TemporalResampling.cs.slang", defines);
-        CreatePass(mpSpatialResamplingPass, "RenderPasses/AreaLightReSTIR/SpatialResampling.cs.slang", defines);
+        //CreatePass(mpTemporalResamplingPass, "RenderPasses/AreaLightReSTIR/TemporalResampling.cs.slang", defines);
+        //CreatePass(mpSpatialResamplingPass, "RenderPasses/AreaLightReSTIR/SpatialResampling.cs.slang", defines);
         CreatePass(mpShadingPass, "RenderPasses/AreaLightReSTIR/Shading.cs.slang", defines);
     }
 
@@ -415,10 +425,12 @@ void AreaLightReSTIR::UpdateDefines()
 {
     Shader::DefineList PCSSDefines;
     const char* kTargetPdf = "_TARGET_PDF";
-    PCSSDefines.add("BLOCKER_SEARCH_SAMPLES", std::to_string(mBlockerSearchSamples));
+    PCSSDefines.add("_BLOCKER_SEARCH_SAMPLES", std::to_string(mBlockerSearchSamples));
     PCSSDefines.add("PCF_SAMPLES", std::to_string(mPCFSamples));
     PCSSDefines.add(kTargetPdf, std::to_string(mActiveTargetPdf));
     PCSSDefines.add("_MIN_VISIBILITY", std::to_string(mMinVisibility));
+    PCSSDefines.add("_DEPTH_BIAS", std::to_string(mDepthBias));
+    PCSSDefines.add("_NEW_PCSS_SAMPLES", std::to_string(mNewPCSSSamples));
 
     {
         const char* kInitialAreaLightSamples = "_INITIAL_AREA_LIGHT_SAMPLES";
@@ -430,22 +442,23 @@ void AreaLightReSTIR::UpdateDefines()
         AddDefines(mpInitialSamplingPass, defines);
     }
 
-    {
-        Shader::DefineList defines;
-        defines.add(PCSSDefines);
-        AddDefines(mpTemporalResamplingPass, defines);
-    }
+    //{
+    //    Shader::DefineList defines;
+    //    defines.add(PCSSDefines);
+    //    AddDefines(mpTemporalResamplingPass, defines);
+    //}
 
-    {
-        Shader::DefineList defines;
-        defines.add(PCSSDefines);
-        AddDefines(mpSpatialResamplingPass, defines);
-    }
+    //{
+    //    Shader::DefineList defines;
+    //    defines.add(PCSSDefines);
+    //    AddDefines(mpSpatialResamplingPass, defines);
+    //}
 
     {
         const char* kStoreFinalVisibility = "_STORE_FINAL_VISIBILITY";
         const char* kBruteForce = "_BRUTE_FORCE";
         const char* kShadingMode = "_SHADING_MODE";
+        PCSSDefines.add("_MIN_VISIBILITY", std::to_string(0.0f)); // No need to clamp  
         Shader::DefineList defines;
         defines.add(kStoreFinalVisibility, mStoreFinalVisibility ? "1" : "0");
         defines.add(kBruteForce, mBruteForce ? "1" : "0");
@@ -475,7 +488,7 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
         posW = mLightPos;
         dirW = lightData.transMatIT * float4(0.0f, 0.0f, 1.0f, 1.0f);
         lightView = glm::lookAt(posW, posW + dirW, mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, 10000.0f);
+        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, mLightFarPlane);
     }
     else if (lightType == LightType::Distant)
     {
@@ -488,7 +501,7 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
         posW = mLightPos;
         dirW = glm::rotate(glm::mat4(1.0f), glm::radians(mRotation.x), float3(mRotation.yzw)) * float4(0.0f, -1.0f, 0.0f, 1.0f);
         lightView = glm::lookAt(posW, posW + dirW, mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, float(1e6));
+        lightProj = glm::perspective(glm::radians(mFovY), 1.0f, mLightNearPlane, mLightFarPlane);
     }
 
     logInfo("light position: " + to_string(posW));
@@ -509,14 +522,14 @@ void AreaLightReSTIR::setPCSSShaderData(const ShaderVar& vars)
     vars["gLightPos"] = mLightPos;
     vars["gShadowMapDim"] = float2(kShadowMapSize);
     vars["nearZ"] = mLightNearPlane;
-    vars["farZ"] = 10000.0f;
+    vars["farZ"] = mLightFarPlane;
     vars["gShadowMap"] = mShadowMapPass.pFbo->getDepthStencilTexture();
 
     // Create sampler for sampling shadow map texture
     Sampler::Desc samplerDesc;
     samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(1.0f)); // Outside sample points will not be shadowed
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point); // for comparsion texture
-    samplerDesc.setComparisonMode(Sampler::ComparisonMode::LessEqual); // lessEqual = no occluders
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point); // for comparsion texture
+    samplerDesc.setComparisonMode(Sampler::ComparisonMode::Less); // lessEqual = no occluders
     vars["gSamplerCmp"] = Sampler::create(samplerDesc);
 
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);

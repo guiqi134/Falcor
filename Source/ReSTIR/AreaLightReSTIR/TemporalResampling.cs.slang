@@ -34,7 +34,7 @@ static struct Data
 } gData;
 
 // Thresholds to reject neighbor reservoirs with substantially different geometry/material
-static const int maxHistoryLength = 20;
+static const int maxHistoryLength = 5;
 static const float positionThreshold = 0.1f;
 static const float normalThreshold = 0.65f;
 
@@ -61,8 +61,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         float avgBlockerDepth, zReceiver;
         float3 projCoords, lightSpaceView;
         
-        float3 lightPos = gScene.getLight(0).posW;
-        float3 L = normalize(lightPos - posWOrigin);
+        float3 L = normalize(gPCSS.gLightPos - posWOrigin);
         float NdotL = dot(sd.N, L);
         bool hasBlocker = gPCSS.blockerSearch(avgBlockerDepth, projCoords, zReceiver, lightSpaceView, NdotL, 
             sd.posW, sampleNext2D(sg));

@@ -30,11 +30,13 @@ namespace Falcor
             if (!pLight) return;
 
             auto translation = glm::translate(glm::mat4(1.0f), lightPos);
-            //auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(rot.x), float3(rot.yzw));
-            auto model = translation;
-            auto pSphereLight = dynamic_cast<SphereLight*>(pLight);
-            pSphereLight->setScaling(float3(lightSize / 2.0f));
-            pSphereLight->setTransformMatrix(model);
+            auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(rot.x), float3(rot.yzw));
+
+            auto lightType = pLight->getType();
+            auto pAreaLight = dynamic_cast<AnalyticAreaLight*>(pLight);
+            auto model = lightType == LightType::Rect ? translation * rotation : translation;
+            pAreaLight->setScaling(float3(lightSize / 2.0f));
+            pAreaLight->setTransformMatrix(model);
         }
     }
 

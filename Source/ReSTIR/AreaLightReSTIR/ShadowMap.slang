@@ -52,13 +52,3 @@ float4 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
     float linearDepth = LinearizeDepth(depth) / farZ;
     return float4(float3(linearDepth), 1.0f);
 }
-
-
-//bool _alphaTest<L:ITextureSampler>(VertexData v, MaterialData md, MaterialResources mr, L lod)
-//{
-//    if (EXTRACT_ALPHA_MODE(md.flags) != AlphaModeMask) return false;
-//
-//    // Load opacity from the alpha channel of the diffuse texture.
-//    float alpha = sampleTexture(mr.baseColor, mr.samplerState, v.texC, md.baseColor, EXTRACT_ALPHA_TYPE(md.flags), lod).a;
-//    return evalAlphaTest(alpha, md.alphaThreshold, v.posW);
-//}
