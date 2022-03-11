@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="AreaLightReSTIR.cpp" />
+    <ClCompile Include="ShadingDataLoader.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AreaLightReSTIR.h" />
+    <ClInclude Include="ShadingDataLoader.h" />
+    <ClInclude Include="Helpers.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="Helpers.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="InitialSampling.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="PCSS.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ReSTIR.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shading.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ShadingDataLoader.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SpatialResampling.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="TemporalResampling.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ShadowMap.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="PoissonDisk.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SimplePathTracing.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="shaders">
+      <UniqueIdentifier>{24400dc5-e1e9-430a-b3d5-7249cce105bb}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

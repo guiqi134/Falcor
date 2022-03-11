@@ -138,6 +138,10 @@ namespace Mogwai
             auto ext = Bitmap::getFileExtFromResourceFormat(pTex->getFormat());
             auto format = Bitmap::getFormatFromFileExtension(ext);
             std::string filename = getOutputNamePrefix(pGraph->getOutputName(i)) + std::to_string(gpFramework->getGlobalClock().getFrame()) + "." + ext;
+
+            // My file name
+            filename = filename.substr(0, filename.find(".")) + "." + ext;
+
             pTex->captureToFile(0, 0, filename, format);
         }
 

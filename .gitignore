@@ -14,7 +14,6 @@ Bin/*
 *slang-dump-*
 *.mp4
 Source/Externals/.packman/*
-Source/ReSTIR/Data/scenes/*
 Media
 Tools/.packman
 Tests/data
