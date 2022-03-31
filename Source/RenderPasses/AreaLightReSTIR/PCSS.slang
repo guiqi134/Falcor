@@ -29,7 +29,7 @@ float shadowMapPCF(float3 projCoords, float2 filterRadiusUV, float2 poissonOffse
 
     for (int i = 0; i < _PCF_SAMPLES; i++)
     {
-        float2 selectedSample = POISSON_SAMPLES_512[i];
+        float2 selectedSample = POISSON_SAMPLES_256[i];
         float2 offset = rotatedPoisson(selectedSample, rotation) * filterRadiusUV; // rotated poisson
         offset = selectedSample * filterRadiusUV;
 

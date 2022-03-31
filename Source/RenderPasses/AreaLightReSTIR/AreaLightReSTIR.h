@@ -118,7 +118,7 @@ private:
 
     uint mInitialAreaLightSamples = 4u; // M candiates 
     uint mBlockerSearchSamples = 8u;
-    uint mPCFSamples = 32u;
+    uint mPCFSamples = 256u;
     uint mShadingLightSamples = 4; // same as mInitialAreaLightSamples
     uint mActiveTargetPdf = 1;
 
