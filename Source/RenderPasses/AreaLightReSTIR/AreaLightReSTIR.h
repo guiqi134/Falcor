@@ -31,6 +31,7 @@
 #include "Experimental/Scene/Lights/EmissivePowerSampler.h"
 #include "Utils/Sampling/SampleGenerator.h"
 #include "RenderPasses/Shared/AreaLight/SceneHelpers.h"
+#include "HostDeviceSharedDefinitions.h"
 
 
 using namespace Falcor;
@@ -55,7 +56,7 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 private:
     AreaLightReSTIR();
@@ -66,7 +67,7 @@ private:
     void CreatePasses();
     void UpdateDefines();
     void calcLightSpaceMatrix();
-    void setPCSSShaderData(const ShaderVar& var);
+    void setShadowMapPassFbo();
 
     PixelDebug::SharedPtr mpPixelDebug;
 
@@ -82,6 +83,12 @@ private:
         Fbo::SharedPtr pFbo;
     } mShadowMapPass;
 
+    struct
+    {
+        ComputePass::SharedPtr mpSATScan1;
+        ComputePass::SharedPtr mpSATScan2;
+    } mSATScanPasses;
+
     ComputePass::SharedPtr              mpInitialSamplingPass;
     ComputePass::SharedPtr              mpTemporalResamplingPass;
     ComputePass::SharedPtr              mpSpatialResamplingPass;
@@ -89,9 +96,14 @@ private:
     ComputePass::SharedPtr mpSimplePathTracing;
 
     // Resources
-    Texture::SharedPtr                  mpVBufferPrev;
-    Buffer::SharedPtr                   mpReservoirBuffer; // contain both current & previous reservoirs?
-    Buffer::SharedPtr                   mpNeighborOffsetBuffer;
+    Texture::SharedPtr mpVBufferPrev;
+    Texture::SharedPtr mpRowSum;
+    Texture::SharedPtr mpSAT;
+    Buffer::SharedPtr  mpReservoirBuffer; // contain both current & previous reservoirs?
+    Buffer::SharedPtr  mpNeighborOffsetBuffer;
+    Sampler::SharedPtr mpSamplerCmp;
+    Sampler::SharedPtr mpTrilinearSampler;
+    Sampler::SharedPtr mpPointSampler;
 
     // Parameters
     uint                                mLastFrameOutputReservoir = 0;
@@ -101,29 +113,28 @@ private:
     bool                                mEnableSpatialResampling = false;
     bool                                mEnableTemporalResampling = false;
     bool                                mStoreFinalVisibility = false; // Cause bugs in temporal reuse 
-    bool                                mNeedUpdateDefines = false;
+    bool                                mNeedUpdate = false;
+    bool mAnimateCamera = false;
 
-    uint mInitialAreaLightSamples = 32u; // M candiates 
+    uint mInitialAreaLightSamples = 4u; // M candiates 
     uint mBlockerSearchSamples = 8u;
     uint mPCFSamples = 32u;
-    uint mActiveTargetPdf = 0;
-    uint mActiveShadingMode = 1;
+    uint mShadingLightSamples = 4; // same as mInitialAreaLightSamples
+    uint mActiveTargetPdf = 1;
 
-    float mMinVisibility = 0.0f;
-    float mDepthBias = -1.0f; // slope-scale depth bias
+    ShadowType mShadowType = ShadowType::NewPCSSReSTIR; // Control different shadow methods
 
-    // Simple Path Tracing params
-    bool mEnableSimplePathTracing = false;
-    uint mLightSamples = 8u;
-    uint mShadowEvalution = 0;
+    // VSM, EVSM, MSM params
+    float mLBRThreshold = 0.0f;
 
     // Area light parameters
-    AreaLightParams mLightParams = AreaLightParams(SceneName::SimpleScene);
+    AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;
     float4x4 mLightProj;
 
-
-    // Test
+    // Initial camera parameters
+    float3 mInitialCameraPos;
+    float3 mInitialCameraTarget;
 };

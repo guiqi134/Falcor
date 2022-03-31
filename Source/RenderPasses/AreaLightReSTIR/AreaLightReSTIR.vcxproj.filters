@@ -8,6 +8,8 @@
     <ClInclude Include="AreaLightReSTIR.h" />
     <ClInclude Include="ShadingDataLoader.h" />
     <ClInclude Include="Helpers.h" />
+    <ClInclude Include="HostDeviceSharedDefinitions.h" />
+    <ClInclude Include="PoissonDisk.h" />
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="Helpers.slang">
@@ -34,13 +36,22 @@
     <ShaderSource Include="TemporalResampling.cs.slang">
       <Filter>shaders</Filter>
     </ShaderSource>
-    <ShaderSource Include="ShadowMap.slang">
+    <ShaderSource Include="ShadowMap.3d.slang">
       <Filter>shaders</Filter>
     </ShaderSource>
     <ShaderSource Include="PoissonDisk.slang">
       <Filter>shaders</Filter>
     </ShaderSource>
     <ShaderSource Include="SimplePathTracing.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="VSM.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SATScans.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="MSM.slang">
       <Filter>shaders</Filter>
     </ShaderSource>
   </ItemGroup>

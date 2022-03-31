@@ -1423,7 +1423,12 @@ namespace Falcor
         mUpdates |= updateEnvMap(false);
         mUpdates |= updateMaterials(false);
         mUpdates |= updateGeometry(false);
-        pContext->flush();
+        {
+            PROFILE("flush() call");
+            pContext->flush();
+        }
+
+        PROFILE("after flush");
 
         if (is_set(mUpdates, UpdateFlags::MeshesMoved))
         {

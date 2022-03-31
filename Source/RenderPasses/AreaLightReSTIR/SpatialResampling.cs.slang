@@ -22,11 +22,17 @@ cbuffer CB
     uint gOutputBufferIndex;
     ResamplingRuntimeParameters gParams;
     ShadingDataLoader gShadingDataLoader;
-    PCSS gPCSS;
+    LightParams gLightParams;
+
+    SamplerComparisonState gSamplerCmp;
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
 }
 
 RWStructuredBuffer<Reservoir> gReservoirs;
 Buffer<float2> gNeighborOffsetBuffer;
+
+Texture2D<float4> gShadowMap;
 
 static struct Data
 {
@@ -143,10 +149,9 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 float targetPdfCurrent = luminance(Le * gData.standardMaterial.eval(sd, dir));
 
                 float visibility = 1.0f;
-#if _TARGET_PDF == 1
+#if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
                 BlockerSearchOutputs bso = { state.projCoords, state.shadingPosLightView };
-                visibility = state.shadingPosLightView.w ? gPCSS.shadowMapPCSSModified(samplePos, bso) : 1.0f;
-                visibility = max(_MIN_VISIBILITY, visibility);
+                visibility = state.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
 #elif _TARGET_PDF == 2
                 RayDesc ray;
                 ray.Origin = posWOrigin;
@@ -174,9 +179,10 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         // if (false)
         if (isValidReservoir(state))
         {
-            // float pi = state.targetPdf;
-            // float piSum = state.targetPdf * centerSample.M;
+            float p_y = state.targetPdf;
+            float p_sum = state.targetPdf * centerSample.M;
             uint count = centerSample.M;
+
             for (uint i = 0; i < numSpatialSamples; i++)
             {
                 if ((cachedResult & (1u << uint(i))) == 0) 
@@ -204,7 +210,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
                 // Visibility test: trace shadow ray / shadow map
                 float targetPdfNeighbor = 0.0f;
-#if _SHADING_MODE == 0
+#if _SHADOW_TYPE == 0
                 RayDesc ray;
                 ray.Origin = neighborPosW;
                 ray.Direction = toLight / distance;
@@ -215,23 +221,19 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 {
                     targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir));
                 }
-#elif _SHADING_MODE == 1
+#elif _SHADOW_TYPE == 1
                 BlockerSearchOutputs bso = { neighborSample.projCoords, neighborSample.shadingPosLightView };
-                float visibility = neighborSample.shadingPosLightView.w ? 
-                    gPCSS.shadowMapPCSSModified(samplePos, bso) : 1.0f;
-                targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir));
+                float visibility = neighborSample.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
+                targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir) * visibility);
 #endif
-                // Delete?
-                if (targetPdfNeighbor > 0.0f)
-                {
-                    count += neighborSample.M;
-                }
+                print(p_y);
+                print(targetPdfNeighbor);
 
-                // Q: ???
-                // pi = (selected == i ? targetPdfNeighbor : pi);
-                // piSum += targetPdfNeighbor * neighborSample.M;
+                p_y = selected == i ? targetPdfNeighbor : p_y; // selected neighbor sample
+                p_sum += targetPdfNeighbor * neighborSample.M;
             }
-            finalizeResampling(state, 1.0f, count);
+
+            finalizeResampling(state, p_y, p_sum);
         }
         else
         {

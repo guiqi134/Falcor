@@ -304,7 +304,7 @@ namespace Falcor
 
     void Camera::updateFromAnimation(const glm::mat4& transform)
     {
-        float3 up = float3(transform[1]);
+        float3 up = float3(transform[1]); // column 1 for transform matrix
         float3 fwd = float3(-transform[2]);
         float3 pos = float3(transform[3]);
         setUpVector(up);

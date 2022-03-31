@@ -7,7 +7,7 @@ namespace Falcor
     enum class SceneName
     {
         SimpleScene, SanMiguel, BistroExterior, BistroInterior,
-        Sponza, 
+        PlaneScene, Bicycle
     };
 
     struct AreaLightParams
@@ -20,26 +20,29 @@ namespace Falcor
         float mFovY;
         float mLightNearPlane;
         float mLightFarPlane;
+        float mDepthBias;
 
-        AreaLightParams(SceneName name) : name(name), mLightFarPlane(1e5), mRotation(float3(0.0f))
+        AreaLightParams(SceneName name) : name(name), mLightFarPlane(1e5), mRotation(float3(0.0f)), mDepthBias(0.001f)
         {
             if (name == SceneName::SanMiguel)
             {
                 mLightUp = float3(0.0f, 0.0f, -1.0f);
                 mLightPos = float3(14.5f, 50.0f, 15.0f);
-                mRotation = float3(100.0f, 0.0f, 0.0f);
-                mLightSize = 10.0f;
-                mFovY = 40.0f;
+                mRotation = float3(107.0f, 0.0f, 0.0f);
+                mLightSize = 3.0f;
+                mFovY = 35.0f;
                 mLightNearPlane = mLightPos.y - 20.0f;
+                mDepthBias = 0.008f;
             }
             else if (name == SceneName::SimpleScene)
             {
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
-                mLightPos = float3(0.0f, 2.0f, -10.0f);
-                mRotation = float3(10.0f, 0.0f, 0.0f);
-                mLightSize = 1.5f;
+                mLightPos = float3(0.0f, 5.0f, -10.0f);
+                mRotation = float3(40.0f, 0.0f, 0.0f);
+                mLightSize = 0.75f;
                 mFovY = 55.0;
                 mLightNearPlane = 8.0f;
+                mDepthBias = 0.03f;
             }
             else if (name == SceneName::BistroExterior)
             {
@@ -49,6 +52,7 @@ namespace Falcor
                 mLightSize = 15.0f;
                 mFovY = 90.0;
                 mLightNearPlane = 40.0f;
+                mDepthBias = 0.01f;
             }
             else if (name == SceneName::BistroInterior)
             {
@@ -58,18 +62,30 @@ namespace Falcor
                 mLightSize = 2.0f;
                 mFovY = 125.0;
                 mLightNearPlane = 1.5f;
+                mDepthBias = 0.0005f;
             }
-            else if (name == SceneName::Sponza)
+            else if (name == SceneName::PlaneScene)
+            {
+                mLightUp = float3(0.0f, 0.0f, -1.0f);
+                mLightPos = float3(0.0f, 10.0f, 0.0f);
+                mRotation = float3(90.0f, 0.0f, 0.0f);
+                mLightSize = 1.5f;
+                mFovY = 30.0;
+                mLightNearPlane = 6.0f;
+            }
+            else if (name == SceneName::Bicycle)
             {
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
-                mLightPos = float3(0.0f, 20.0f, 0.0f);
-                mRotation = float3(90.0f, 0.0f, 0.0f);
-                mLightSize = 15.0f;
-                mFovY = 90.0;
-                mLightNearPlane = mLightPos.y - 10.0f;
+                mLightPos = float3(7.0f, 8.0f, -12.0f);
+                mRotation = float3(35.0f, -30.0f, 0.0f);
+                mLightSize = 0.75f;
+                mFovY = 40.0;
+                mLightNearPlane = 12.0f;
+                mDepthBias = 0.006f;
             }
         }
 
+        // Only for Bistro Scenes
         void setSceneSettings(const Scene::SharedPtr& pScene)
         {
             if (name == SceneName::BistroExterior)

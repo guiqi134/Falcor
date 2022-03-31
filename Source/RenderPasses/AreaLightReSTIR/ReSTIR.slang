@@ -1,5 +1,6 @@
 #include "Utils/Math/MathConstants.slangh"
 import Utils.Sampling.SampleGenerator;
+import Utils.Debug.PixelDebug;
 
 static const uint EnvMapIndex = 0x7FFFFFFF;
 

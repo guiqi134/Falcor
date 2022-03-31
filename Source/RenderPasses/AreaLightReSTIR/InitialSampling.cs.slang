@@ -23,10 +23,15 @@ cbuffer CB
     uint gOutputBufferIndex;
     ResamplingRuntimeParameters gParams;
     ShadingDataLoader gShadingDataLoader;
-    PCSS gPCSS;
+    LightParams gLightParams;
+
+    SamplerComparisonState gSamplerCmp;
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
 }
 
 RWStructuredBuffer<Reservoir> gReservoirs;
+Texture2D<float4> gShadowMap;
 
 static struct Data
 {
@@ -50,6 +55,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
     printSetPixel(threadIndex);
 
     SampleGenerator sg = SampleGenerator.create(threadIndex, gFrameIndex + 1 * 13);
+    SampleGenerator sgFixed = SampleGenerator.create(threadIndex, 0);
+
     Reservoir r = emptyReservoir();
 
     // Prepare shading data from vBuffer
@@ -61,12 +68,14 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         float3 posWOrigin = sd.computeNewRayOrigin();
         BlockerSearchOutputs bso;
             
-#if _TARGET_PDF == 1 || _HAS_REUSING
-        // Compute average blocker depth
-        float3 L = normalize(gPCSS.gLightPos - posWOrigin);
+#if _NEED_BLOCKER_SEARCH 
+        print(111);
+        // Compute average blocker depth (~0.5ms)
+        float3 L = normalize(gLightParams.lightPos - posWOrigin);
         float NdotL = dot(sd.N, L);
-        gPCSS.blockerSearch(bso, NdotL, sd.posW, sampleNext2D(sg) - 0.5f); // translated poisson
-        // gPCSS.blockerSearch(bso, NdotL, sd.posW, randomRotation(sampleNext1D(sg) * M_2PI)); // rotated poisson
+        float bias = max(2.0f * _DEPTH_BIAS * (1.0 - NdotL), _DEPTH_BIAS);
+        blockerSearch(bso, bias, sd.posW, sampleNext2D(sgFixed) - 0.5f, gLinearSampler, gShadowMap, gLightParams); // translated poisson
+        // blockerSearch(bso, NdotL, sd.posW, randomRotation(sampleNext1D(sg) * M_2PI), gLinearSampler, gShadowMap, gLightParams); // rotated poisson
 
         r.projCoords = bso.projCoords;
         r.shadingPosLightView = bso.shadingPosLightView;
@@ -92,9 +101,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 float visibility = 1.0f;
 
 // _TARGET_PDF == 0 -> unshadowed 
-#if _TARGET_PDF == 1 // New PCSS
-                visibility = bso.shadingPosLightView.w ? gPCSS.shadowMapPCSSModified(lightSample.posW, bso) : 1.0f;
-                visibility = max(_MIN_VISIBILITY, visibility);
+#if _TARGET_PDF == 1 && _SHADOW_TYPE == 1 // New PCSS
+                visibility = bso.shadingPosLightView.w ? shadowMapNewPCSS(lightSample.posW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
 #elif _TARGET_PDF == 2 // Shadow Ray
                 RayDesc ray;
                 ray.Origin = posWOrigin;
@@ -122,8 +130,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         // r = areaLightReservoir;
 
-        // Visibility reuse only need for when reusing enabled and unshadowed target pdf 
-#if _HAS_REUSING && _TARGET_PDF == 0
+// Visibility reuse only need for when reusing enabled and target pdf is unshadowed
+#if _NEED_VISIBILITY_REUSE
         if (isValidReservoir(r))
         {
             uint lightIndex = getReservoirLightIndex(r);
@@ -134,7 +142,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
             // Trace shadow ray or New PCSS for selected light sample
             float visibility = 1.0f;
-#if _SHADING_MODE == 0
+#if _SHADOW_TYPE == 0
             RayDesc ray;
             ray.Origin = posWOrigin;
             ray.Direction = toLight / distance;
@@ -142,8 +150,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             ray.TMax = distance - 0.001f;
 
             visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
-#elif _SHADING_MODE == 1
-            visibility = bso.shadingPosLightView.w ? gPCSS.shadowMapPCSSModified(samplePos, bso) : 1.0f;
+#elif _SHADOW_TYPE == 1
+            visibility = bso.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
 #endif
             if (!visibility)
             {

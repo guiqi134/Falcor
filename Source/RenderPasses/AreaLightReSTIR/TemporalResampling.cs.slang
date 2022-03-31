@@ -23,10 +23,15 @@ cbuffer CB
     uint gOutputBufferIndex;
     ResamplingRuntimeParameters gParams;
     ShadingDataLoader gShadingDataLoader;
-    PCSS gPCSS;
+    LightParams gLightParams;
+
+    SamplerComparisonState gSamplerCmp;
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
 }
 
 RWStructuredBuffer<Reservoir> gReservoirs; // current + previous
+Texture2D<float4> gShadowMap;
 
 static struct Data
 {
@@ -34,7 +39,7 @@ static struct Data
 } gData;
 
 // Thresholds to reject neighbor reservoirs with substantially different geometry/material
-static const int maxHistoryLength = 5; // 1 is ok 
+static const int maxHistoryLength = 20; 
 static const float positionThreshold = 0.1f;
 static const float normalThreshold = 0.65f;
 
@@ -67,10 +72,13 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             selectedLightPrevID = getReservoirLightIndex(curSample);
         }
 
+        // Always combine curSample to state if curSample is a vaild reservoir
         Reservoir state = emptyReservoir();
-        combineReservoirs(state, curSample, 0.5f, curSample.targetPdf); // p: 0.5 < 1, always combine
+        combineReservoirs(state, curSample, 0.5f, curSample.targetPdf); 
         state.projCoords = curSample.projCoords;
         state.shadingPosLightView = curSample.shadingPosLightView;
+
+        print(curSample.lightData);
 
         // Calculate previous frame pixel position using motion vector 
         float2 motion = gShadingDataLoader.motionVector[threadIndex];
@@ -80,7 +88,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         ShadingData neighborSd; // load from previous vBuffer
         bool foundNeighbor = false;
-        const float radius = 4;
+        const float radius = 0;
         
         // Continue to find reprojecting position using uniform random disk
         // The iteration tries to find a neighbor with similar geometry info
@@ -126,6 +134,11 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         // Calculate current target pdf using previous sample position
         Reservoir prevSample = loadReservoir(gParams, gReservoirs, prevPos, gHistoryBufferIndex);
+
+        // Check current and previous shadow map depth difference
+        print(curSample.posW);
+        print(prevSample.posW);
+
         if (foundNeighbor)
         {
             prevSample.M = min(prevSample.M, historyLimit);
@@ -145,10 +158,9 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 targetPdfCurrent = luminance(Le * gData.standardMaterial.eval(sd, dir));
 
                 float visibility = 1.0f;
-#if _TARGET_PDF == 1
+#if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
                 BlockerSearchOutputs bso = { state.projCoords, state.shadingPosLightView };
-                visibility = state.shadingPosLightView.w ? gPCSS.shadowMapPCSSModified(samplePos, bso) : 1.0f;
-                visibility = max(_MIN_VISIBILITY, visibility);
+                visibility = state.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
 #elif _TARGET_PDF == 2
                 RayDesc ray;
                 ray.Origin = posWOrigin;
@@ -168,12 +180,16 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 selectedLightPrevID = int(originalPrevLightID);
             }
         }
+
         
         // Debias part 
-        // if (false)
+        //if (false)
         if (isValidReservoir(state))
         {
+            float p_y = state.targetPdf;
+            float p_sum = state.targetPdf * curSample.M;
             uint count = curSample.M;
+
             uint lightIndex = selectedLightPrevID;
             float3 samplePos = state.posW;
             float3 neighborPosW = neighborSd.computeNewRayOrigin();
@@ -186,7 +202,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
             // Visibility test: trace shadow ray / shadow map
             float targetPdfNeighbor = 0.0f;
-#if _SHADING_MODE == 0
+#if _SHADOW_TYPE == 0
             RayDesc ray;
             ray.Origin = neighborPosW;
             ray.Direction = toLight / distance;
@@ -197,32 +213,34 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             {
                 targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir));
             }
-#elif _SHADING_MODE == 1
+#elif _SHADOW_TYPE == 1
             BlockerSearchOutputs bso = { prevSample.projCoords, prevSample.shadingPosLightView };
-            float visibility = prevSample.shadingPosLightView.w ? 
-                gPCSS.shadowMapPCSSModified(samplePos, bso) : 1.0f;
+            float visibility = prevSample.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
             print("visibility = ", visibility);
-            // visibility = max(_MIN_VISIBILITY, visibility);
-            targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir)) *visibility;
+            targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir) * visibility);
 #endif
-            print("targetPdfNeighbor = ", targetPdfNeighbor);
-            print("state.weightSum = ", state.weightSum);
             if (targetPdfNeighbor > 0.0f)
             {
                 count += prevSample.M;
             }
-            finalizeResampling(state, 1.0, count);
-            print("prevSample.M = ", prevSample.M);
-            print(count);
+
+            print(selectedPreviousSample);
+            print(p_y);
+            print(targetPdfNeighbor);
+            p_y = selectedPreviousSample ? targetPdfNeighbor : p_y; // seems no need (targetPdfNeighbor = p_y)
+            p_sum += targetPdfNeighbor * prevSample.M;
+
+            print(p_y / p_sum);
+            print(1.f / count);
+
+            finalizeResampling(state, p_y, p_sum);
+            //finalizeResampling(state, 1.0, count);
         }
         else
         {
             finalizeResampling(state, 1.0, state.M);
         }
         temporalResult = state;
-
-        print("temporalResult.W = ", temporalResult.weightSum);
-        print("temporalResult.M = ", temporalResult.M);
     }
 
     storeReservoir(gParams, temporalResult, gReservoirs, threadIndex, gOutputBufferIndex);

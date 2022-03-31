@@ -66,7 +66,6 @@ private:
     PixelDebug::SharedPtr mpPixelDebug;
     SampleGenerator::SharedPtr mpSampleGenerator;
     Scene::SharedPtr mpScene;
-    Profiler::SharedPtr mpProfiler;
 
     // Resources
     Texture::SharedPtr mpRowSum;
