@@ -169,10 +169,11 @@ bool combineReservoirs(
     const Reservoir newReservoir,
     float random,
     float targetPdf,
-    float misWeight = 1.f)
+    float misWeight = 1.f,
+    bool useMISWeights = false)
 {
     // What's the current weight (times any prior-step RIS normalization factor), here r.weightSum = r.W
-    float risWeight = targetPdf * newReservoir.weightSum * newReservoir.M * misWeight;
+    float risWeight = targetPdf * newReservoir.weightSum * (useMISWeights ? 1.f : newReservoir.M) * misWeight;
 
     // Our *effective* candidate pool is the sum of our candidates plus those of our neighbors
     reservoir.M += newReservoir.M;

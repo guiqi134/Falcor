@@ -24,6 +24,7 @@ cbuffer CB
     ResamplingRuntimeParameters gParams;
     ShadingDataLoader gShadingDataLoader;
     LightParams gLightParams;
+    bool gUsePairwiseMIS;
 
     SamplerComparisonState gSamplerCmp;
     SamplerState gLinearSampler;
@@ -42,6 +43,35 @@ static struct Data
 static const int maxHistoryLength = 20; 
 static const float positionThreshold = 0.1f;
 static const float normalThreshold = 0.65f;
+
+float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLightView, ShadingData sd, inout uint lightIndex)
+{
+    lightIndex = getReservoirLightIndex(sample);
+    float3 samplePos = sample.posW;
+    float3 posWOrigin = sd.computeNewRayOrigin();
+
+    float3 toLight = samplePos - posWOrigin;
+    float distSqr = max(FLT_MIN, dot(toLight, toLight));
+    float distance = sqrt(distSqr);
+    float3 dir = toLight / distance;
+    float3 Le = gScene.getLight(lightIndex).intensity;
+
+    float visibility;
+#if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
+    BlockerSearchOutputs bso = { projCoords, shadingPosLightView };
+    visibility = shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
+#elif _TARGET_PDF == 2
+    RayDesc ray;
+    ray.Origin = posWOrigin;
+    ray.Direction = toLight / distance;
+    ray.TMin = 0.001f;
+    ray.TMax = distance - 0.001f;
+
+    visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
+#endif
+
+    return Le * gData.standardMaterial.eval(sd, dir) * visibility;
+}
 
 [numthreads(16, 16, 1)]
 void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID)
@@ -74,7 +104,10 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         // Always combine curSample to state if curSample is a vaild reservoir
         Reservoir state = emptyReservoir();
-        combineReservoirs(state, curSample, 0.5f, curSample.targetPdf); 
+
+        if (!gUsePairwiseMIS)
+            combineReservoirs(state, curSample, 0.5f, curSample.targetPdf);
+
         state.projCoords = curSample.projCoords;
         state.shadingPosLightView = curSample.shadingPosLightView;
 
@@ -139,41 +172,35 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         print(curSample.posW);
         print(prevSample.posW);
 
+        float centerMISWeight = 1.f;
+
         if (foundNeighbor)
         {
+            float neighborMISWeight = 1.f;
+
             prevSample.M = min(prevSample.M, historyLimit);
             uint originalPrevLightID = getReservoirLightIndex(prevSample);
             float targetPdfCurrent = 0.0f;
-            if (isValidReservoir(prevSample))
+
+            if (gUsePairwiseMIS)
             {
-                uint lightIndex = originalPrevLightID;
-                float3 samplePos = prevSample.posW;
-
-                float3 toLight = samplePos - posWOrigin; // unnormalized
-                float distSqr = max(FLT_MIN, dot(toLight, toLight));
-                float distance = sqrt(distSqr);
-                float3 dir = toLight / distance;
-                float3 Le = gScene.getLight(lightIndex).intensity;
-
-                targetPdfCurrent = luminance(Le * gData.standardMaterial.eval(sd, dir));
-
-                float visibility = 1.0f;
-#if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
-                BlockerSearchOutputs bso = { state.projCoords, state.shadingPosLightView };
-                visibility = state.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
-#elif _TARGET_PDF == 2
-                RayDesc ray;
-                ray.Origin = posWOrigin;
-                ray.Direction = toLight / distance;
-                ray.TMin = 0.001f;
-                ray.TMax = distance - 0.001f;
-
-                visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
-#endif
-                targetPdfCurrent *= visibility;
+                uint dummy = -1;
+                float pHat_centerSampleAtNeighbor = luminance(computeTargetPdf(curSample, prevSample.projCoords, prevSample.shadingPosLightView, neighborSd, dummy));
+                float pHat_centerSampleAtCenter = curSample.targetPdf;
+                centerMISWeight = pHat_centerSampleAtCenter == 0.f ? 0.f : float(pHat_centerSampleAtCenter) / (pHat_centerSampleAtCenter + pHat_centerSampleAtNeighbor * prevSample.M);
             }
 
-            bool sampleSelected = combineReservoirs(state, prevSample, sampleNext1D(sg), targetPdfCurrent);
+            if (isValidReservoir(prevSample))
+            {
+                // compute target pdf
+                targetPdfCurrent = luminance(computeTargetPdf(prevSample, curSample.projCoords, curSample.shadingPosLightView, sd, originalPrevLightID));
+                if (gUsePairwiseMIS)
+                {
+                    neighborMISWeight = prevSample.targetPdf * prevSample.M / (targetPdfCurrent + prevSample.targetPdf * prevSample.M);
+                }
+            }
+
+            bool sampleSelected = combineReservoirs(state, prevSample, sampleNext1D(sg), targetPdfCurrent, neighborMISWeight, gUsePairwiseMIS);
             if (sampleSelected)
             {
                 selectedPreviousSample = true;
@@ -181,10 +208,13 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             }
         }
 
-        
+        if (gUsePairwiseMIS)
+        {
+            combineReservoirs(state, curSample, sampleNext1D(sg), curSample.targetPdf, centerMISWeight, gUsePairwiseMIS);
+        }
+
         // Debias part 
-        //if (false)
-        if (isValidReservoir(state))
+        if (!gUsePairwiseMIS && isValidReservoir(state))
         {
             float p_y = state.targetPdf;
             float p_sum = state.targetPdf * curSample.M;
@@ -234,11 +264,10 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             print(1.f / count);
 
             finalizeResampling(state, p_y, p_sum);
-            //finalizeResampling(state, 1.0, count);
         }
         else
         {
-            finalizeResampling(state, 1.0, state.M);
+            finalizeResampling(state, 1.0, gUsePairwiseMIS ? 1.f : state.M);
         }
         temporalResult = state;
     }

@@ -254,7 +254,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             PROFILE("Initial Sampling");
             auto cb = mpInitialSamplingPass["CB"]; // it is a ParameterBlockSharedPtr, we can use [] to get shader var
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
-            cb["gFrameIndex"] = (uint)gpFramework->getGlobalClock().getFrame();
+            cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
             cb["gParams"]["reservoirBlockRowPitch"] = reservoirBlockRowPitch;
             cb["gParams"]["reservoirArrayPitch"] = reservoirArrayPitch;
             cb["gOutputBufferIndex"] = initialOutputBufferIndex;
@@ -275,7 +275,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             PROFILE("Temporal Resampling");
             auto cb = mpTemporalResamplingPass["CB"];
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
-            cb["gFrameIndex"] = (uint)gpFramework->getGlobalClock().getFrame();
+            cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
             cb["gParams"]["reservoirBlockRowPitch"] = reservoirBlockRowPitch;
             cb["gParams"]["reservoirArrayPitch"] = reservoirArrayPitch;
             cb["gInputBufferIndex"] = initialOutputBufferIndex; // 1
@@ -284,6 +284,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             cb["gSamplerCmp"] = mpSamplerCmp;
             cb["gLinearSampler"] = mpTrilinearSampler;
             cb["gPointSampler"] = mpPointSampler;
+            cb["gUsePairwiseMIS"] = mUsePairwiseMIS;
             mpTemporalResamplingPass["gReservoirs"] = mpReservoirBuffer;
             mpTemporalResamplingPass["gShadowMap"] = shadowMapTex;
             ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
@@ -298,7 +299,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             PROFILE("Spatial Resampling");
             auto cb = mpSpatialResamplingPass["CB"];
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
-            cb["gFrameIndex"] = (uint)gpFramework->getGlobalClock().getFrame();
+            cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
             cb["gParams"]["reservoirBlockRowPitch"] = reservoirBlockRowPitch;
             cb["gParams"]["reservoirArrayPitch"] = reservoirArrayPitch;
             cb["gInputBufferIndex"] = spatialInputBufferIndex;
@@ -306,6 +307,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             cb["gSamplerCmp"] = mpSamplerCmp;
             cb["gLinearSampler"] = mpTrilinearSampler;
             cb["gPointSampler"] = mpPointSampler;
+            cb["gUsePairwiseMIS"] = mUsePairwiseMIS;
             mpSpatialResamplingPass["gReservoirs"] = mpReservoirBuffer;
             mpSpatialResamplingPass["gNeighborOffsetBuffer"] = mpNeighborOffsetBuffer;
             mpSpatialResamplingPass["gShadowMap"] = shadowMapTex;
@@ -322,7 +324,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         PROFILE("Shading");
         auto cb = mpShadingPass["CB"];
         cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
-        cb["gFrameIndex"] = (uint)gpFramework->getGlobalClock().getFrame();
+        cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
         cb["gParams"]["reservoirBlockRowPitch"] = reservoirBlockRowPitch;
         cb["gParams"]["reservoirArrayPitch"] = reservoirArrayPitch;
         cb["gInputBufferIndex"] = shadeInputBufferIndex;
@@ -402,6 +404,10 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
         {
             dirty |= group.checkbox("Enable Spatial Resampling", mEnableSpatialResampling);
         }
+
+        dirty |= widget.checkbox("Use Pairwise MIS", mUsePairwiseMIS);
+
+        dirty |= widget.checkbox("Fix frame", mFixFrame);
     }
     else
     {
@@ -430,11 +436,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     mInitialCameraPos = mpScene->getCamera()->getPosition();
     mInitialCameraTarget = mpScene->getCamera()->getTarget();
 
-    std::vector<uint8_t> offsets;
-    offsets.resize(8192 * 2); // Q: what is this magic number?
-    FillNeighborOffsetBuffer(offsets.data());
-    mpNeighborOffsetBuffer = Buffer::createTyped(ResourceFormat::RG8Snorm, 8192, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, offsets.data());
-    mpNeighborOffsetBuffer->setName("ReSTIR: Neighbor Offset Buffer");
+    mpNeighborOffsetBuffer = createNeighborOffsetTexture(8192);
 
     CreatePasses();
     calcLightSpaceMatrix();
