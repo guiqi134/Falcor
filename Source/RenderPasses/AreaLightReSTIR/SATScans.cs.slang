@@ -42,14 +42,6 @@ void naiveScan(uint2 threadIdx)
     gOutput[threadIdx] = partialSums[pOut * kBlockSize + threadIdx1D];
 }
 
-// Reference: https://github.com/walbourn/directx-sdk-samples/blob/main/AdaptiveTessellationCS40/ScanCS.hlsl
-groupshared float4 bucket[kBlockSize];
-
-void balancedTreeScan()
-{
-
-}
-
 #ifdef _ROW_SCAN
 [numthreads(kBlockSize, 1, 1)]
 #else
@@ -62,4 +54,5 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex) // GI: thre
 
     naiveScan(threadIdx);
 }
+
 

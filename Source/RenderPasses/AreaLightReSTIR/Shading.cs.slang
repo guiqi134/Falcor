@@ -182,6 +182,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
                     float2 shadowMapSize;
                     gSAT.GetDimensions(shadowMapSize.x, shadowMapSize.y);
+                    print(shadowMapSize);
                     float2 texelSize = 1 / shadowMapSize;
                     filterSize = clamp(filterSize, kMinFilterWidth, kMaxFilterWidth);
 
@@ -189,6 +190,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     float2 coordsUL = projCoords.xy - 0.5f * filterSize;
                     float4 filterBound = coordsUL.xyxy + float4(0.0f, 0.0f, filterSize.xy);
                     float4 moments = sampleSAT(filterBound, shadowMapSize, depthNoBias, gSAT, gLinearSampler);
+                    print(moments);
 
                     if (gShadowType == (uint)ShadowType::VSM)
                         visibility = vsmShadowContribSAT(moments, depthNoBias);

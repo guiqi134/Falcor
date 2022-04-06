@@ -89,6 +89,16 @@ private:
         ComputePass::SharedPtr mpSATScan2;
     } mSATScanPasses;
 
+    struct
+    {
+        ComputePass::SharedPtr mpRowScan1;
+        ComputePass::SharedPtr mpRowScan2;
+        ComputePass::SharedPtr mpRowScan3;
+        ComputePass::SharedPtr mpColScan1;
+        ComputePass::SharedPtr mpColScan2;
+        ComputePass::SharedPtr mpColScan3;
+    } mSATScanPasses1;
+
     ComputePass::SharedPtr              mpInitialSamplingPass;
     ComputePass::SharedPtr              mpTemporalResamplingPass;
     ComputePass::SharedPtr              mpSpatialResamplingPass;
@@ -97,6 +107,7 @@ private:
 
     // Resources
     Texture::SharedPtr mpVBufferPrev;
+    Texture::SharedPtr mpDepthMap;
     Texture::SharedPtr mpRowSum;
     Texture::SharedPtr mpSAT;
     Buffer::SharedPtr  mpReservoirBuffer; // contain both current & previous reservoirs?
@@ -115,6 +126,7 @@ private:
     bool                                mStoreFinalVisibility = false; // Cause bugs in temporal reuse 
     bool                                mNeedUpdate = false;
     bool mAnimateCamera = false;
+    bool mNaiveSATScan = false;
 
     uint mInitialAreaLightSamples = 4u; // M candiates 
     uint mBlockerSearchSamples = 8u;
@@ -124,13 +136,13 @@ private:
     bool mUsePairwiseMIS = false;
     bool mFixFrame = false;
 
-    ShadowType mShadowType = ShadowType::NewPCSSReSTIR; // Control different shadow methods
+    ShadowType mShadowType = ShadowType::VSM; // Control different shadow methods
 
     // VSM, EVSM, MSM params
     float mLBRThreshold = 0.0f;
 
     // Area light parameters
-    AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
+    AreaLightParams mLightParams = AreaLightParams(SceneName::PlaneScene);
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;

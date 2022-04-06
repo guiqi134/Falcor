@@ -41,7 +41,6 @@ namespace
     };
 
     const char kDepthName[] = "depth"; // For depth debug
-    //const char kLinearDepthName[] = "linearDepth";
     const ChannelList kOutputChannels =
     {
         { "color",      "",     "Output color", false, ResourceFormat::RGBA16Float},
@@ -51,7 +50,7 @@ namespace
     const char kEnableSpatialResampling[] = "enableSpatialResampling";
     const char kStoreFinalVisibility[] = "storeFinalVisibility";
 
-    const uint32_t kShadowMapSize = 1 << 10; // 1K
+    const uint kSATBlockSize = 512u;
 }
 
 // Don't remove this. it's required for hot-reload to function properly
@@ -95,9 +94,8 @@ RenderPassReflection AreaLightReSTIR::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
     addRenderPassInputs(reflector, kInputChannels);
     addRenderPassOutputs(reflector, kOutputChannels);
-    reflector.addOutput(kDepthName, "Depth value").format(ResourceFormat::D32Float).bindFlags(Resource::BindFlags::DepthStencil | Resource::BindFlags::ShaderResource)
-        .texture2D(kShadowMapSize, kShadowMapSize, 0);
-    //reflector.addOutput(kLinearDepthName, "Linear depth value");
+    reflector.addOutput(kDepthName, "Depth value");
+    reflector.addOutput("SAT", "SAT scans output");
     return reflector;
 }
 
@@ -181,15 +179,20 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
 
     mCurrentFrameOutputReservoir = shadeInputBufferIndex;
 
+    if (mpDepthMap == nullptr || mNeedUpdate)
+    {
+        mpDepthMap = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 1, 1, nullptr,
+            Resource::BindFlags::ShaderResource | Resource::BindFlags::DepthStencil);
+    }
+
     // Shadow pass
     if (mShadowType != ShadowType::ShadowRay)
     {
         PROFILE("Shadow Map");
         const auto& pDepthTex = renderData[kDepthName]->asTexture();
-        //const auto& pLinearDepthTex = renderData[kLinearDepthName]->asTexture();
 
         auto& pFbo = mShadowMapPass.pFbo;
-        pFbo->attachDepthStencilTarget(pDepthTex);
+        pFbo->attachDepthStencilTarget(mpDepthMap);
         pRenderContext->clearFbo(pFbo.get(), float4(0.0f), 1.0f, 0); // clear all components (RTV, DSV)
         mShadowMapPass.pState->setFbo(pFbo);
 
@@ -200,10 +203,12 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
 
         mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, mShadowMapPass.pVars->getRootVar());
         mpScene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::None);
+
+        pRenderContext->blit(mpDepthMap->getSRV(), pDepthTex->getRTV());
     }
 
     // Get shadow map texture and (generate mipmaps)
-    auto shadowMapTex = mShadowMapPass.pFbo->getDepthStencilTexture();
+    auto shadowMapTex = mpDepthMap;
     auto colorTex = mShadowMapPass.pFbo->getColorTexture(0); 
     if (colorTex != nullptr)
     {
@@ -232,17 +237,77 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     {
         PROFILE("SAT Generation");
 
-        auto vars = mSATScanPasses.mpSATScan1->getRootVar();
-        vars["gInput"] = colorTex;
-        vars["gOutput"] = mpRowSum;
-        mpPixelDebug->prepareProgram(mSATScanPasses.mpSATScan1->getProgram(), mSATScanPasses.mpSATScan1->getRootVar());
-        mSATScanPasses.mpSATScan1->execute(pRenderContext, kShadowMapSize, kShadowMapSize);
+        const auto& pSAT = renderData["SAT"]->asTexture();
 
-        vars = mSATScanPasses.mpSATScan2->getRootVar();
-        vars["gInput"] = mpRowSum;
-        vars["gOutput"] = mpSAT;
-        //mpPixelDebug->prepareProgram(mSATScanPasses.mpSATScan2->getProgram(), mSATScanPasses.mpSATScan2->getRootVar());
-        mSATScanPasses.mpSATScan2->execute(pRenderContext, kShadowMapSize, kShadowMapSize);
+        // Naive Scan
+        if (mNaiveSATScan)
+        {
+            auto vars = mSATScanPasses.mpSATScan1->getRootVar();
+            vars["gInput"] = colorTex;
+            vars["gOutput"] = mpRowSum;
+            mpPixelDebug->prepareProgram(mSATScanPasses.mpSATScan1->getProgram(), mSATScanPasses.mpSATScan1->getRootVar());
+            mSATScanPasses.mpSATScan1->execute(pRenderContext, mShadowMapSize, mShadowMapSize);
+
+            vars = mSATScanPasses.mpSATScan2->getRootVar();
+            vars["gInput"] = mpRowSum;
+            vars["gOutput"] = mpSAT;
+            //mpPixelDebug->prepareProgram(mSATScanPasses.mpSATScan2->getProgram(), mSATScanPasses.mpSATScan2->getRootVar());
+            mSATScanPasses.mpSATScan2->execute(pRenderContext, mShadowMapSize, mShadowMapSize);
+        }
+        // Binary Tree Scan
+        else
+        {
+            uint sectionSize = mShadowMapSize / (kSATBlockSize * 2); // we compute two results in one thread
+
+            // First perfom row scans
+            auto pTexBlockSums1 = Texture::create2D(sectionSize, colorTex->getHeight(), colorTex->getFormat(),
+                colorTex->getArraySize(), 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+            auto pTexBlockSums2 = Texture::create2D(sectionSize, colorTex->getHeight(), colorTex->getFormat(),
+                colorTex->getArraySize(), 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+
+            auto vars = mSATScanPasses1.mpRowScan1->getRootVar();
+            vars["Input"] = colorTex;
+            vars["gTemp"] = pTexBlockSums1;
+            vars["Result"] = mpRowSum;
+            mpPixelDebug->prepareProgram(mSATScanPasses1.mpRowScan1->getProgram(), vars);
+            mSATScanPasses1.mpRowScan1->execute(pRenderContext, mShadowMapSize / 2, mShadowMapSize);
+
+            vars = mSATScanPasses1.mpRowScan2->getRootVar();
+            vars["Input"] = pTexBlockSums1;
+            vars["Result"] = pTexBlockSums2;
+            mpPixelDebug->prepareProgram(mSATScanPasses1.mpRowScan2->getProgram(), vars);
+            mSATScanPasses1.mpRowScan2->execute(pRenderContext, (sectionSize + 1) / 2, mShadowMapSize);
+
+            vars = mSATScanPasses1.mpRowScan3->getRootVar();
+            vars["Input"] = pTexBlockSums2;
+            vars["Result"] = mpRowSum;
+            mpPixelDebug->prepareProgram(mSATScanPasses1.mpRowScan3->getProgram(), vars);
+            mSATScanPasses1.mpRowScan3->execute(pRenderContext, mShadowMapSize, mShadowMapSize);
+
+            // Then perform column scans
+            pTexBlockSums1 = Texture::create2D(colorTex->getWidth(), sectionSize, colorTex->getFormat(),
+                colorTex->getArraySize(), 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+            pTexBlockSums2 = Texture::create2D(colorTex->getWidth(), sectionSize, colorTex->getFormat(),
+                colorTex->getArraySize(), 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+
+            vars = mSATScanPasses1.mpColScan1->getRootVar();
+            vars["Input"] = mpRowSum;
+            vars["gTemp"] = pTexBlockSums1;
+            vars["Result"] = mpSAT;
+            mSATScanPasses1.mpColScan1->execute(pRenderContext, mShadowMapSize, mShadowMapSize / 2);
+
+            vars = mSATScanPasses1.mpColScan2->getRootVar();
+            vars["Input"] = pTexBlockSums1;
+            vars["Result"] = pTexBlockSums2;
+            mSATScanPasses1.mpColScan2->execute(pRenderContext, mShadowMapSize, (sectionSize + 1) / 2);
+
+            vars = mSATScanPasses1.mpColScan3->getRootVar();
+            vars["Input"] = pTexBlockSums2;
+            vars["Result"] = mpSAT;
+            mSATScanPasses1.mpColScan3->execute(pRenderContext, mShadowMapSize, mShadowMapSize);
+        }
+
+        pRenderContext->blit(mpSAT->getSRV(), pSAT->getRTV());
     }
 
     LightParams lightParams = { mLightSpaceMat, mLightView, mLightProj, mLightParams.mLightPos };
@@ -375,9 +440,14 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
         {64, "64"}, {128, "128"}, {256, "256"}, {512, "512"},
         {1024, "1024"}
     };
+    Gui::DropdownList shadowMapSizes = {
+        {1024, "1024"}, {2048, "2048"}, {4096, "4096"}, {8192, "8192"}, {16384, "16384"}
+    };
     dirty |= widget.dropdown("Blocker search samples", samplesOption, mBlockerSearchSamples);
     dirty |= widget.dropdown("PCF samples", samplesOption, mPCFSamples);
-    //dirty |= widget.var("Depth Bias", mDepthBias);
+    dirty |= widget.dropdown("Shaodw Map Size", shadowMapSizes, mShadowMapSize);
+    dirty |= widget.var("Depth Bias", mLightParams.mDepthBias);
+
     
     if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewPCSSReSTIR)
     {
@@ -411,6 +481,7 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     }
     else
     {
+        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
         dirty |= widget.var("Shading Light Samples", mShadingLightSamples);
         dirty |= widget.var("Light Bleeding Reduction", mLBRThreshold, 0.0f, 1.0f);
     }
@@ -564,10 +635,27 @@ void AreaLightReSTIR::CreatePasses()
     {
         Program::Desc desc;
         Shader::DefineList defines;
-        desc.addShaderLibrary("RenderPasses/ShadowMap/SATScans.cs.slang").csEntry("main").setShaderModel("6_5");
+        desc.addShaderLibrary("RenderPasses/AreaLightReSTIR/SATScans.cs.slang").csEntry("main").setShaderModel("6_5");
         defines.add("_ROW_SCAN");
         mSATScanPasses.mpSATScan1 = ComputePass::create(desc, defines);
         mSATScanPasses.mpSATScan2 = ComputePass::create(desc);
+    }
+
+    {
+        std::vector<Program::Desc> descs(3);
+        Shader::DefineList defines;
+        descs[0].addShaderLibrary("RenderPasses/AreaLightReSTIR/ScanCS.cs.slang").csEntry("CSScanInBucket").setShaderModel("6_5");
+        descs[1].addShaderLibrary("RenderPasses/AreaLightReSTIR/ScanCS.cs.slang").csEntry("CSScanBucketResult").setShaderModel("6_5");
+        descs[2].addShaderLibrary("RenderPasses/AreaLightReSTIR/ScanCS.cs.slang").csEntry("CSScanAddBucketResult").setShaderModel("6_5");
+        defines.add("_ROW_SCAN");
+        defines.add("groupthreads", std::to_string(kSATBlockSize));
+        mSATScanPasses1.mpRowScan1 = ComputePass::create(descs[0], defines);
+        mSATScanPasses1.mpRowScan2 = ComputePass::create(descs[1], defines);
+        mSATScanPasses1.mpRowScan3 = ComputePass::create(descs[2], defines);
+        defines.remove("_ROW_SCAN");
+        mSATScanPasses1.mpColScan1 = ComputePass::create(descs[0], defines);
+        mSATScanPasses1.mpColScan2 = ComputePass::create(descs[1], defines);
+        mSATScanPasses1.mpColScan3 = ComputePass::create(descs[2], defines);
     }
 
     // Create ReSTIR passes 
@@ -768,5 +856,5 @@ void AreaLightReSTIR::setShadowMapPassFbo()
 
     uint mipLevel = colorFormat == ResourceFormat::Unknown ? 1 : Texture::kMaxPossible; // Texture::kMaxPossible
 
-    mShadowMapPass.pFbo = Fbo::create2D(kShadowMapSize, kShadowMapSize, fboDesc, 1, mipLevel);
+    mShadowMapPass.pFbo = Fbo::create2D(mShadowMapSize, mShadowMapSize, fboDesc, 1, mipLevel);
 }

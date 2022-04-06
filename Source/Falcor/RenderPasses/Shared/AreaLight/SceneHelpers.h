@@ -7,7 +7,7 @@ namespace Falcor
     enum class SceneName
     {
         SimpleScene, SanMiguel, BistroExterior, BistroInterior,
-        PlaneScene, Bicycle
+        PlaneScene, Bicycle, 
     };
 
     struct AreaLightParams

@@ -54,6 +54,9 @@
     <ShaderSource Include="MSM.slang">
       <Filter>shaders</Filter>
     </ShaderSource>
+    <ShaderSource Include="ScanCS.cs.slang">
+      <Filter>shaders</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="shaders">

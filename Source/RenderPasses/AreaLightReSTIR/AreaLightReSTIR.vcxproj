@@ -48,6 +48,7 @@
     <ShaderSource Include="PoissonDisk.slang" />
     <ShaderSource Include="ReSTIR.slang" />
     <ShaderSource Include="SATScans.cs.slang" />
+    <ShaderSource Include="ScanCS.cs.slang" />
     <ShaderSource Include="Shading.cs.slang" />
     <ShaderSource Include="ShadingDataLoader.slang" />
     <ShaderSource Include="ShadowMap.3d.slang" />
