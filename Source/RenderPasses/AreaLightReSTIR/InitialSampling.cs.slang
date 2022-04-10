@@ -73,7 +73,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         // Compute average blocker depth (~0.5ms)
         float3 L = normalize(gLightParams.lightPos - posWOrigin);
         float NdotL = dot(sd.N, L);
-        float bias = max(2.0f * _DEPTH_BIAS * (1.0 - NdotL), _DEPTH_BIAS);
+        float bias = _DEPTH_BIAS * saturate(1.0 - NdotL) + _DEPTH_BIAS;
         blockerSearch(bso, bias, sd.posW, sampleNext2D(sgFixed) - 0.5f, gLinearSampler, gShadowMap, gLightParams); // translated poisson
         // blockerSearch(bso, NdotL, sd.posW, randomRotation(sampleNext1D(sg) * M_2PI), gLinearSampler, gShadowMap, gLightParams); // rotated poisson
 

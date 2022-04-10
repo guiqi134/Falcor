@@ -41,10 +41,10 @@ static struct Data
     StandardMaterial standardMaterial;
 } gData;
 
-static const uint numSamples = 3; // number of spatial reuse samples
+static const uint numSamples = 1; // number of spatial reuse samples
 static const uint numDisocclusionBoostSamples = 4; // ???
 static const uint targetHistoryLength = 20;
-static const float samplingRadius = 30.0f;
+static const float samplingRadius = 20.0f;
 static const float positionThreshold = 1.0f;
 static const float normalThreshold = 0.5f;
 static const uint neighborOffsetMask = 8191;
@@ -61,7 +61,7 @@ float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLi
     float3 dir = toLight / distance;
     float3 Le = gScene.getLight(lightIndex).intensity;
 
-    float visibility;
+    float visibility = 1.0f;
 #if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
     BlockerSearchOutputs bso = { projCoords, shadingPosLightView };
     visibility = shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
@@ -287,6 +287,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             print(centerMISWeight / validNeighbors);
             print(1.f / state.M);
             print(state.weightSum / (gUsePairwiseMIS ? validNeighbors : state.M));
+
             finalizeResampling(state, 1.f, gUsePairwiseMIS ? validNeighbors : state.M);
         }
 

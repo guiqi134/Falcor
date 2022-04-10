@@ -73,6 +73,7 @@ private:
 
     Scene::SharedPtr                    mpScene;
     SampleGenerator::SharedPtr          mpSampleGenerator;
+    EmissiveLightSampler::SharedPtr mpEmissiveSampler;
 
     // Passes
     struct
@@ -129,17 +130,20 @@ private:
     bool mNaiveSATScan = false;
 
     uint mInitialAreaLightSamples = 4u; // M candiates 
-    uint mBlockerSearchSamples = 8u;
-    uint mPCFSamples = 256u;
+    uint mBlockerSearchSamples = 32u;
+    uint mPCFSamples = 512u;
     uint mShadingLightSamples = 4; // same as mInitialAreaLightSamples
     uint mActiveTargetPdf = 1;
+
     bool mUsePairwiseMIS = false;
     bool mFixFrame = false;
+    uint mShadowMapSize = 1 << 11; // 2048
 
-    ShadowType mShadowType = ShadowType::VSM; // Control different shadow methods
+    ShadowType mShadowType = ShadowType::NewPCSS; // Control different shadow methods
 
     // VSM, EVSM, MSM params
     float mLBRThreshold = 0.0f;
+    float mDepthDifference = 0.03f;
 
     // Area light parameters
     AreaLightParams mLightParams = AreaLightParams(SceneName::PlaneScene);

@@ -4,7 +4,7 @@
 
 import Utils.Debug.PixelDebug;
 import Utils.Sampling.SampleGenerator;
-import PoissonDisk;
+__exported import PoissonDisk;
 
 float LinearizeDepth(float depth)
 {
@@ -20,41 +20,46 @@ float2 rotatedPoisson(float2 poissonSample, float2 rotation)
     );
 }
 
-float shadowMapPCF(float3 projCoords, float2 filterRadiusUV, float2 poissonOffset, SamplerComparisonState samplerCmp,
+float shadowMapPCF(float3 projCoords, float2 filterSize, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler,
     Texture2D shadowMap, float2 rotation)
 {
     float sum = 0.0f;
-    // float2 t = frac(projCoords.xy * gShadowMapDim + 0.5f); // Interpolation percentage in x, y
-    //filterRadiusUV = min(filterRadiusUV, 0.03f);
+    //float2 t = frac(projCoords.xy * uint2(2048) + 0.5f); // Interpolation percentage in x, y
+    //filterSize = float2(0.03);
 
     for (int i = 0; i < _PCF_SAMPLES; i++)
     {
-        float2 selectedSample = POISSON_SAMPLES_256[i];
-        float2 offset = rotatedPoisson(selectedSample, rotation) * filterRadiusUV; // rotated poisson
-        offset = selectedSample * filterRadiusUV;
+        // Poisson Rectangle
+        float2 selectedSample = POISSON_RECT_SAMPLES_512[i] - 0.5f;
+        //float2 offset = clamp(rotatedPoisson(selectedSample, rotation), float2(-0.5f), float2(0.5f)) * filterSize;
+        float2 offset = selectedSample * filterSize;
 
-        //float2 offset = (POISSON_SAMPLES_256[i] * poissonOffset) * filterRadiusUV; // random translation poisson
+        // Poisson Disk
+        //float2 selectedSample = 0.5f * POISSON_SAMPLES_512[i];
+        //float2 offset = rotatedPoisson(selectedSample, rotation) * filterSize; // rotated poisson
+
+        //float2 offset = (0.5f * POISSON_SAMPLES_512[i] + poissonOffset) * filterRadiusUV; // random translation poisson
 
         // Use hardware PCF
         sum += shadowMap.SampleCmpLevelZero(samplerCmp, projCoords.xy + offset, projCoords.z); // projCoords.z <= sample value ? for all nearest texel
 
 
         // Gathers the four texels: (-,+),(+,+),(+,-),(-,-)
-        // float4 tmp = gShadowMap.Gather(gSampler, projCoords.xy + offset);
-        // tmp.x = tmp.x < projCoords.z ? 0.0f : 1.0f;
-        // tmp.y = tmp.y < projCoords.z ? 0.0f : 1.0f;
-        // tmp.z = tmp.z < projCoords.z ? 0.0f : 1.0f;
-        // tmp.w = tmp.w < projCoords.z ? 0.0f : 1.0f;
-        // sum += lerp(lerp(tmp.w, tmp.z, t.x), lerp(tmp.x, tmp.y, t.x), t.y); // bilinear filter comparison results
+        //float4 tmp = shadowMap.Gather(linearSampler, projCoords.xy + offset);
+        //tmp.x = tmp.x < projCoords.z ? 0.0f : 1.0f;
+        //tmp.y = tmp.y < projCoords.z ? 0.0f : 1.0f;
+        //tmp.z = tmp.z < projCoords.z ? 0.0f : 1.0f;
+        //tmp.w = tmp.w < projCoords.z ? 0.0f : 1.0f;
+        //sum += lerp(lerp(tmp.w, tmp.z, t.x), lerp(tmp.x, tmp.y, t.x), t.y); // bilinear filter comparison results
 
-        /*float shadowMapDepth = gShadowMap.SampleLevel(gSampler, projCoords.xy + offset, 0).r;
+        /*float shadowMapDepth = shadowMap.SampleLevel(linearSampler, projCoords.xy + offset, 0).r;
         sum += shadowMapDepth < projCoords.z ? 0.0f : 1.0f;*/
     }
 
     return saturate(sum / _PCF_SAMPLES);
 }
 
-void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoords, float zReceiver, float2 poissonOffset,
+void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoords, float zReceiver, float2 poissonOffset, 
     SamplerState sampler, Texture2D shadowMap)
 {
     // This uses similar triangles to compute what area of the shadow map we should search (in light view space)
@@ -70,7 +75,7 @@ void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoo
         // float2 offset = float2(poissonSample.x * poissonOffset.x - poissonSample.y * poissonOffset.y, 
         //     poissonSample.x * poissonOffset.y + poissonSample.y * poissonOffset.x)
         //     * searchSize;
-        float2 offset = (POISSON_SAMPLES_8[i] + poissonOffset) * searchSize; 
+        float2 offset = (POISSON_SAMPLES_32[i] + poissonOffset) * searchSize; 
         float shadowMapDepth = shadowMap.SampleLevel(sampler, projCoords.xy + offset, 0).r;
         if (shadowMapDepth < projCoords.z)
         {
@@ -85,7 +90,7 @@ void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoo
 
 // Reference: https://developer.download.nvidia.com/whitepapers/2008/PCSS_Integration.pdf
 // All calculation should be performed in light view space!
-float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerComparisonState samplerCmp, Texture2D shadowMap, float2 rotation)
+float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler, Texture2D shadowMap, float2 rotation)
 {
     // 1. get blocker search outputs
     float avgBlockerDepth = bso.projCoords.w;
@@ -107,7 +112,7 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
     //filterRadiusUV = float2(0.001f);
 
     // 3. PCF filtering
-    return shadowMapPCF(projCoords, filterRadiusUV, poissonOffset, samplerCmp, shadowMap, rotation);
+    return shadowMapPCF(projCoords, filterRadiusUV, poissonOffset, samplerCmp, linearSampler, shadowMap, rotation);
 }
 
 // New idea for PCSS: instead of using PCF, we just use the mapped light sample

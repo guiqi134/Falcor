@@ -3,7 +3,7 @@ import Utils.Debug.PixelDebug;
 
 // TODO: const should later change to defines and pass through CPU side
 static const float kMinVariance = 1e-4f;
-static const float2 kMinFilterWidth = 0.001f;
+static const float2 kMinFilterWidth = 0.00001f;
 static const float2 kMaxFilterWidth = 0.9f;
 static const float2 evsmExponents = float2(5.5f, 2.0f); // TODO: need to be tuned
 
@@ -92,11 +92,15 @@ float4 sampleSAT(float4 filterBound, float2 texSize, float depth, Texture2D texS
 
     // Work out normalized coordinates and area
     // We need shift current filter bound one texel to the upper-left, then we can get the right texture coordinate
-    float4 realCoords = filterBound - texelSize.xyxy;
+    //float4 realCoords = filterBound - texelSize.xyxy;
+    float4 realCoords = filterBound;
+    print(realCoords);
+    realCoords = saturate(realCoords);
+    //print(realCoords);
+    filterBound = saturate(filterBound);
     float2 dims = (filterBound.zw - filterBound.xy) * texSize; // screen space filter area
+    //print(dims.x * dims.y);
 
-    // Handle special case: when realCoords is partially outside the texture
-    if (realCoords.x < 0.0f || realCoords.y < 0.0f || realCoords.z > 1.0f || realCoords.w > 1.0f) return 1.0f;
 
     // Sample four SAT corners
     // filterBound.xy is upper left, filterBound.zw is lower right.
@@ -134,7 +138,6 @@ float evsmShadowContribSAT(float4 moments, float depth)
     float posV = ChebyshevUpperBound(moments.xy, expDepth.x);
     float negV = ChebyshevUpperBound(moments.zw, expDepth.y);
 
-    print(moments);
     print(expDepth);
     print(posV);
     print(negV);

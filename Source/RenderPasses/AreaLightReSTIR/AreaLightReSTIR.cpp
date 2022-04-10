@@ -110,6 +110,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
 
     auto pCamera = mpScene->getCamera();
 
+    if (mpEmissiveSampler == nullptr)
+    {
+        mpScene->getLightCollection(pRenderContext)->prepareSyncCPUData(pRenderContext);
+        mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+        mNeedUpdate = true;
+    }
+    mpEmissiveSampler->update(pRenderContext);
+
     // Update when parameters change
     if (mNeedUpdate)
     {
@@ -139,6 +147,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         );
         pCamera->updateFromAnimation(transform);
     }
+
 
     if (mpVBufferPrev == nullptr)
     {
@@ -190,6 +199,12 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     {
         PROFILE("Shadow Map");
         const auto& pDepthTex = renderData[kDepthName]->asTexture();
+
+        //RasterizerState::Desc rasterizeDesc;
+        //rasterDesc.setCullMode(RasterizerState::CullMode::None);
+        //rasterDesc.setDepthBias(2, mLightParams.mDepthBias);
+        //auto rasterizeState = RasterizeState::create(rasterizeDesc);
+        //mShadowMapPass.pState->setRasterizerState(rasterizeState);
 
         auto& pFbo = mShadowMapPass.pFbo;
         pFbo->attachDepthStencilTarget(mpDepthMap);
@@ -384,7 +399,6 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         }
     }
 
-    // Need create another shading pass for VSM?
     {
         PROFILE("Shading");
         auto cb = mpShadingPass["CB"];
@@ -402,6 +416,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpShadingPass["gShadowMap"] = shadowMapTex;
         mpShadingPass["gVSM"] = colorTex;
         mpShadingPass["gSAT"] = mpSAT;
+        mpEmissiveSampler->setShaderData(cb["gEmissiveLightSampler"]);
         ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
         lightParams.setShaderData(cb["gLightParams"]);
         mpScene->setRaytracingShaderData(pRenderContext, mpShadingPass->getRootVar());
@@ -438,7 +453,7 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     Gui::DropdownList samplesOption = {
         {4, "4"}, {8, "8"}, {16, "16"}, {32, "32"},
         {64, "64"}, {128, "128"}, {256, "256"}, {512, "512"},
-        {1024, "1024"}
+        {1024, "1024"}, {2048, "2048"}
     };
     Gui::DropdownList shadowMapSizes = {
         {1024, "1024"}, {2048, "2048"}, {4096, "4096"}, {8192, "8192"}, {16384, "16384"}
@@ -448,10 +463,10 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     dirty |= widget.dropdown("Shaodw Map Size", shadowMapSizes, mShadowMapSize);
     dirty |= widget.var("Depth Bias", mLightParams.mDepthBias);
 
+    dirty |= widget.checkbox("Brute Force", mBruteForce);
     
     if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewPCSSReSTIR)
     {
-        dirty |= widget.checkbox("Brute Force", mBruteForce);    
         const Gui::RadioButtonGroup targetPdfs = {
             {0, "Unshadowed", true},
             {1, "New PCSS", true},
@@ -481,9 +496,10 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     }
     else
     {
-        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
         dirty |= widget.var("Shading Light Samples", mShadingLightSamples);
         dirty |= widget.var("Light Bleeding Reduction", mLBRThreshold, 0.0f, 1.0f);
+        dirty |= widget.var("Depth Difference Threshold", mDepthDifference, 0.0f, 1.0f);
+        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
     }
 
     mpPixelDebug->renderUI(widget);
@@ -494,11 +510,11 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
 void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     mpScene = pScene;
-    Scene::RenderSettings renderSettings;
-    renderSettings.useEmissiveLights = false;
-    mpScene->setRenderSettings(renderSettings);
+    //Scene::RenderSettings renderSettings;
+    //renderSettings.useEmissiveLights = false;
+    //mpScene->setRenderSettings(renderSettings);
+    //mLightParams.setSceneSettings(pScene);
     
-    mLightParams.setSceneSettings(pScene);
     mLightParams.updateSceneAreaLight(pScene);
 
     auto pCamera = mpScene->getCamera();
@@ -522,12 +538,12 @@ bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key2)
-    {
-        mNeedUpdate = true;
-        mShadowType = ShadowType::NewPCSSReSTIR;
-        return true;
-    }
+    //if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key2)
+    //{
+    //    mNeedUpdate = true;
+    //    mShadowType = ShadowType::NewPCSSReSTIR;
+    //    return true;
+    //}
 
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key3)
     {
@@ -580,12 +596,12 @@ AreaLightReSTIR::AreaLightReSTIR()
     mpSamplerCmp = Sampler::create(samplerDesc);
 
     //samplerDesc.setMaxAnisotropy(maxAnisotropy);
-    //samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setComparisonMode(Sampler::ComparisonMode::Disabled);
     mpTrilinearSampler = Sampler::create(samplerDesc);
 
-    //samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(samplerDesc);
 }
@@ -707,9 +723,12 @@ void AreaLightReSTIR::UpdateDefines()
         break;
     case ShadowType::VSM:
         sharedDefines.add("_VSM");
+        mLightParams.mDepthBias = 0.005f;
         break;
     case ShadowType::EVSM:
         sharedDefines.add("_EVSM");
+        mLightParams.mDepthBias = 0.005f;
+        mDepthDifference = 0.03f;
         break;
     case ShadowType::MSM:
         sharedDefines.add("_MSM");
@@ -787,47 +806,60 @@ void AreaLightReSTIR::UpdateDefines()
         defines.add(kBruteForce, mBruteForce ? "1" : "0");
         defines.add("_NEED_BLOCKER_SEARCH", std::to_string(shadingBlockerSearch));
         defines.add("_LIGHT_SAMPLES", std::to_string(mShadingLightSamples));
+        defines.add("_DEPTH_DIFFERENCE", std::to_string(mDepthDifference));
         defines.add(PCSSDefines);
+        if (mpEmissiveSampler) defines.add(mpEmissiveSampler->getDefines());
         AddDefines(mpShadingPass, defines);
     }
 }
 
+// All light matrix is calculated by considering area light as a point light in the center
 void AreaLightReSTIR::calcLightSpaceMatrix()
 {
-    auto pLight = mpScene->getLightByName("Area Light");
-    if (!pLight) return;
-
-    // light pos and dir in world space
-    auto lightData = pLight->getData();
-    auto lightType = pLight->getType();
     float3 posW;
     float3 dirW;
     float4x4 lightView;
     float4x4 lightProj;
 
-    if (lightType == LightType::Rect)
+
+    // For Analytic Area Light
+    //{
+    //    auto pLight = mpScene->getLightByName("Area Light");
+    //    if (pLight) return;
+
+    //    // light pos and dir in world space
+    //    auto lightData = pLight->getData();
+    //    auto lightType = pLight->getType();
+
+    //    if (lightType == LightType::Rect)
+    //    {
+    //        posW = mLightParams.mLightPos;
+    //        dirW = lightData.transMatIT * float4(0.0f, 0.0f, 1.0f, 1.0f);
+    //        lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
+    //        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
+    //    }
+    //    else if (lightType == LightType::Distant)
+    //    {
+    //        posW = lightData.posW;
+    //        dirW = lightData.dirW;
+    //    }
+    //    else if (lightType == LightType::Sphere)
+    //    {
+    //        posW = mLightParams.mLightPos;
+    //        dirW = lightData.transMatIT * float4(0.0f, -1.0f, 0.0f, 1.0f); // assume sphere light look at -y direction. A proper way should look at all 6 faces
+    //        lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
+    //        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
+    //    }
+    //}
+
+    // For Emissive Area Light
     {
         posW = mLightParams.mLightPos;
-        dirW = lightData.transMatIT * float4(0.0f, 0.0f, 1.0f, 1.0f);
+        dirW = float3(0.0f, -1.0f, 0.0f);
         lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
-    }
-    else if (lightType == LightType::Distant)
-    {
-        posW = lightData.posW;
-        dirW = lightData.dirW;
-    }
-    else if (lightType == LightType::Sphere)
-    {
-        posW = mLightParams.mLightPos;
-        dirW = lightData.transMatIT * float4(0.0f, -1.0f, 0.0f, 1.0f); // assume sphere light look at -y direction. A proper way should look at all 6 faces
-        lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
+        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane); 
     }
 
-    //logInfo("light position: " + to_string(posW));
-    //logInfo("lightData position: " + to_string(lightData.posW));
-    //logInfo("light direction: " + to_string(dirW));
     //logInfo("GLM_CONFIG_CLIP_CONTROL = " + std::to_string(GLM_CONFIG_CLIP_CONTROL)); // GLM_CLIP_CONTROL_RH_ZO   
 
     mLightSpaceMat = lightProj * lightView;

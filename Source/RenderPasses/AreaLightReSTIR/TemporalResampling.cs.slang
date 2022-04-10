@@ -56,7 +56,7 @@ float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLi
     float3 dir = toLight / distance;
     float3 Le = gScene.getLight(lightIndex).intensity;
 
-    float visibility;
+    float visibility = 1.0f;
 #if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
     BlockerSearchOutputs bso = { projCoords, shadingPosLightView };
     visibility = shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;

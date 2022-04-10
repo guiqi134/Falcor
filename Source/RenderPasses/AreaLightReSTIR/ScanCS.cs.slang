@@ -108,7 +108,7 @@ void CSScanAddBucketResult(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_Grou
     uint2 blockIdx = uint2(Gid.x, Gid.y / 2 - 1);
 #endif
 
-    printSetPixel(DTid.xy);
+    //printSetPixel(DTid.xy);
 
     Result[DTid.xy] = Result[DTid.xy] + Input[blockIdx];
 }

@@ -62,8 +62,6 @@ float4 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
     float2 expDepth = getEvsmExponents(depth);
     float4 result = float4(expDepth, expDepth * expDepth);
 
-    print(result);
-
     return result.xzyw;
 }
 #elif defined(_MSM)

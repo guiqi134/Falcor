@@ -7,7 +7,7 @@ namespace Falcor
     enum class SceneName
     {
         SimpleScene, SanMiguel, BistroExterior, BistroInterior,
-        PlaneScene, Bicycle, 
+        PlaneScene, Bicycle, PalmTrees,
     };
 
     struct AreaLightParams
@@ -42,7 +42,7 @@ namespace Falcor
                 mLightSize = 0.75f;
                 mFovY = 55.0;
                 mLightNearPlane = 8.0f;
-                mDepthBias = 0.03f;
+                mDepthBias = 0.008f;
             }
             else if (name == SceneName::BistroExterior)
             {
@@ -69,9 +69,10 @@ namespace Falcor
                 mLightUp = float3(0.0f, 0.0f, -1.0f);
                 mLightPos = float3(0.0f, 10.0f, 0.0f);
                 mRotation = float3(90.0f, 0.0f, 0.0f);
-                mLightSize = 1.5f;
+                mLightSize = 1.0f;
                 mFovY = 30.0;
-                mLightNearPlane = 6.0f;
+                //mLightNearPlane = 6.0f; // three planes
+                mLightNearPlane = 4.0f; // one plane
             }
             else if (name == SceneName::Bicycle)
             {
@@ -81,7 +82,17 @@ namespace Falcor
                 mLightSize = 0.75f;
                 mFovY = 40.0;
                 mLightNearPlane = 12.0f;
-                mDepthBias = 0.006f;
+                mDepthBias = 0.004f;
+            }
+            else if (name == SceneName::PalmTrees)
+            {
+                mLightUp = float3(0.0f, 1.0f, 0.0f);
+                mLightPos = float3(-2.0f, 26.0f, -5.0f);
+                mRotation = float3(70.0f, 60.0f, 0.0f);
+                mLightSize = 1.5f;
+                mFovY = 81.0;
+                mLightNearPlane = 6.0f;
+                mDepthBias = 0.003f;
             }
         }
 
@@ -132,6 +143,14 @@ namespace Falcor
             auto model = translation * rotationY * rotationZ * rotationX;
             pAreaLight->setScaling(float3(mLightSize / 2.0f));
             pAreaLight->setTransformMatrix(model);
+        }
+
+        void updateSceneEmissiveLight(const Scene::SharedPtr& pScene)
+        {
+            auto pEmissiveMesh = pScene->getMeshInstance(0);
+            auto meshBound = pScene->getMeshBounds(0);
+            float3 size = meshBound.extent(); // Bound box size of the mesh
+
         }
         
     };
