@@ -21,6 +21,7 @@ VSOut vsMain(VSIn vIn)
     return vsOut;
 }
 
+
 /*
 Projection Matrix (row major):
 xScale     0          0              0
@@ -33,52 +34,38 @@ float LinearizeDepth(float depth)
     return (nearZ * farZ) / (farZ + depth * (nearZ - farZ));
 }
 
+struct PSOut
+{
 #ifdef _VSM
-float2 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
+    float2 color : SV_Target;
+#elif defined(_EVSM) || defined(_MSM)
+    float4 color : SV_Target;
+#endif
+    float depth : SV_Depth;
+};
+
+PSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID)
 {
     printSetPixel(vsOut.posH.xy);
-
     if (alphaTest(vsOut, triangleIndex)) discard;
 
+    PSOut psOut;
     float depth = saturate(vsOut.posH.z); // posH is screen space coordinate
+
+#ifdef _VSM
     float2 moments = float2(depth, depth * depth);
-
-    // Compute partial derivatives of depth.
-    //float dx = ddx(depth);
-    //float dy = ddy(depth);
-    // Compute second moment over the pixel extents. (including bias)
-    //moments.y = depth * depth + 0.25 * (dx * dx + dy * dy);
-
-    return moments; // TODO: better use linear depth 
-}
+    psOut.color = moments;
 #elif defined(_EVSM)
-float4 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
-{
-    printSetPixel(vsOut.posH.xy);
-    if (alphaTest(vsOut, triangleIndex)) discard;
-
     // Compute EVSM exponents
-    float depth = saturate(vsOut.posH.z);
     float2 expDepth = getEvsmExponents(depth);
     float4 result = float4(expDepth, expDepth * expDepth);
-
-    return result.xzyw;
-}
+    psOut.color = result.xzyw;
 #elif defined(_MSM)
-float4 psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
-{
-    printSetPixel(vsOut.posH.xy);
-    if (alphaTest(vsOut, triangleIndex)) discard;
-
-    float depth = saturate(vsOut.posH.z);
-
-    // Compute 4 moments
-    return float4(depth, depth * depth, depth * depth * depth, depth * depth * depth * depth);
-}
-#else
-void psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID) : SV_Target0
-{
-    //printSetPixel(vsOut.posH.xy);
-    if (alphaTest(vsOut, triangleIndex)) discard;
-}
+    psOut.color = float4(depth, depth * depth, depth * depth * depth, depth * depth * depth * depth);
 #endif
+
+    psOut.depth = vsOut.instanceID.index == 0 ? 1.0f : depth;
+    return psOut;
+}
+
+

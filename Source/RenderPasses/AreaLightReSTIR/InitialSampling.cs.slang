@@ -8,6 +8,7 @@ import Scene.Shading;
 import Experimental.Scene.Material.StandardMaterial;
 import Experimental.Scene.Material.MaterialHelpers;
 import Experimental.Scene.Lights.LightHelpers;
+import Experimental.Scene.Lights.EmissiveLightSampler;
 import Utils.Debug.PixelDebug;
 
 import ShadingDataLoader;
@@ -28,6 +29,7 @@ cbuffer CB
     SamplerComparisonState gSamplerCmp;
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
+    EmissiveLightSampler gEmissiveLightSampler;
 }
 
 RWStructuredBuffer<Reservoir> gReservoirs;

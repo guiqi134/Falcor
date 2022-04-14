@@ -29,6 +29,7 @@ cbuffer CB
     ShadingDataLoader gShadingDataLoader;
     LightParams gLightParams;
     uint gShadowType;
+    bool gPrecomputeLightSamples;
 
     SamplerComparisonState gSamplerCmp;
     SamplerState gLinearSampler;
@@ -36,12 +37,15 @@ cbuffer CB
     EmissiveLightSampler gEmissiveLightSampler;
 }
 
-RWStructuredBuffer<Reservoir> gReservoirs;
-
 Texture2D gShadowMap;
 Texture2D gVSM;
 Texture2D gSAT;
+Texture1D<float4> gLightSampleTexture;
+
+RWStructuredBuffer<Reservoir> gReservoirs;
 RWTexture2D<float4> gShadingOutput;
+
+static const uint sampleLightMask = 1024;
 
 static struct Data
 {
@@ -137,11 +141,11 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             float visibility = 1.0f;
 
             // Compute unshadowed contribution or New PCSS
-            const uint lightCount = gScene.getLightCount();
-            uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+            //const uint lightCount = gScene.getLightCount();
+            //uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
             float3 unshadowedContrib = 0.0f;
             float3 shadowedContrib = 0.0f;
-            for (uint i = 0; i < 1; i++)
+            for (uint i = 0; i < 2; i++)
             {
                 //AnalyticLightSample lightSample;
                 //if (sampleLight(posWOrigin, gScene.getLight(lightIndex), sg, lightSample) && dot(sd.N, lightSample.dir) >= kMinCosTheta)
@@ -162,13 +166,15 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     unshadowedContrib += radiance;
                 }
             }
-            unshadowedContrib /= 1;
+            unshadowedContrib /= 2;
 
             // Compute final contribution
             switch (gShadowType)
             {
             case ShadowType::NewPCSS:
                 float sum = 0.0f;
+                uint startIndex = sampleNext1D(sg) * sampleLightMask;
+                print(startIndex);
                 for (uint i = 0; i < _LIGHT_SAMPLES; i++)
                 {
                     // Analytic light sampling
@@ -177,10 +183,42 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     //    sum += bso.shadingPosLightView.w ? shadowMapNewPCSS(lightSample.posW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
 
                     // Emissive light sampling
-                    TriangleLightSample tls;
-                    if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
+                    if (gPrecomputeLightSamples)
                     {
-                        sum += bso.shadingPosLightView.w ? shadowMapNewPCSS(tls.posW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
+                        uint sampleIndex = (startIndex + i) % sampleLightMask;
+
+                        //print(sampleIndex);
+                        //print(lightSample);
+
+                        float4 randoms = gLightSampleTexture[sampleIndex];
+                        uint triangleCount = gScene.lightCollection.triangleCount;
+                        uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
+                        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+                        //float2 u = POISSON_RECT_SAMPLES_64[i];
+                        //const float3 barycentrics = sample_triangle(u);
+                        float3 lightPosW = tri.getPosition(randoms.yzw);
+
+                        if (triangleIndex > 3)
+                            print(triangleIndex);
+
+                        // Compute light vector and squared distance.
+                        float3 toLight = lightPosW - sd.posW;
+                        const float distSqr = max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
+                        float distance = sqrt(distSqr);
+                        float3 lightDir = toLight / distance;
+
+                        if (dot(tri.normal, -lightDir) > 0.0f && dot(sd.N, lightDir) >= kMinCosTheta)
+                        {
+                            sum += bso.shadingPosLightView.w ? shadowMapNewPCSS(lightPosW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
+                        }
+                    }
+                    else
+                    {
+                        TriangleLightSample tls;
+                        if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
+                        {
+                            sum += bso.shadingPosLightView.w ? shadowMapNewPCSS(tls.posW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
+                        }
                     }
                 }
                 res = unshadowedContrib * sum / _LIGHT_SAMPLES;
@@ -229,7 +267,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     float shadowMapDepth = gShadowMap.SampleLevel(gLinearSampler, projCoords.xy, 0).x;
                     float difference = projCoords.z - shadowMapDepth;
                     print(difference);
-                    if (difference <= _DEPTH_DIFFERENCE && all(filterSize <= float2(0.01f)))
+                    bool checkFilterSize = all(filterSize <= float2(0.01f));
+                    if (difference <= _DEPTH_DIFFERENCE && checkFilterSize)
                     {
                         res = float3(1.0f, 0.0f, 0.0f);
                         float sum = 0.0f;
@@ -285,19 +324,23 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             //    }
             //}
 
-            TriangleLightSample tls;
-            if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
+            for (uint i = 0; i < _SHADOW_RAYS; i++)
             {
-                RayDesc ray;
-                ray.Origin = posWOrigin;
-                ray.Direction = tls.dir;
-                ray.TMin = 0.001f;
-                ray.TMax = tls.distance - 0.001f;
-                if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
+                TriangleLightSample tls;
+                if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
                 {
-                    res += tls.Le * gData.standardMaterial.eval(sd, tls.dir) / tls.pdf;
+                    RayDesc ray;
+                    ray.Origin = posWOrigin;
+                    ray.Direction = tls.dir;
+                    ray.TMin = 0.001f;
+                    ray.TMax = tls.distance - 0.001f;
+                    if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
+                    {
+                        res += tls.Le * gData.standardMaterial.eval(sd, tls.dir) / tls.pdf;
+                    }
                 }
             }
+            res /= _SHADOW_RAYS;
         }
 #endif
     }

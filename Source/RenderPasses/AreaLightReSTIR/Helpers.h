@@ -49,3 +49,33 @@ Texture::SharedPtr createNeighborOffsetTexture(uint32_t sampleCount)
 
     return Texture::create1D(sampleCount, ResourceFormat::RG8Snorm, 1, 1, offsets.get());
 }
+
+
+Texture::SharedPtr createLightSamplesTexture(const Scene::SharedPtr& pScene, RenderContext* pRenderContext, uint sampleCount)
+{
+    std::random_device device;
+    std::mt19937 rng(device());
+    std::uniform_real_distribution<float> dist(0.0, 1.0);
+
+    const auto& pLightCollection = pScene->getLightCollection(pRenderContext);
+    uint triangleCount = pLightCollection->getActiveLightCount();
+    //logInfo("ActiveLightCount = " + std::to_string(triangleCount));
+
+    std::uniform_int_distribution<int> dist_int(0, triangleCount - 1);
+
+    std::unique_ptr<float4[]> samples(new float4[sampleCount]);
+    for (uint i = 0; i < sampleCount; i++)
+    {
+        float2 u = float2(dist(rng), dist(rng));
+        float su = sqrt(u.x);
+        float2 b = float2(1.f - su, u.y * su); 
+        float3 barycentrics = float3(1.f - b.x - b.y, b.x, b.y);
+
+        samples[i] = float4(dist(rng), barycentrics);
+    }
+
+    for (uint i = 0; i < 20; i++)
+        logInfo("samples[i] = " + to_string(samples[i]));
+
+    return Texture::create1D(sampleCount, ResourceFormat::RGBA32Float, 1, 1, samples.get());
+}

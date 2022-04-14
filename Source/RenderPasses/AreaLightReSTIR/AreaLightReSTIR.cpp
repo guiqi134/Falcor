@@ -96,6 +96,7 @@ RenderPassReflection AreaLightReSTIR::reflect(const CompileData& compileData)
     addRenderPassOutputs(reflector, kOutputChannels);
     reflector.addOutput(kDepthName, "Depth value");
     reflector.addOutput("SAT", "SAT scans output");
+    reflector.addOutput("moments", "shadow map pass moments");
     return reflector;
 }
 
@@ -108,28 +109,37 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
 
     mpPixelDebug->beginFrame(pRenderContext, renderData.getDefaultTextureDims());
 
-    auto pCamera = mpScene->getCamera();
+    mpScene->getLightCollection(pRenderContext)->prepareSyncCPUData(pRenderContext);
 
-    if (mpEmissiveSampler == nullptr)
+    if (mpScene->hasAnimation())
     {
-        mpScene->getLightCollection(pRenderContext)->prepareSyncCPUData(pRenderContext);
-        mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
-        mNeedUpdate = true;
+        mLightParams.updateSceneEmissiveLight(mpScene, pRenderContext);
+        calcLightSpaceMatrix();
     }
-    mpEmissiveSampler->update(pRenderContext);
 
     // Update when parameters change
+    auto& dict = renderData.getDictionary();
     if (mNeedUpdate)
     {
         mLightParams.updateSceneAreaLight(mpScene);
+        mLightParams.updateSceneEmissiveLight(mpScene, pRenderContext);
         calcLightSpaceMatrix();
         UpdateDefines();
         setShadowMapPassFbo();
+
+        // Auto reset accumulation
+        auto flags = dict.getValue(kRenderPassRefreshFlags, Falcor::RenderPassRefreshFlags::None);
+        flags |= Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        dict[Falcor::kRenderPassRefreshFlags] = flags;
 
        /* pCamera->setPosition(mInitialCameraPos);
         pCamera->setTarget(mInitialCameraTarget);*/
     }
 
+    mpEmissiveSampler->update(pRenderContext);
+
+
+    auto pCamera = mpScene->getCamera();
     if (pCamera->isAnimated())
     {
         uint currentFrame = (uint)gpFramework->getGlobalClock().getFrame();
@@ -201,10 +211,13 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         const auto& pDepthTex = renderData[kDepthName]->asTexture();
 
         //RasterizerState::Desc rasterizeDesc;
-        //rasterDesc.setCullMode(RasterizerState::CullMode::None);
-        //rasterDesc.setDepthBias(2, mLightParams.mDepthBias);
-        //auto rasterizeState = RasterizeState::create(rasterizeDesc);
+        //rasterizeDesc.setCullMode(RasterizerState::CullMode::None);
+        //rasterizeDesc.setDepthBias(2, mLightParams.mDepthBias);
+        //auto rasterizeState = RasterizerState::create(rasterizeDesc);
         //mShadowMapPass.pState->setRasterizerState(rasterizeState);
+
+        //auto pBlendState = mShadowMapPass.pState->getBlendState();
+        //logInfo("isBlendEnabled = " + std::to_string(pBlendState->isBlendEnabled(0)));
 
         auto& pFbo = mShadowMapPass.pFbo;
         pFbo->attachDepthStencilTarget(mpDepthMap);
@@ -220,11 +233,15 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpScene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::None);
 
         pRenderContext->blit(mpDepthMap->getSRV(), pDepthTex->getRTV());
+
+        if (mShadowType == ShadowType::VSM || mShadowType == ShadowType::EVSM || mShadowType == ShadowType::MSM)
+            pRenderContext->blit(mShadowMapPass.pFbo->getColorTexture(0)->getSRV(), renderData["moments"]->asTexture()->getRTV());
     }
 
     // Get shadow map texture and (generate mipmaps)
     auto shadowMapTex = mpDepthMap;
-    auto colorTex = mShadowMapPass.pFbo->getColorTexture(0); 
+    auto colorTex = mShadowMapPass.pFbo->getColorTexture(0);
+    
     if (colorTex != nullptr)
     {
         //colorTex->generateMips(pRenderContext); // TODO: remove this when using SAT
@@ -411,11 +428,13 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         cb["gSamplerCmp"] = mpSamplerCmp;
         cb["gLinearSampler"] = mpTrilinearSampler;
         cb["gPointSampler"] = mpPointSampler;
+        cb["gPrecomputeLightSamples"] = mPrecomputeLightSamples;
         mpShadingPass["gReservoirs"] = mpReservoirBuffer;
         mpShadingPass["gShadingOutput"] = renderData[kOutputChannels[0].name]->asTexture();
         mpShadingPass["gShadowMap"] = shadowMapTex;
         mpShadingPass["gVSM"] = colorTex;
         mpShadingPass["gSAT"] = mpSAT;
+        mpShadingPass["gLightSampleTexture"] = mpLightSampleTexture;
         mpEmissiveSampler->setShaderData(cb["gEmissiveLightSampler"]);
         ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
         lightParams.setShaderData(cb["gLightParams"]);
@@ -496,10 +515,12 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     }
     else
     {
-        dirty |= widget.var("Shading Light Samples", mShadingLightSamples);
+        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
+        dirty |= widget.checkbox("Precompute Light Samples for NewPCSS", mPrecomputeLightSamples);
+        dirty |= widget.var("NewPCSS Light Samples", mShadingLightSamples);
+        dirty |= widget.var("Brute Force Shadow Rays", mShadowRays);
         dirty |= widget.var("Light Bleeding Reduction", mLBRThreshold, 0.0f, 1.0f);
         dirty |= widget.var("Depth Difference Threshold", mDepthDifference, 0.0f, 1.0f);
-        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
     }
 
     mpPixelDebug->renderUI(widget);
@@ -516,6 +537,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     //mLightParams.setSceneSettings(pScene);
     
     mLightParams.updateSceneAreaLight(pScene);
+    mLightParams.updateSceneEmissiveLight(pScene, pRenderContext);
 
     auto pCamera = mpScene->getCamera();
     pCamera->setHasAnimation(true);
@@ -524,9 +546,12 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     mInitialCameraTarget = mpScene->getCamera()->getTarget();
 
     mpNeighborOffsetBuffer = createNeighborOffsetTexture(8192);
+    mpLightSampleTexture = createLightSamplesTexture(pScene, pRenderContext, 1024);
 
-    CreatePasses();
+    mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+
     calcLightSpaceMatrix();
+    CreatePasses();
 }
 
 bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -640,6 +665,11 @@ void AreaLightReSTIR::CreatePasses()
         mShadowMapPass.pState = GraphicsState::create();
         mShadowMapPass.pState->setProgram(mShadowMapPass.pProgram);
 
+        DepthStencilState::Desc depthStencilDesc;
+        depthStencilDesc.setDepthFunc(DepthStencilState::Func::LessEqual);
+        auto depthStencilState = DepthStencilState::create(depthStencilDesc);
+        mShadowMapPass.pState->setDepthStencilState(depthStencilState);
+
         Shader::DefineList defines;
         defines.add("_LBR_THRESHOLD", std::to_string(mLBRThreshold));
         mShadowMapPass.pProgram->addDefines(mpScene->getSceneDefines());
@@ -723,12 +753,12 @@ void AreaLightReSTIR::UpdateDefines()
         break;
     case ShadowType::VSM:
         sharedDefines.add("_VSM");
-        mLightParams.mDepthBias = 0.005f;
+        //mLightParams.mDepthBias = 0.005f;
         break;
     case ShadowType::EVSM:
         sharedDefines.add("_EVSM");
-        mLightParams.mDepthBias = 0.005f;
-        mDepthDifference = 0.03f;
+        //mLightParams.mDepthBias = 0.005f;
+        //mDepthDifference = 0.03f;
         break;
     case ShadowType::MSM:
         sharedDefines.add("_MSM");
@@ -807,6 +837,10 @@ void AreaLightReSTIR::UpdateDefines()
         defines.add("_NEED_BLOCKER_SEARCH", std::to_string(shadingBlockerSearch));
         defines.add("_LIGHT_SAMPLES", std::to_string(mShadingLightSamples));
         defines.add("_DEPTH_DIFFERENCE", std::to_string(mDepthDifference));
+        defines.add("_LIGHT_WORLD_SIZE", std::to_string(mLightParams.mLightSize));
+        float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
+        defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
+        defines.add("_SHADOW_RAYS", std::to_string(mShadowRays));
         defines.add(PCSSDefines);
         if (mpEmissiveSampler) defines.add(mpEmissiveSampler->getDefines());
         AddDefines(mpShadingPass, defines);
@@ -821,6 +855,16 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
     float4x4 lightView;
     float4x4 lightProj;
 
+    // For Emissive Area Light
+    {
+        dirW = mLightParams.mObjectToWorld * float4(0.0f, 0.0f, 1.0f, 0.0f);
+        posW = mLightParams.mLightPos;
+
+        lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
+        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
+    }
+
+    //logInfo("dirW = " + to_string(dirW));
 
     // For Analytic Area Light
     //{
@@ -852,14 +896,6 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
     //    }
     //}
 
-    // For Emissive Area Light
-    {
-        posW = mLightParams.mLightPos;
-        dirW = float3(0.0f, -1.0f, 0.0f);
-        lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane); 
-    }
-
     //logInfo("GLM_CONFIG_CLIP_CONTROL = " + std::to_string(GLM_CONFIG_CLIP_CONTROL)); // GLM_CLIP_CONTROL_RH_ZO   
 
     mLightSpaceMat = lightProj * lightView;
@@ -886,7 +922,8 @@ void AreaLightReSTIR::setShadowMapPassFbo()
     fboDesc.setDepthStencilTarget(depthFormat);
     fboDesc.setColorTarget(0, colorFormat);
 
-    uint mipLevel = colorFormat == ResourceFormat::Unknown ? 1 : Texture::kMaxPossible; // Texture::kMaxPossible
+    //uint mipLevel = colorFormat == ResourceFormat::Unknown ? 1 : Texture::kMaxPossible; // Texture::kMaxPossible
+    uint mipLevel = 1;
 
     mShadowMapPass.pFbo = Fbo::create2D(mShadowMapSize, mShadowMapSize, fboDesc, 1, mipLevel);
 }

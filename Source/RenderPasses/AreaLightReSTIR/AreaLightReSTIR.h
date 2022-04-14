@@ -113,6 +113,7 @@ private:
     Texture::SharedPtr mpSAT;
     Buffer::SharedPtr  mpReservoirBuffer; // contain both current & previous reservoirs?
     Texture::SharedPtr  mpNeighborOffsetBuffer;
+    Texture::SharedPtr mpLightSampleTexture;
     Sampler::SharedPtr mpSamplerCmp;
     Sampler::SharedPtr mpTrilinearSampler;
     Sampler::SharedPtr mpPointSampler;
@@ -131,13 +132,15 @@ private:
 
     uint mInitialAreaLightSamples = 4u; // M candiates 
     uint mBlockerSearchSamples = 32u;
-    uint mPCFSamples = 512u;
-    uint mShadingLightSamples = 4; // same as mInitialAreaLightSamples
+    uint mPCFSamples = 64u;
+    uint mShadingLightSamples = 64; // same as mInitialAreaLightSamples
     uint mActiveTargetPdf = 1;
 
     bool mUsePairwiseMIS = false;
     bool mFixFrame = false;
     uint mShadowMapSize = 1 << 11; // 2048
+    bool mPrecomputeLightSamples = true;
+    uint mShadowRays = 1;
 
     ShadowType mShadowType = ShadowType::NewPCSS; // Control different shadow methods
 

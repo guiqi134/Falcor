@@ -109,10 +109,10 @@ float4 sampleSAT(float4 filterBound, float2 texSize, float depth, Texture2D texS
     float4 pn = texSAT.SampleLevel(sampler, realCoords.zy, 0); // (max, min)
     float4 pp = texSAT.SampleLevel(sampler, realCoords.zw, 0); // (max, max)
 
-    print(nn);
-    print(np);
-    print(pn);
-    print(pp);
+    //print(nn);
+    //print(np);
+    //print(pn);
+    //print(pp);
 
     // Compute sum and divide to get average moments
     float4 avg = (pp - pn - np + nn) / (dims.x * dims.y);

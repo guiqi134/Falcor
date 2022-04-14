@@ -16,11 +16,12 @@ namespace Falcor
         float3 mLightPos;
         float3 mLightUp;
         float3 mRotation;
-        float mLightSize;
+        float mLightSize; // TODO: change to 2D size
         float mFovY;
         float mLightNearPlane;
         float mLightFarPlane;
         float mDepthBias;
+        float4x4 mObjectToWorld;
 
         AreaLightParams(SceneName name) : name(name), mLightFarPlane(1e5), mRotation(float3(0.0f)), mDepthBias(0.001f)
         {
@@ -70,19 +71,20 @@ namespace Falcor
                 mLightPos = float3(0.0f, 10.0f, 0.0f);
                 mRotation = float3(90.0f, 0.0f, 0.0f);
                 mLightSize = 1.0f;
-                mFovY = 30.0;
+                mFovY = 70.0;
                 //mLightNearPlane = 6.0f; // three planes
-                mLightNearPlane = 4.0f; // one plane
+                mLightNearPlane = 3.0f; // one plane
+                mDepthBias = 0.0005f;
             }
             else if (name == SceneName::Bicycle)
             {
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
                 mLightPos = float3(7.0f, 8.0f, -12.0f);
                 mRotation = float3(35.0f, -30.0f, 0.0f);
-                mLightSize = 0.75f;
+                mLightSize = 1.0f;
                 mFovY = 40.0;
                 mLightNearPlane = 12.0f;
-                mDepthBias = 0.004f;
+                mDepthBias = 0.0005f;
             }
             else if (name == SceneName::PalmTrees)
             {
@@ -145,18 +147,53 @@ namespace Falcor
             pAreaLight->setTransformMatrix(model);
         }
 
-        void updateSceneEmissiveLight(const Scene::SharedPtr& pScene)
+        void updateSceneEmissiveLight(const Scene::SharedPtr& pScene, RenderContext* pRenderContext)
         {
-            auto pEmissiveMesh = pScene->getMeshInstance(0);
-            auto meshBound = pScene->getMeshBounds(0);
-            float3 size = meshBound.extent(); // Bound box size of the mesh
+            // Get emissive light's mesh instance ID 
+            const auto& pLightCollection = pScene->getLightCollection(pRenderContext);
+            const auto& meshLights = pLightCollection->getMeshLights();
+            uint meshInstanceID = meshLights[0].meshInstanceID;
 
+            // Get all necessary data from Scene 
+            const auto& pMeshInstance = pScene->getMeshInstance(meshInstanceID);
+            const auto& meshBound = pScene->getMeshBounds(meshInstanceID); 
+            const auto pAnimationController = pScene->getAnimationController();
+            const auto& globalMatrices = pAnimationController->getGlobalMatrices();
+
+            // Compute light position, light size
+            float3 size = meshBound.extent(); // Bound box size of the mesh
+            float3 lightCenter = meshBound.center();
+            if (pScene->hasAnimation())
+            {
+                mObjectToWorld = globalMatrices[pMeshInstance.globalMatrixID];
+                mLightSize = std::max(size.x, size.y);
+                mLightPos = mObjectToWorld * float4(lightCenter, 1.0f);
+            }
+            else
+            {
+                auto translation = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, 0.0f));
+                auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                mObjectToWorld = translation * rotation;
+                mLightSize = std::max(std::max(size.x, size.y), size.z);
+                mLightPos = float4(lightCenter, 1.0f);
+            }
+            
+
+            if (name == SceneName::PlaneScene)
+            {
+                mLightNearPlane = mLightPos.y - 5.0f - 0.1f;
+            }
+
+            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[0]));
+            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[1]));
+            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[2]));
+            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[3]));
+
+            //logInfo("size = " + to_string(size));
+            //logInfo("mLightSize = " + std::to_string(mLightSize));
+            //logInfo("lightCenter = " + to_string(lightCenter));
         }
         
     };
 
-    void setSceneMesh()
-    {
-
-    }
 }

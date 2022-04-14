@@ -30,9 +30,9 @@ float shadowMapPCF(float3 projCoords, float2 filterSize, float2 poissonOffset, S
     for (int i = 0; i < _PCF_SAMPLES; i++)
     {
         // Poisson Rectangle
-        float2 selectedSample = POISSON_RECT_SAMPLES_512[i] - 0.5f;
-        //float2 offset = clamp(rotatedPoisson(selectedSample, rotation), float2(-0.5f), float2(0.5f)) * filterSize;
+        float2 selectedSample = POISSON_RECT_SAMPLES_64[i] - 0.5f;
         float2 offset = selectedSample * filterSize;
+        //float2 offset = clamp(rotatedPoisson(selectedSample, rotation), float2(-0.5f), float2(0.5f)) * filterSize;
 
         // Poisson Disk
         //float2 selectedSample = 0.5f * POISSON_SAMPLES_512[i];
@@ -66,6 +66,8 @@ void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoo
     float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver);
     // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
     searchSize /= _LIGHT_FRUSTUM_SIZE;
+
+    print(searchSize);
 
     float blockerSum = 0;
     numBlockers = 0;
@@ -125,12 +127,12 @@ float shadowMapNewPCSS(float3 samplePos, BlockerSearchOutputs bso, SamplerCompar
     float avgBlockerDepth = bso.projCoords.w;
     float zReceiver = abs(shadingPosLightView.z);
 
-    // 2. map samplePos to shadow map
+    // 2. map samplePos to shadow map. (this part is not the bottleneck)
     float3 shadingPosOnBlocker = (avgBlockerDepth / zReceiver) * shadingPosLightView; 
     float2 samplePosView = mul(float4(samplePos, 1.0f), lightParams.lightView).xy; // samplePosView.z = 0
     samplePosView = shadingPosOnBlocker.xy + samplePosView * (zReceiver - avgBlockerDepth) / zReceiver; 
     float4 samplePosH = mul(float4(samplePosView, shadingPosOnBlocker.z, 1.0f), lightParams.lightProj);
-    float3 samplePosNDC = samplePosH.xyz / samplePosH.w;
+    float3 samplePosNDC = samplePosH.xyz / samplePosH.w; // TODO: remove
     samplePosNDC.y *= -1;
     float3 samplePosProj = float3(samplePosNDC.xy * 0.5f + 0.5f, samplePosNDC.z); // normalized screen space
 
@@ -163,3 +165,8 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     // bso.poissonOffset = poissonOffset;
 }
 
+void blockerSearchOurs(inout BlockerSearchOutputs bso, float bias, float3 posW, float2 poissonOffset, SamplerState sampler,
+    Texture2D shadowMap, LightParams lightParams)
+{
+
+}
