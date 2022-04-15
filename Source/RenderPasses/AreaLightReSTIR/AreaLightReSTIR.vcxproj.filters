@@ -9,7 +9,7 @@
     <ClInclude Include="ShadingDataLoader.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
-    <ClInclude Include="PoissonDisk.h" />
+    <ClInclude Include="PoissonSamples.h" />
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="Helpers.slang">

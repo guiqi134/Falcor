@@ -4,6 +4,11 @@
 
 import Utils.Debug.PixelDebug;
 import Utils.Sampling.SampleGenerator;
+import Utils.Math.MathHelpers;
+import Scene.Scene;
+import Experimental.Scene.Lights.LightHelpers;
+import Experimental.Scene.Lights.EmissiveLightSampler;
+
 __exported import PoissonDisk;
 
 float LinearizeDepth(float depth)
@@ -20,79 +25,10 @@ float2 rotatedPoisson(float2 poissonSample, float2 rotation)
     );
 }
 
-float shadowMapPCF(float3 projCoords, float2 filterSize, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler,
-    Texture2D shadowMap, float2 rotation)
-{
-    float sum = 0.0f;
-    //float2 t = frac(projCoords.xy * uint2(2048) + 0.5f); // Interpolation percentage in x, y
-    //filterSize = float2(0.03);
-
-    for (int i = 0; i < _PCF_SAMPLES; i++)
-    {
-        // Poisson Rectangle
-        float2 selectedSample = POISSON_RECT_SAMPLES_64[i] - 0.5f;
-        float2 offset = selectedSample * filterSize;
-        //float2 offset = clamp(rotatedPoisson(selectedSample, rotation), float2(-0.5f), float2(0.5f)) * filterSize;
-
-        // Poisson Disk
-        //float2 selectedSample = 0.5f * POISSON_SAMPLES_512[i];
-        //float2 offset = rotatedPoisson(selectedSample, rotation) * filterSize; // rotated poisson
-
-        //float2 offset = (0.5f * POISSON_SAMPLES_512[i] + poissonOffset) * filterRadiusUV; // random translation poisson
-
-        // Use hardware PCF
-        sum += shadowMap.SampleCmpLevelZero(samplerCmp, projCoords.xy + offset, projCoords.z); // projCoords.z <= sample value ? for all nearest texel
-
-
-        // Gathers the four texels: (-,+),(+,+),(+,-),(-,-)
-        //float4 tmp = shadowMap.Gather(linearSampler, projCoords.xy + offset);
-        //tmp.x = tmp.x < projCoords.z ? 0.0f : 1.0f;
-        //tmp.y = tmp.y < projCoords.z ? 0.0f : 1.0f;
-        //tmp.z = tmp.z < projCoords.z ? 0.0f : 1.0f;
-        //tmp.w = tmp.w < projCoords.z ? 0.0f : 1.0f;
-        //sum += lerp(lerp(tmp.w, tmp.z, t.x), lerp(tmp.x, tmp.y, t.x), t.y); // bilinear filter comparison results
-
-        /*float shadowMapDepth = shadowMap.SampleLevel(linearSampler, projCoords.xy + offset, 0).r;
-        sum += shadowMapDepth < projCoords.z ? 0.0f : 1.0f;*/
-    }
-
-    return saturate(sum / _PCF_SAMPLES);
-}
-
-void findBlocker(out float avgBlockerDepth, out uint numBlockers, float3 projCoords, float zReceiver, float2 poissonOffset, 
-    SamplerState sampler, Texture2D shadowMap)
-{
-    // This uses similar triangles to compute what area of the shadow map we should search (in light view space)
-    float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver);
-    // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
-    searchSize /= _LIGHT_FRUSTUM_SIZE;
-
-    print(searchSize);
-
-    float blockerSum = 0;
-    numBlockers = 0;
-    for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
-    {
-        //float2 poissonSample = POISSON_SAMPLES_8[i];
-        // float2 offset = float2(poissonSample.x * poissonOffset.x - poissonSample.y * poissonOffset.y, 
-        //     poissonSample.x * poissonOffset.y + poissonSample.y * poissonOffset.x)
-        //     * searchSize;
-        float2 offset = (POISSON_SAMPLES_32[i] + poissonOffset) * searchSize; 
-        float shadowMapDepth = shadowMap.SampleLevel(sampler, projCoords.xy + offset, 0).r;
-        if (shadowMapDepth < projCoords.z)
-        {
-            float linearDepth = abs(LinearizeDepth(shadowMapDepth));
-            blockerSum += linearDepth;
-            numBlockers++;
-        }
-    }
-
-    avgBlockerDepth = blockerSum / numBlockers;
-}
-
 // Reference: https://developer.download.nvidia.com/whitepapers/2008/PCSS_Integration.pdf
 // All calculation should be performed in light view space!
-float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler, Texture2D shadowMap, float2 rotation)
+float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler, Texture2D shadowMap,
+    Texture1D<float2> PCFRectSamples, float2 rotation)
 {
     // 1. get blocker search outputs
     float avgBlockerDepth = bso.projCoords.w;
@@ -111,10 +47,19 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
     print("penumbraSize = ", penumbraSize);
     print("filterRadiusUV = ", filterRadiusUV);
 
-    //filterRadiusUV = float2(0.001f);
-
     // 3. PCF filtering
-    return shadowMapPCF(projCoords, filterRadiusUV, poissonOffset, samplerCmp, linearSampler, shadowMap, rotation);
+    float sum = 0.0f;
+    for (int i = 0; i < _PCF_SAMPLES; i++)
+    {
+        // Poisson Rectangle
+        float2 selectedSample = PCFRectSamples[i] - 0.5f;
+        float2 offset = selectedSample * filterRadiusUV;
+
+        // Hardware PCF
+        sum += shadowMap.SampleCmpLevelZero(samplerCmp, projCoords.xy + offset, projCoords.z); // projCoords.z <= sample value ? for all nearest texel
+    }
+
+    return saturate(sum / _PCF_SAMPLES);
 }
 
 // New idea for PCSS: instead of using PCF, we just use the mapped light sample
@@ -142,8 +87,46 @@ float shadowMapNewPCSS(float3 samplePos, BlockerSearchOutputs bso, SamplerCompar
     return visibility;
 }
 
-// TODO: optimize this part
-void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, float2 poissonOffset, SamplerState sampler,
+void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, float2 rotation, SamplerState sampler,
+    Texture2D shadowMap, Texture1D<float2> blockSearchDiskSamples, LightParams lightParams)
+{
+    // Apply light transforms 
+    float4 lightSpacePosH = mul(float4(posW, 1.0f), lightParams.lightSpaceMat); // clipping space
+    float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
+    lightSpacePos.y *= -1;
+    float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // screen space
+    float3 shadingPosLightView = mul(float4(posW, 1.0f), lightParams.lightView).xyz;
+    float zReceiver = abs(shadingPosLightView.z);
+
+    // Blocker Search
+    float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver);
+    searchSize /= _LIGHT_FRUSTUM_SIZE; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
+
+    float blockerSum = 0;
+    uint numBlockers = 0;
+    for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
+    {
+        float2 selectedSample = blockSearchDiskSamples[i] * 0.5f;
+        float2 offset = rotatedPoisson(selectedSample, rotation) * searchSize;
+
+        float shadowMapDepth = shadowMap.SampleLevel(sampler, projCoords.xy + offset, 0).r;
+        if (shadowMapDepth < projCoords.z)
+        {
+            float linearDepth = abs(LinearizeDepth(shadowMapDepth));
+            blockerSum += linearDepth;
+            numBlockers++;
+        }
+    }
+    float avgBlockerDepth = blockerSum / numBlockers;
+
+    // Initialize structure
+    bso.projCoords.xyz = projCoords;
+    bso.shadingPosLightView.xyz = shadingPosLightView;
+    bso.projCoords.w = avgBlockerDepth;
+    bso.shadingPosLightView.w = numBlockers < 1 ? false : true;
+}
+
+void blockerSearchNewPCSS(inout BlockerSearchOutputs bso, float bias, float3 posW, SampleGenerator sg, SamplerState sampler,
     Texture2D shadowMap, LightParams lightParams)
 {
     float4 lightSpacePosH = mul(float4(posW, 1.0f), lightParams.lightSpaceMat); // clipping space
@@ -153,20 +136,40 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     float3 shadingPosLightView = mul(float4(posW, 1.0f), lightParams.lightView).xyz;
     float zReceiver = abs(shadingPosLightView.z);
 
-    uint numBlockers;
-    float avgBlockerDepth;
-    findBlocker(avgBlockerDepth, numBlockers, projCoords, zReceiver, poissonOffset, sampler, shadowMap);
+    // Blocker search
+    float blockerSum = 0;
+    uint numBlockers = 0;
+    for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
+    {
+        uint triangleCount = gScene.lightCollection.triangleCount;
+        uint triangleIndex = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+        float2 u = sampleNext2D(sg);
+        const float3 barycentrics = sample_triangle(u);
+        float3 lightSamplePos = tri.getPosition(barycentrics);
+
+        // Map light sample to near plane
+        float3 shadingPosOnNearPlane = (_LIGHT_NEAR_PLANE / zReceiver) * shadingPosLightView;
+        float2 samplePosView = mul(float4(lightSamplePos, 1.0f), lightParams.lightView).xy; // sample position on light 
+        samplePosView = shadingPosOnNearPlane.xy + samplePosView * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver; // sample position on near plane
+        float4 samplePosH = mul(float4(samplePosView, shadingPosOnNearPlane.z, 1.0f), lightParams.lightProj);
+        float3 samplePosNDC = samplePosH.xyz / samplePosH.w; // TODO: remove
+        samplePosNDC.y *= -1;
+        float3 samplePosProj = float3(samplePosNDC.xy * 0.5f + 0.5f, samplePosNDC.z); // normalized screen space
+
+        float shadowMapDepth = shadowMap.SampleLevel(sampler, samplePosProj.xy, 0).r;
+        if (shadowMapDepth < projCoords.z)
+        {
+            float linearDepth = abs(LinearizeDepth(shadowMapDepth));
+            blockerSum += linearDepth;
+            numBlockers++;
+        }
+    }
+    float avgBlockerDepth = blockerSum / numBlockers;
 
     // Initialize structure
     bso.projCoords.xyz = projCoords;
     bso.shadingPosLightView.xyz = shadingPosLightView;
     bso.projCoords.w = avgBlockerDepth;
     bso.shadingPosLightView.w = numBlockers < 1 ? false : true;
-    // bso.poissonOffset = poissonOffset;
-}
-
-void blockerSearchOurs(inout BlockerSearchOutputs bso, float bias, float3 posW, float2 poissonOffset, SamplerState sampler,
-    Texture2D shadowMap, LightParams lightParams)
-{
-
 }

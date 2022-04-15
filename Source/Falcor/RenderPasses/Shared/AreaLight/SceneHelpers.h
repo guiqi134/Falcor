@@ -82,7 +82,7 @@ namespace Falcor
                 mLightPos = float3(7.0f, 8.0f, -12.0f);
                 mRotation = float3(35.0f, -30.0f, 0.0f);
                 mLightSize = 1.0f;
-                mFovY = 40.0;
+                mFovY = 35.0;
                 mLightNearPlane = 12.0f;
                 mDepthBias = 0.0005f;
             }

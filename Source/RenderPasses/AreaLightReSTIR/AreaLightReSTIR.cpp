@@ -28,6 +28,7 @@
 #include "AreaLightReSTIR.h"
 #include "Helpers.h"
 #include "ShadingDataLoader.h"
+#include "PoissonSamples.h"
 #include <RenderGraph\RenderPassHelpers.h>
 
 namespace
@@ -131,6 +132,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         auto flags = dict.getValue(kRenderPassRefreshFlags, Falcor::RenderPassRefreshFlags::None);
         flags |= Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
         dict[Falcor::kRenderPassRefreshFlags] = flags;
+
+        // Update poisson sample texture
+        uint index = uint(log2(mBlockerSearchSamples)) - 2; // 4 is the first element
+        auto diskSamples = poissonDiskSet[index];
+        mpBlockerSearchSamples = Texture::create1D(uint(diskSamples.size()), ResourceFormat::RG32Float, 1, 1, diskSamples.data());
+        index = uint(log2(mPCFSamples)) - 2;
+        auto PCFSamples = poissonRectSet[index];
+        mpPCFSamples = Texture::create1D(uint(PCFSamples.size()), ResourceFormat::RG32Float, 1, 1, PCFSamples.data());
 
        /* pCamera->setPosition(mInitialCameraPos);
         pCamera->setTarget(mInitialCameraTarget);*/
@@ -429,12 +438,15 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         cb["gLinearSampler"] = mpTrilinearSampler;
         cb["gPointSampler"] = mpPointSampler;
         cb["gPrecomputeLightSamples"] = mPrecomputeLightSamples;
+        cb["gUseNewBlockerSearch"] = mUseNewBlockerSearch;
         mpShadingPass["gReservoirs"] = mpReservoirBuffer;
         mpShadingPass["gShadingOutput"] = renderData[kOutputChannels[0].name]->asTexture();
         mpShadingPass["gShadowMap"] = shadowMapTex;
         mpShadingPass["gVSM"] = colorTex;
         mpShadingPass["gSAT"] = mpSAT;
         mpShadingPass["gLightSampleTexture"] = mpLightSampleTexture;
+        mpShadingPass["gBlockerSearchSamples"] = mpBlockerSearchSamples;
+        mpShadingPass["gPCFSamples"] = mpPCFSamples;
         mpEmissiveSampler->setShaderData(cb["gEmissiveLightSampler"]);
         ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
         lightParams.setShaderData(cb["gLightParams"]);
@@ -472,10 +484,10 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     Gui::DropdownList samplesOption = {
         {4, "4"}, {8, "8"}, {16, "16"}, {32, "32"},
         {64, "64"}, {128, "128"}, {256, "256"}, {512, "512"},
-        {1024, "1024"}, {2048, "2048"}
+        {1024, "1024"},
     };
     Gui::DropdownList shadowMapSizes = {
-        {1024, "1024"}, {2048, "2048"}, {4096, "4096"}, {8192, "8192"}, {16384, "16384"}
+        {1024, "1024"}, {2048, "2048"}, {4096, "4096"}, {8192, "8192"}, 
     };
     dirty |= widget.dropdown("Blocker search samples", samplesOption, mBlockerSearchSamples);
     dirty |= widget.dropdown("PCF samples", samplesOption, mPCFSamples);
@@ -515,12 +527,19 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     }
     else
     {
-        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
         dirty |= widget.checkbox("Precompute Light Samples for NewPCSS", mPrecomputeLightSamples);
+        dirty |= widget.checkbox("Use New Blocker Search", mUseNewBlockerSearch);
+        widget.tooltip("Use stochastic light samples and map them onto the near plane to compute average blocker for our method", true);
         dirty |= widget.var("NewPCSS Light Samples", mShadingLightSamples);
         dirty |= widget.var("Brute Force Shadow Rays", mShadowRays);
+        widget.text(" ");
+
+        widget.text("VSM EVSM MSM Parameters: ");
+        dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
         dirty |= widget.var("Light Bleeding Reduction", mLBRThreshold, 0.0f, 1.0f);
         dirty |= widget.var("Depth Difference Threshold", mDepthDifference, 0.0f, 1.0f);
+        dirty |= widget.var("Filter Size Threshold", mFilterSizeThreshold, 0.0f, 1.0f);
+        widget.tooltip("If shading point's filter size is below this threshold, it may degenerate to use PCF", true);
     }
 
     mpPixelDebug->renderUI(widget);
@@ -549,6 +568,16 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     mpLightSampleTexture = createLightSamplesTexture(pScene, pRenderContext, 1024);
 
     mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+
+    // Adjust scene dependent parameters
+    if (mLightParams.name == SceneName::Bicycle)
+    {
+        mFilterSizeThreshold = 0.01f;
+    }
+    else if (mLightParams.name == SceneName::PlaneScene)
+    {
+        mFilterSizeThreshold = 0.01f;
+    }
 
     calcLightSpaceMatrix();
     CreatePasses();
@@ -629,6 +658,15 @@ AreaLightReSTIR::AreaLightReSTIR()
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(samplerDesc);
+
+    // Create poisson sample textures
+    uint index = uint(log2(mBlockerSearchSamples)) - 2; // 4 is the first element
+    auto diskSamples = poissonDiskSet[index];
+    mpBlockerSearchSamples = Texture::create1D(uint(diskSamples.size()), ResourceFormat::RG32Float, 1, 1, diskSamples.data());
+
+    index = uint(log2(mPCFSamples)) - 2;
+    auto PCFSamples = poissonRectSet[index];
+    mpPCFSamples = Texture::create1D(uint(PCFSamples.size()), ResourceFormat::RG32Float, 1, 1, PCFSamples.data());
 }
 
 void AreaLightReSTIR::AddDefines(ComputePass::SharedPtr pass, Shader::DefineList& defines)
@@ -841,6 +879,7 @@ void AreaLightReSTIR::UpdateDefines()
         float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
         defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
         defines.add("_SHADOW_RAYS", std::to_string(mShadowRays));
+        defines.add("_FILTER_SIZE_THRESHOLD", std::to_string(mFilterSizeThreshold));
         defines.add(PCSSDefines);
         if (mpEmissiveSampler) defines.add(mpEmissiveSampler->getDefines());
         AddDefines(mpShadingPass, defines);

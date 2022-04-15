@@ -30,6 +30,7 @@ cbuffer CB
     LightParams gLightParams;
     uint gShadowType;
     bool gPrecomputeLightSamples;
+    bool gUseNewBlockerSearch;
 
     SamplerComparisonState gSamplerCmp;
     SamplerState gLinearSampler;
@@ -41,6 +42,8 @@ Texture2D gShadowMap;
 Texture2D gVSM;
 Texture2D gSAT;
 Texture1D<float4> gLightSampleTexture;
+Texture1D<float2> gBlockerSearchSamples;
+Texture1D<float2> gPCFSamples;
 
 RWStructuredBuffer<Reservoir> gReservoirs;
 RWTexture2D<float4> gShadingOutput;
@@ -83,13 +86,22 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         float bias = 0.0f;
 
 #if _NEED_BLOCKER_SEARCH
-        print(222);
         float3 L = normalize(gLightParams.lightPos - posWOrigin);
         float NdotL = dot(sd.N, L);
         bias = _DEPTH_BIAS * saturate(1.0 - NdotL) + _DEPTH_BIAS;
 
-        //print(bias);
-        blockerSearch(bso, bias, sd.posW, sampleNext2D(sgFixed) - 0.5f, gLinearSampler, gShadowMap, gLightParams);
+        if (!gUseNewBlockerSearch || gShadowType != (uint)ShadowType::NewPCSS)
+        {
+            print(111);
+            float angle = sampleNext1D(sgFixed) * M_2PI;
+            float2 rotation = float2(cos(angle), sin(angle)); // This can turn into a LUT
+            blockerSearch(bso, bias, sd.posW, rotation, gLinearSampler, gShadowMap, gBlockerSearchSamples, gLightParams);
+        }
+        else
+        {
+            print(222);
+            blockerSearchNewPCSS(bso, bias, sd.posW, sgFixed, gLinearSampler, gShadowMap, gLightParams);
+        }
 #endif
         print(bso.projCoords);
         //print(bso.shadingPosLightView);
@@ -174,6 +186,9 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             case ShadowType::NewPCSS:
                 float sum = 0.0f;
                 uint startIndex = sampleNext1D(sg) * sampleLightMask;
+
+                // TODO: read the part of the data from device to local
+
                 print(startIndex);
                 for (uint i = 0; i < _LIGHT_SAMPLES; i++)
                 {
@@ -187,19 +202,11 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     {
                         uint sampleIndex = (startIndex + i) % sampleLightMask;
 
-                        //print(sampleIndex);
-                        //print(lightSample);
-
                         float4 randoms = gLightSampleTexture[sampleIndex];
                         uint triangleCount = gScene.lightCollection.triangleCount;
                         uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
                         const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
-                        //float2 u = POISSON_RECT_SAMPLES_64[i];
-                        //const float3 barycentrics = sample_triangle(u);
                         float3 lightPosW = tri.getPosition(randoms.yzw);
-
-                        if (triangleIndex > 3)
-                            print(triangleIndex);
 
                         // Compute light vector and squared distance.
                         float3 toLight = lightPosW - sd.posW;
@@ -226,9 +233,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             case ShadowType::PCSS:
                 float angle = sampleNext1D(sgFixed) * M_2PI;
                 float2 rotation = float2(cos(angle), sin(angle));
-                // TODO: change to fixed samples
-                visibility = bso.shadingPosLightView.w ? shadowMapPCSS(bso, 0.3f * (sampleNext2D(sg) - 0.5f), gSamplerCmp, gLinearSampler, gShadowMap, rotation) : 1.0f;
-                print(visibility);
+                visibility = bso.shadingPosLightView.w ? shadowMapPCSS(bso, 0.3f * (sampleNext2D(sg) - 0.5f) /* translated poission */,
+                    gSamplerCmp, gLinearSampler, gShadowMap, gPCFSamples, rotation) : 1.0f;
                 res += unshadowedContrib * visibility;
                 break;
             case ShadowType::VSM:
@@ -267,20 +273,21 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     float shadowMapDepth = gShadowMap.SampleLevel(gLinearSampler, projCoords.xy, 0).x;
                     float difference = projCoords.z - shadowMapDepth;
                     print(difference);
-                    bool checkFilterSize = all(filterSize <= float2(0.01f));
+                    bool checkFilterSize = all(filterSize <= float2(_FILTER_SIZE_THRESHOLD));
                     if (difference <= _DEPTH_DIFFERENCE && checkFilterSize)
                     {
                         res = float3(1.0f, 0.0f, 0.0f);
                         float sum = 0.0f;
+                        const uint PCFSampleCount = 64;
 
-                        for (int i = 0; i < 32; i++)
+                        for (int i = 0; i < PCFSampleCount; i++)
                         {
                             // Poisson Rectangle
-                            float2 selectedSample = POISSON_RECT_SAMPLES_32[i] - 0.5f;
+                            float2 selectedSample = POISSON_RECT_SAMPLES_64[i] - 0.5f;
                             float2 offset = selectedSample * filterSize;
                             sum += gShadowMap.SampleCmpLevelZero(gSamplerCmp, projCoords.xy + offset, projCoords.z);
                         }
-                        visibility = saturate(sum / 32);
+                        visibility = saturate(sum / PCFSampleCount);
                     }
                     else
                     {

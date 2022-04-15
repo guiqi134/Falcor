@@ -112,8 +112,11 @@ private:
     Texture::SharedPtr mpRowSum;
     Texture::SharedPtr mpSAT;
     Buffer::SharedPtr  mpReservoirBuffer; // contain both current & previous reservoirs?
-    Texture::SharedPtr  mpNeighborOffsetBuffer;
+    Texture::SharedPtr mpNeighborOffsetBuffer;
     Texture::SharedPtr mpLightSampleTexture;
+    Texture::SharedPtr mpBlockerSearchSamples;
+    Texture::SharedPtr mpPCFSamples;
+
     Sampler::SharedPtr mpSamplerCmp;
     Sampler::SharedPtr mpTrilinearSampler;
     Sampler::SharedPtr mpPointSampler;
@@ -131,25 +134,27 @@ private:
     bool mNaiveSATScan = false;
 
     uint mInitialAreaLightSamples = 4u; // M candiates 
-    uint mBlockerSearchSamples = 32u;
-    uint mPCFSamples = 64u;
-    uint mShadingLightSamples = 64; // same as mInitialAreaLightSamples
     uint mActiveTargetPdf = 1;
-
     bool mUsePairwiseMIS = false;
     bool mFixFrame = false;
+
+    uint mBlockerSearchSamples = 32u;
+    uint mPCFSamples = 64u;
+    uint mShadingLightSamples = 64; 
     uint mShadowMapSize = 1 << 11; // 2048
-    bool mPrecomputeLightSamples = true;
     uint mShadowRays = 1;
+    bool mPrecomputeLightSamples = true;
+    bool mUseNewBlockerSearch = false; // only for NewPCSS method
 
     ShadowType mShadowType = ShadowType::NewPCSS; // Control different shadow methods
 
     // VSM, EVSM, MSM params
     float mLBRThreshold = 0.0f;
     float mDepthDifference = 0.03f;
+    float mFilterSizeThreshold = 0.01f; 
 
     // Area light parameters
-    AreaLightParams mLightParams = AreaLightParams(SceneName::PlaneScene);
+    AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;

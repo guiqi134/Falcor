@@ -32,7 +32,7 @@
     <ClInclude Include="AreaLightReSTIR.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
-    <ClInclude Include="PoissonDisk.h" />
+    <ClInclude Include="PoissonSamples.h" />
     <ClInclude Include="ShadingDataLoader.h" />
   </ItemGroup>
   <ItemGroup>
