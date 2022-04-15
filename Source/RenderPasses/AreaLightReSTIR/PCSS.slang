@@ -63,7 +63,7 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
 }
 
 // New idea for PCSS: instead of using PCF, we just use the mapped light sample
-float shadowMapNewPCSS(float3 samplePos, BlockerSearchOutputs bso, SamplerComparisonState samplerCmp, Texture2D shadowMap,
+float shadowMapNewPCSS(float3 shadingPos, float3 samplePos, BlockerSearchOutputs bso, SamplerComparisonState samplerCmp, Texture2D shadowMap,
     LightParams lightParams)
 {
     // 1. get data for mapping from blocker search outputs
@@ -72,14 +72,18 @@ float shadowMapNewPCSS(float3 samplePos, BlockerSearchOutputs bso, SamplerCompar
     float avgBlockerDepth = bso.projCoords.w;
     float zReceiver = abs(shadingPosLightView.z);
 
-    // 2. map samplePos to shadow map. (this part is not the bottleneck)
-    float3 shadingPosOnBlocker = (avgBlockerDepth / zReceiver) * shadingPosLightView; 
-    float2 samplePosView = mul(float4(samplePos, 1.0f), lightParams.lightView).xy; // samplePosView.z = 0
-    samplePosView = shadingPosOnBlocker.xy + samplePosView * (zReceiver - avgBlockerDepth) / zReceiver; 
-    float4 samplePosH = mul(float4(samplePosView, shadingPosOnBlocker.z, 1.0f), lightParams.lightProj);
-    float3 samplePosNDC = samplePosH.xyz / samplePosH.w; // TODO: remove
-    samplePosNDC.y *= -1;
-    float3 samplePosProj = float3(samplePosNDC.xy * 0.5f + 0.5f, samplePosNDC.z); // normalized screen space
+    // 2. map samplePos to shadow map. (this part IS the bottleneck)
+    float3 lightDirView = mul(samplePos - shadingPos, float3x3(lightParams.lightView));
+    float3 queryPosView = shadingPosLightView + lightDirView * (1.f - avgBlockerDepth / zReceiver);
+    float2 samplePosProj = 0.5 * float2(-lightParams.lightProj[0][0], lightParams.lightProj[1][1]) * queryPosView.xy / queryPosView.z + 0.5;
+
+    //float3 shadingPosOnBlocker = (avgBlockerDepth / zReceiver) * shadingPosLightView; 
+    //float2 samplePosView = mul(float4(samplePos, 1.0f), lightParams.lightView).xy; // samplePosView.z = 0
+    //samplePosView = shadingPosOnBlocker.xy + samplePosView * (zReceiver - avgBlockerDepth) / zReceiver;
+    //float4 samplePosH = mul(float4(samplePosView, shadingPosOnBlocker.z, 1.0f), lightParams.lightProj);
+    //float3 samplePosNDC = samplePosH.xyz / samplePosH.w; // TODO: remove
+    //samplePosNDC.y *= -1;
+    //float3 samplePosProj = float3(samplePosNDC.xy * 0.5f + 0.5f, samplePosNDC.z); // normalized screen space
 
     // 3. calculate visibility
     float visibility = shadowMap.SampleCmpLevelZero(samplerCmp, samplePosProj.xy, projCoords.z); // already add depth bias
