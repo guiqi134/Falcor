@@ -52,6 +52,8 @@ namespace
     const char kStoreFinalVisibility[] = "storeFinalVisibility";
 
     const uint kSATBlockSize = 512u;
+    const uint kLightSampleTexSize = 2048;
+    const bool kLightAnimation = false;
 }
 
 // Don't remove this. it's required for hot-reload to function properly
@@ -116,6 +118,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     {
         mLightParams.updateSceneEmissiveLight(mpScene, pRenderContext);
         calcLightSpaceMatrix();
+        if (kLightAnimation) mpLightSampleTexture = createLightSamplesTexture(mpScene, pRenderContext, kLightSampleTexSize, mLightView);
     }
 
     // Update when parameters change
@@ -439,6 +442,8 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         cb["gPointSampler"] = mpPointSampler;
         cb["gPrecomputeLightSamples"] = mPrecomputeLightSamples;
         cb["gUseNewBlockerSearch"] = mUseNewBlockerSearch;
+        cb["gUseAdaptiveDepthBias"] = mUseAdaptiveDepthBias;
+        cb["gLightProjData"] = float2(mLightProj[0][0], mLightProj[1][1]);
         mpShadingPass["gReservoirs"] = mpReservoirBuffer;
         mpShadingPass["gShadingOutput"] = renderData[kOutputChannels[0].name]->asTexture();
         mpShadingPass["gShadowMap"] = shadowMapTex;
@@ -481,6 +486,8 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
         dirty |= group.var("Light rotation", mLightParams.mRotation);
     }
 
+    dirty |= widget.checkbox("Brute Force", mBruteForce);
+
     Gui::DropdownList samplesOption = {
         {4, "4"}, {8, "8"}, {16, "16"}, {32, "32"},
         {64, "64"}, {128, "128"}, {256, "256"}, {512, "512"},
@@ -492,10 +499,16 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     dirty |= widget.dropdown("Blocker search samples", samplesOption, mBlockerSearchSamples);
     dirty |= widget.dropdown("PCF samples", samplesOption, mPCFSamples);
     dirty |= widget.dropdown("Shaodw Map Size", shadowMapSizes, mShadowMapSize);
-    dirty |= widget.var("Depth Bias", mLightParams.mDepthBias);
+    dirty |= widget.checkbox("Use Adaptive Depth Bias", mUseAdaptiveDepthBias);
+    if (mUseAdaptiveDepthBias)
+    {
+        dirty |= widget.var("Constant Part", mConstantEpsilon);
+    }
+    else
+    {
+        dirty |= widget.var("Depth Bias", mLightParams.mDepthBias);
+    }
 
-    dirty |= widget.checkbox("Brute Force", mBruteForce);
-    
     if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewPCSSReSTIR)
     {
         const Gui::RadioButtonGroup targetPdfs = {
@@ -532,7 +545,6 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
         widget.tooltip("Use stochastic light samples and map them onto the near plane to compute average blocker for our method", true);
         dirty |= widget.var("NewPCSS Light Samples", mShadingLightSamples);
         dirty |= widget.var("Brute Force Shadow Rays", mShadowRays);
-        widget.text(" ");
 
         widget.text("VSM EVSM MSM Parameters: ");
         dirty |= widget.checkbox("Naive SAT Scan", mNaiveSATScan);
@@ -565,22 +577,25 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     mInitialCameraTarget = mpScene->getCamera()->getTarget();
 
     mpNeighborOffsetBuffer = createNeighborOffsetTexture(8192);
-    mpLightSampleTexture = createLightSamplesTexture(pScene, pRenderContext, 1024);
 
     mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
 
     // Adjust scene dependent parameters
     if (mLightParams.name == SceneName::Bicycle)
     {
-        mFilterSizeThreshold = 0.01f;
+        mFilterSizeThreshold = float2(0.01f);
+        mConstantEpsilon = 0.02f;
     }
     else if (mLightParams.name == SceneName::PlaneScene)
     {
-        mFilterSizeThreshold = 0.01f;
+        mFilterSizeThreshold = float2(0.01f);
+        mConstantEpsilon = 0.003f;
     }
 
     calcLightSpaceMatrix();
     CreatePasses();
+
+    mpLightSampleTexture = createLightSamplesTexture(pScene, pRenderContext, kLightSampleTexSize, mLightView);
 }
 
 bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -748,9 +763,12 @@ void AreaLightReSTIR::CreatePasses()
         defines.add(mpSampleGenerator->getDefines());
         defines.add("_MS_DISABLE_ALPHA_TEST");
         defines.add("_DEFAULT_ALPHA_TEST");
-        defines.add("_LIGHT_WORLD_SIZE", std::to_string(mLightParams.mLightSize));
+        defines.add("_LIGHT_WORLD_SIZE", to_string(mLightParams.mLightSize));
         float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
         defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
+        defines.add("_LIGHT_NEAR_PLANE", std::to_string(mLightParams.mLightNearPlane));
+        defines.add("_LIGHT_FAR_PLANE", std::to_string(mLightParams.mLightFarPlane));
+        defines.add("_CONSTANT_BIAS", std::to_string(mConstantEpsilon));
 
         CreatePass(mpInitialSamplingPass, "RenderPasses/AreaLightReSTIR/InitialSampling.cs.slang", defines);
         CreatePass(mpTemporalResamplingPass, "RenderPasses/AreaLightReSTIR/TemporalResampling.cs.slang", defines);
@@ -875,11 +893,12 @@ void AreaLightReSTIR::UpdateDefines()
         defines.add("_NEED_BLOCKER_SEARCH", std::to_string(shadingBlockerSearch));
         defines.add("_LIGHT_SAMPLES", std::to_string(mShadingLightSamples));
         defines.add("_DEPTH_DIFFERENCE", std::to_string(mDepthDifference));
-        defines.add("_LIGHT_WORLD_SIZE", std::to_string(mLightParams.mLightSize));
+        defines.add("_LIGHT_WORLD_SIZE", to_string(mLightParams.mLightSize));
         float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
         defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
         defines.add("_SHADOW_RAYS", std::to_string(mShadowRays));
-        defines.add("_FILTER_SIZE_THRESHOLD", std::to_string(mFilterSizeThreshold));
+        defines.add("_FILTER_SIZE_THRESHOLD", to_string(mFilterSizeThreshold));
+        defines.add("_CONSTANT_BIAS", std::to_string(mConstantEpsilon));
         defines.add(PCSSDefines);
         if (mpEmissiveSampler) defines.add(mpEmissiveSampler->getDefines());
         AddDefines(mpShadingPass, defines);
@@ -900,7 +919,7 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
         posW = mLightParams.mLightPos;
 
         lightView = glm::lookAt(posW, posW + dirW, mLightParams.mLightUp); // RH camera look direction is -z direction in view space
-        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane);
+        lightProj = glm::perspective(glm::radians(mLightParams.mFovY), 1.0f, mLightParams.mLightNearPlane, mLightParams.mLightFarPlane); // D3DXMatrixPerspectiveFovRH
     }
 
     //logInfo("dirW = " + to_string(dirW));
@@ -936,6 +955,7 @@ void AreaLightReSTIR::calcLightSpaceMatrix()
     //}
 
     //logInfo("GLM_CONFIG_CLIP_CONTROL = " + std::to_string(GLM_CONFIG_CLIP_CONTROL)); // GLM_CLIP_CONTROL_RH_ZO   
+    //logInfo("GLM_CLIP_SPACE_Y = " + std::to_string(GLM_CLIP_SPACE_Y)); // GLM_CLIP_SPACE_Y_BOTTOMUP   
 
     mLightSpaceMat = lightProj * lightView;
     mLightView = lightView;

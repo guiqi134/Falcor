@@ -51,7 +51,8 @@ Texture::SharedPtr createNeighborOffsetTexture(uint32_t sampleCount)
 }
 
 
-Texture::SharedPtr createLightSamplesTexture(const Scene::SharedPtr& pScene, RenderContext* pRenderContext, uint sampleCount)
+Texture::SharedPtr createLightSamplesTexture(const Scene::SharedPtr& pScene, RenderContext* pRenderContext, uint sampleCount,
+    float4x4 lightView)
 {
     std::random_device device;
     std::mt19937 rng(device());
@@ -63,19 +64,32 @@ Texture::SharedPtr createLightSamplesTexture(const Scene::SharedPtr& pScene, Ren
 
     std::uniform_int_distribution<int> dist_int(0, triangleCount - 1);
 
-    std::unique_ptr<float4[]> samples(new float4[sampleCount]);
+    std::unique_ptr<float2[]> samples(new float2[sampleCount]);
     for (uint i = 0; i < sampleCount; i++)
     {
-        float2 u = float2(dist(rng), dist(rng));
+        // Select a mesh light triangle 
+        float3 randoms = float3(dist(rng), dist(rng), dist(rng));
+        uint triangleIndex = std::min((uint)(randoms.x * triangleCount), triangleCount - 1);
+        auto triangle = pLightCollection->getMeshLightTriangles()[triangleIndex];
+        auto vertices = triangle.vtx;
+
+        // Calculate barycentrics
+        float2 u = randoms.yz;
         float su = sqrt(u.x);
         float2 b = float2(1.f - su, u.y * su); 
         float3 barycentrics = float3(1.f - b.x - b.y, b.x, b.y);
 
-        samples[i] = float4(dist(rng), barycentrics);
+        // Get sample position in light view space
+        float3 samplePosW = vertices[0].pos * barycentrics[0] +
+                vertices[1].pos * barycentrics[1] +
+                vertices[2].pos * barycentrics[2];
+        float3 samplePosLightView = lightView * float4(samplePosW, 1.0f);
+
+        samples[i] = samplePosLightView.xy;
     }
 
     for (uint i = 0; i < 20; i++)
         logInfo("samples[i] = " + to_string(samples[i]));
 
-    return Texture::create1D(sampleCount, ResourceFormat::RGBA32Float, 1, 1, samples.get());
+    return Texture::create1D(sampleCount, ResourceFormat::RG32Float, 1, 1, samples.get());
 }

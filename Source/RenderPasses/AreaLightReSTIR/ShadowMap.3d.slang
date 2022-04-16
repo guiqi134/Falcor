@@ -23,7 +23,7 @@ VSOut vsMain(VSIn vIn)
 
 
 /*
-Projection Matrix (row major):
+D3DXMatrixPerspectiveFovRH (row major):
 xScale     0          0              0
 0        yScale       0              0
 0          0      zf/(zn-zf)        -1
@@ -31,7 +31,7 @@ xScale     0          0              0
 */
 float LinearizeDepth(float depth)
 {
-    return (nearZ * farZ) / (farZ + depth * (nearZ - farZ));
+    return (nearZ * farZ) / (depth * (nearZ - farZ) - farZ);
 }
 
 struct PSOut
@@ -50,7 +50,7 @@ PSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID)
     if (alphaTest(vsOut, triangleIndex)) discard;
 
     PSOut psOut;
-    float depth = saturate(vsOut.posH.z); // posH is screen space coordinate
+    float depth = saturate(vsOut.posH.z); // posH is screen space coordinate (already perform homogeneous divide)
 
 #ifdef _VSM
     float2 moments = float2(depth, depth * depth);

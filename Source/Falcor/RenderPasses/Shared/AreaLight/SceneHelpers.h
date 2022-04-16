@@ -16,7 +16,7 @@ namespace Falcor
         float3 mLightPos;
         float3 mLightUp;
         float3 mRotation;
-        float mLightSize; // TODO: change to 2D size
+        float2 mLightSize; // TODO: change to 2D size
         float mFovY;
         float mLightNearPlane;
         float mLightFarPlane;
@@ -30,7 +30,7 @@ namespace Falcor
                 mLightUp = float3(0.0f, 0.0f, -1.0f);
                 mLightPos = float3(14.5f, 50.0f, 15.0f);
                 mRotation = float3(107.0f, 0.0f, 0.0f);
-                mLightSize = 3.0f;
+                mLightSize = float2(3.0f);
                 mFovY = 35.0f;
                 mLightNearPlane = mLightPos.y - 20.0f;
                 mDepthBias = 0.008f;
@@ -40,7 +40,7 @@ namespace Falcor
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
                 mLightPos = float3(0.0f, 5.0f, -10.0f);
                 mRotation = float3(40.0f, 0.0f, 0.0f);
-                mLightSize = 0.75f;
+                mLightSize = float2(0.75f);
                 mFovY = 55.0;
                 mLightNearPlane = 8.0f;
                 mDepthBias = 0.008f;
@@ -50,7 +50,7 @@ namespace Falcor
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
                 mLightPos = float3(-10.0f, 70.0f, -50.0f);
                 mRotation = float3(40.0f, 0.0f, 0.0f);
-                mLightSize = 15.0f;
+                mLightSize = float2(15.0f);
                 mFovY = 90.0;
                 mLightNearPlane = 40.0f;
                 mDepthBias = 0.01f;
@@ -60,7 +60,7 @@ namespace Falcor
                 mLightUp = float3(0, 1, 0);
                 mLightPos = float3(4.955003, 2.819287, 6.114000);
                 mRotation = float3(160.0f, -10.0f, 0.0f);
-                mLightSize = 2.0f;
+                mLightSize = float2(2.0f);
                 mFovY = 125.0;
                 mLightNearPlane = 1.5f;
                 mDepthBias = 0.0005f;
@@ -70,7 +70,7 @@ namespace Falcor
                 mLightUp = float3(0.0f, 0.0f, -1.0f);
                 mLightPos = float3(0.0f, 10.0f, 0.0f);
                 mRotation = float3(90.0f, 0.0f, 0.0f);
-                mLightSize = 1.0f;
+                mLightSize = float2(1.0f);
                 mFovY = 70.0;
                 //mLightNearPlane = 6.0f; // three planes
                 mLightNearPlane = 3.0f; // one plane
@@ -81,17 +81,17 @@ namespace Falcor
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
                 mLightPos = float3(7.0f, 8.0f, -12.0f);
                 mRotation = float3(35.0f, -30.0f, 0.0f);
-                mLightSize = 1.0f;
+                mLightSize = float2(1.0f);
                 mFovY = 35.0;
                 mLightNearPlane = 12.0f;
-                mDepthBias = 0.0005f;
+                mDepthBias = 0.0009f;
             }
             else if (name == SceneName::PalmTrees)
             {
                 mLightUp = float3(0.0f, 1.0f, 0.0f);
                 mLightPos = float3(-2.0f, 26.0f, -5.0f);
                 mRotation = float3(70.0f, 60.0f, 0.0f);
-                mLightSize = 1.5f;
+                mLightSize = float2(1.5f);
                 mFovY = 81.0;
                 mLightNearPlane = 6.0f;
                 mDepthBias = 0.003f;
@@ -143,7 +143,7 @@ namespace Falcor
 
             auto pAreaLight = dynamic_cast<AnalyticAreaLight*>(pLight);
             auto model = translation * rotationY * rotationZ * rotationX;
-            pAreaLight->setScaling(float3(mLightSize / 2.0f));
+            pAreaLight->setScaling(float3(mLightSize / 2.0f, 1.0f));
             pAreaLight->setTransformMatrix(model);
         }
 
@@ -166,7 +166,7 @@ namespace Falcor
             if (pScene->hasAnimation())
             {
                 mObjectToWorld = globalMatrices[pMeshInstance.globalMatrixID];
-                mLightSize = std::max(size.x, size.y);
+                mLightSize = float2(size.x, size.y);
                 mLightPos = mObjectToWorld * float4(lightCenter, 1.0f);
             }
             else
@@ -174,14 +174,15 @@ namespace Falcor
                 auto translation = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, 0.0f));
                 auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
                 mObjectToWorld = translation * rotation;
-                mLightSize = std::max(std::max(size.x, size.y), size.z);
+                //mLightSize = std::max(std::max(size.x, size.y), size.z); // TODO: ???
                 mLightPos = float4(lightCenter, 1.0f);
             }
             
 
             if (name == SceneName::PlaneScene)
             {
-                mLightNearPlane = mLightPos.y - 5.0f - 0.1f;
+                //mLightNearPlane = mLightPos.y - 5.0f - 0.1f;
+                mLightNearPlane = 3.0f - 0.1f;
             }
 
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[0]));
@@ -190,7 +191,7 @@ namespace Falcor
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[3]));
 
             //logInfo("size = " + to_string(size));
-            //logInfo("mLightSize = " + std::to_string(mLightSize));
+            //logInfo("mLightSize = " + to_string(mLightSize));
             //logInfo("lightCenter = " + to_string(lightCenter));
         }
         

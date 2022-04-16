@@ -143,15 +143,17 @@ private:
     uint mShadingLightSamples = 64; 
     uint mShadowMapSize = 1 << 11; // 2048
     uint mShadowRays = 1;
-    bool mPrecomputeLightSamples = true;
+    bool mPrecomputeLightSamples = false;
     bool mUseNewBlockerSearch = false; // only for NewPCSS method
+    bool mUseAdaptiveDepthBias = false;
+    float mConstantEpsilon = 0.003f;
 
     ShadowType mShadowType = ShadowType::NewPCSS; // Control different shadow methods
 
     // VSM, EVSM, MSM params
     float mLBRThreshold = 0.0f;
     float mDepthDifference = 0.03f;
-    float mFilterSizeThreshold = 0.01f; 
+    float2 mFilterSizeThreshold = float2(0.01f); 
 
     // Area light parameters
     AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
