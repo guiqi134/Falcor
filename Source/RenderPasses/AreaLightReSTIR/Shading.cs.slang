@@ -52,18 +52,20 @@ RWTexture2D<float4> gShadingOutput;
 
 static const uint sampleLightMask = 2048;
 
+groupshared float2 samplePool[sampleLightMask];
+
 static struct Data
 {
     StandardMaterial standardMaterial;
 } gData;
 
 [numthreads(16, 16, 1)]
-void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID)
+void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID, uint indexInGroup : SV_GroupIndex)
 {
-    if (any(threadIndex >= gViewportDims))
-    {
-        return;
-    }
+    //if (any(threadIndex >= gViewportDims))
+    //{
+    //    return;
+    //}
 
     printSetPixel(threadIndex);
 
@@ -196,9 +198,16 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             case ShadowType::NewPCSS:
                 res = unshadowedContrib;
 
+                [unroll]
+                for (int i = 0; i < 8; i++)
+                    samplePool[8 * indexInGroup + i] = gLightSampleTexture[8 * indexInGroup + i];
+
+                GroupMemoryBarrierWithGroupSync();
+
                 if (bso.shadingPosLightView.w)
                 {
                     float sum = 0.0f;
+
                     uint startIndex = sampleNext1D(sg) * sampleLightMask;
                     for (uint i = 0; i < _LIGHT_SAMPLES; i++)
                     {
@@ -212,7 +221,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                         if (gPrecomputeLightSamples)
                         {
                             uint sampleIndex = (startIndex + i) % sampleLightMask;
-                            float3 samplePosLightView = float3(gLightSampleTexture[sampleIndex], 0.0f);
+                            float3 samplePosLightView = float3(samplePool[sampleIndex], 0.0f);
                             lightDirView = samplePosLightView - bso.shadingPosLightView.xyz;
                         }
                         else
