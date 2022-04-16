@@ -108,7 +108,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         else
         {
             print(222);
-            blockerSearchNewPCSS(bso, bias, sd.posW, sgFixed, gLinearSampler, gShadowMap, gLightParams);
+            blockerSearchNewPCSS(bso, bias, sd.posW, sgFixed, gLinearSampler, gShadowMap, gLightParams, gLightProjData);
         }
 #endif
         print(bso.projCoords);
@@ -166,7 +166,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             //uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
             float3 unshadowedContrib = 0.0f;
             float3 shadowedContrib = 0.0f;
-            uint unshadowedCount = 2;
+            uint unshadowedCount = 16;
             for (uint i = 0; i < unshadowedCount; i++)
             {
                 //AnalyticLightSample lightSample;
@@ -248,7 +248,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 float angle = sampleNext1D(sgFixed) * M_2PI;
                 float2 rotation = float2(cos(angle), sin(angle));
                 visibility = bso.shadingPosLightView.w ? shadowMapPCSS(bso, 0.3f * (sampleNext2D(sg) - 0.5f) /* translated poission */,
-                    gSamplerCmp, gLinearSampler, gShadowMap, gPCFSamples, rotation) : 1.0f;
+                    gSamplerCmp, gLinearSampler, gShadowMap, gPCFSamples, rotation, gLightParams) : 1.0f;
                 res += unshadowedContrib * visibility;
                 break;
             case ShadowType::VSM:
@@ -268,8 +268,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 {
                     // Calculate filter size
                     float2 penumbraSize = _LIGHT_WORLD_SIZE * (zReceiver - avgBlockerDepth) / avgBlockerDepth; // depth in light view space
-                    float2 filterSize = penumbraSize * _LIGHT_NEAR_PLANE / zReceiver;
-                    filterSize /= _LIGHT_FRUSTUM_SIZE;
+                    float2 filterSize = penumbraSize * gLightParams.lightNearPlane / zReceiver;
+                    filterSize /= gLightParams.lightFrustumSize;
 
                     filterSize = min(filterSize, kMaxFilterWidth);
                     print(filterSize);

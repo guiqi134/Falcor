@@ -354,7 +354,9 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         pRenderContext->blit(mpSAT->getSRV(), pSAT->getRTV());
     }
 
-    LightParams lightParams = { mLightSpaceMat, mLightView, mLightProj, mLightParams.mLightPos };
+    float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
+    LightParams lightParams = { mLightSpaceMat, mLightView, mLightProj, mLightParams.mLightPos,
+        mLightParams.mLightNearPlane, mLightParams.mLightFarPlane, frustumSize};
 
     // ReSTIR passes
     if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewPCSSReSTIR)
@@ -764,10 +766,6 @@ void AreaLightReSTIR::CreatePasses()
         defines.add("_MS_DISABLE_ALPHA_TEST");
         defines.add("_DEFAULT_ALPHA_TEST");
         defines.add("_LIGHT_WORLD_SIZE", to_string(mLightParams.mLightSize));
-        float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
-        defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
-        defines.add("_LIGHT_NEAR_PLANE", std::to_string(mLightParams.mLightNearPlane));
-        defines.add("_LIGHT_FAR_PLANE", std::to_string(mLightParams.mLightFarPlane));
         defines.add("_CONSTANT_BIAS", std::to_string(mConstantEpsilon));
 
         CreatePass(mpInitialSamplingPass, "RenderPasses/AreaLightReSTIR/InitialSampling.cs.slang", defines);
@@ -791,8 +789,6 @@ void AreaLightReSTIR::UpdateDefines()
     PCSSDefines.add("_SHADOW_TYPE", std::to_string((uint)mShadowType));
 
     Shader::DefineList sharedDefines;
-    sharedDefines.add("_LIGHT_NEAR_PLANE", std::to_string(mLightParams.mLightNearPlane));
-    sharedDefines.add("_LIGHT_FAR_PLANE", std::to_string(mLightParams.mLightFarPlane));
     sharedDefines.add("_LBR_THRESHOLD", std::to_string(mLBRThreshold));
     PCSSDefines.add(sharedDefines);
 
@@ -894,8 +890,6 @@ void AreaLightReSTIR::UpdateDefines()
         defines.add("_LIGHT_SAMPLES", std::to_string(mShadingLightSamples));
         defines.add("_DEPTH_DIFFERENCE", std::to_string(mDepthDifference));
         defines.add("_LIGHT_WORLD_SIZE", to_string(mLightParams.mLightSize));
-        float frustumSize = 2.0f * mLightParams.mLightNearPlane * glm::tan(glm::radians(0.5f * mLightParams.mFovY));
-        defines.add("_LIGHT_FRUSTUM_SIZE", std::to_string(frustumSize));
         defines.add("_SHADOW_RAYS", std::to_string(mShadowRays));
         defines.add("_FILTER_SIZE_THRESHOLD", to_string(mFilterSizeThreshold));
         defines.add("_CONSTANT_BIAS", std::to_string(mConstantEpsilon));

@@ -71,7 +71,7 @@ namespace Falcor
                 mLightPos = float3(0.0f, 10.0f, 0.0f);
                 mRotation = float3(90.0f, 0.0f, 0.0f);
                 mLightSize = float2(1.0f);
-                mFovY = 70.0;
+                mFovY = 140.0;
                 //mLightNearPlane = 6.0f; // three planes
                 mLightNearPlane = 3.0f; // one plane
                 mDepthBias = 0.0005f;
@@ -154,6 +154,8 @@ namespace Falcor
             const auto& meshLights = pLightCollection->getMeshLights();
             uint meshInstanceID = meshLights[0].meshInstanceID;
 
+            logInfo("meshInstanceID = " + std::to_string(meshInstanceID));
+
             // Get all necessary data from Scene 
             const auto& pMeshInstance = pScene->getMeshInstance(meshInstanceID);
             const auto& meshBound = pScene->getMeshBounds(meshInstanceID); 
@@ -181,8 +183,13 @@ namespace Falcor
 
             if (name == SceneName::PlaneScene)
             {
-                //mLightNearPlane = mLightPos.y - 5.0f - 0.1f;
-                mLightNearPlane = 3.0f - 0.1f;
+                const auto& pBlockerMeshInstance = pScene->getMeshInstance(2);
+                const auto& blockerMeshBound = pScene->getMeshBounds(2);
+                float3 blockerCenter = meshBound.center();
+                const auto& blockerTransform = globalMatrices[pBlockerMeshInstance.globalMatrixID];
+                float3 blockerCenterW = blockerTransform * float4(blockerCenter, 1.0f);
+
+                mLightNearPlane = mLightPos.y - blockerCenterW.y - 0.1f;
             }
 
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[0]));

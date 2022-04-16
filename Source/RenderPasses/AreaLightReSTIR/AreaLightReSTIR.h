@@ -156,7 +156,7 @@ private:
     float2 mFilterSizeThreshold = float2(0.01f); 
 
     // Area light parameters
-    AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
+    AreaLightParams mLightParams = AreaLightParams(SceneName::PlaneScene);
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;

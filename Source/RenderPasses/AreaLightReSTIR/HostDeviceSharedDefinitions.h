@@ -22,6 +22,9 @@ struct LightParams
         var["lightView"] = lightView;
         var["lightProj"] = lightProj;
         var["lightPos"] = lightPos;
+        var["lightNearPlane"] = lightNearPlane;
+        var["lightFarPlane"] = lightFarPlane;
+        var["lightFrustumSize"] = lightFrustumSize;
     }
 #endif
 
@@ -29,6 +32,9 @@ struct LightParams
     float4x4 lightView;
     float4x4 lightProj;
     float3 lightPos;
+    float lightNearPlane;
+    float lightFarPlane;
+    float lightFrustumSize;
 };
 
 // This per-pixel data should be passed between shaders

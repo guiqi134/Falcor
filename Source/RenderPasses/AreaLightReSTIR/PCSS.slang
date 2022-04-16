@@ -11,16 +11,9 @@ import Experimental.Scene.Lights.EmissiveLightSampler;
 
 __exported import PoissonDisk;
 
-//float LinearizeDepth(float depth)
-//{
-//    return (_LIGHT_NEAR_PLANE * _LIGHT_FAR_PLANE) /
-//        (_LIGHT_FAR_PLANE + depth * (_LIGHT_NEAR_PLANE - _LIGHT_FAR_PLANE));
-//}
-
-float LinearizeDepth(float depth)
+float LinearizeDepth(float depth, float n, float f)
 {
-    return (_LIGHT_NEAR_PLANE * _LIGHT_FAR_PLANE) /
-        (depth * (_LIGHT_FAR_PLANE - _LIGHT_NEAR_PLANE) - _LIGHT_FAR_PLANE);
+    return (n * f) / (depth * (f - n) - f);
 }
 
 float2 rotatedPoisson(float2 poissonSample, float2 rotation)
@@ -75,7 +68,7 @@ float4x4 inverse(float4x4 m)
 // Reference: https://developer.download.nvidia.com/whitepapers/2008/PCSS_Integration.pdf
 // All calculation should be performed in light view space!
 float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerComparisonState samplerCmp, SamplerState linearSampler, Texture2D shadowMap,
-    Texture1D<float2> PCFRectSamples, float2 rotation)
+    Texture1D<float2> PCFRectSamples, float2 rotation, LightParams lightParams)
 {
     // 1. get blocker search outputs
     float avgBlockerDepth = bso.projCoords.w;
@@ -88,8 +81,8 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
 
     // Mapping penumbra size to the shadow map (divide by frustum size) using similar triangle to determine the filter size
     // The similar triangle takes sample point in area light as upper vertex and penumbra size as bottom edge
-    float2 filterRadiusUV = float2(penumbraSize * _LIGHT_NEAR_PLANE / zView);
-    filterRadiusUV /= _LIGHT_FRUSTUM_SIZE;
+    float2 filterRadiusUV = float2(penumbraSize * lightParams.lightFrustumSize / zView);
+    filterRadiusUV /= lightParams.lightFrustumSize;
 
     print("penumbraSize = ", penumbraSize);
     print("filterRadiusUV = ", filterRadiusUV);
@@ -149,8 +142,10 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     float zReceiver = abs(shadingPosLightView.z);
 
     // Blocker Search
-    float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver);
-    searchSize /= _LIGHT_FRUSTUM_SIZE; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
+    float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - lightParams.lightNearPlane) / zReceiver);
+    searchSize /= lightParams.lightFrustumSize; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
+
+    print(searchSize);
 
     float blockerSum = 0;
     uint numBlockers = 0;
@@ -162,7 +157,7 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
         float shadowMapDepth = shadowMap.SampleLevel(sampler, projCoords.xy + offset, 0).r;
         if (shadowMapDepth < projCoords.z)
         {
-            float linearDepth = abs(LinearizeDepth(shadowMapDepth));
+            float linearDepth = abs(LinearizeDepth(shadowMapDepth, lightParams.lightNearPlane, lightParams.lightFarPlane));
             blockerSum += linearDepth;
             numBlockers++;
         }
@@ -177,7 +172,7 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
 }
 
 void blockerSearchNewPCSS(inout BlockerSearchOutputs bso, float bias, float3 posW, SampleGenerator sg, SamplerState sampler,
-    Texture2D shadowMap, LightParams lightParams)
+    Texture2D shadowMap, LightParams lightParams, float2 lightProjData)
 {
     float4 lightSpacePosH = mul(float4(posW, 1.0f), lightParams.lightSpaceMat); // clipping space
     float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
@@ -191,26 +186,21 @@ void blockerSearchNewPCSS(inout BlockerSearchOutputs bso, float bias, float3 pos
     uint numBlockers = 0;
     for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
     {
+        float3 randoms = sampleNext3D(sg);
         uint triangleCount = gScene.lightCollection.triangleCount;
-        uint triangleIndex = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
+        uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
         const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
-        float2 u = sampleNext2D(sg);
-        const float3 barycentrics = sample_triangle(u);
-        float3 lightSamplePos = tri.getPosition(barycentrics);
+        float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
+        float3 lightDirView = mul(samplePosW - posW, float3x3(lightParams.lightView));
 
         // Map light sample to near plane
-        float3 shadingPosOnNearPlane = (_LIGHT_NEAR_PLANE / zReceiver) * shadingPosLightView;
-        float2 samplePosView = mul(float4(lightSamplePos, 1.0f), lightParams.lightView).xy; // sample position on light 
-        samplePosView = shadingPosOnNearPlane.xy + samplePosView * (zReceiver - _LIGHT_NEAR_PLANE) / zReceiver; // sample position on near plane
-        float4 samplePosH = mul(float4(samplePosView, shadingPosOnNearPlane.z, 1.0f), lightParams.lightProj);
-        float3 samplePosNDC = samplePosH.xyz / samplePosH.w; // TODO: remove
-        samplePosNDC.y *= -1;
-        float3 samplePosProj = float3(samplePosNDC.xy * 0.5f + 0.5f, samplePosNDC.z); // normalized screen space
+        float3 queryPosView = shadingPosLightView + lightDirView * (1.f - lightParams.lightNearPlane / zReceiver);
+        float2 samplePosProj = 0.5 * float2(-lightProjData.x, lightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
 
         float shadowMapDepth = shadowMap.SampleLevel(sampler, samplePosProj.xy, 0).r;
         if (shadowMapDepth < projCoords.z)
         {
-            float linearDepth = abs(LinearizeDepth(shadowMapDepth));
+            float linearDepth = abs(LinearizeDepth(shadowMapDepth, lightParams.lightNearPlane, lightParams.lightFarPlane));
             blockerSum += linearDepth;
             numBlockers++;
         }
@@ -252,12 +242,14 @@ float adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, Te
     // Normalized coordinate in [0,1]
     float2 nlsGridCenter = texelSize * (index + float2(0.5)); // Normalized eye space grid center --- [0,1]
     // Unnormalized coordinate in [-lightLeft,lightLeft]
-    float viewBound = 0.5f * _LIGHT_FRUSTUM_SIZE; // TODO: remove *0.5f ???
+    float viewBound = 0.5f * lightParams.lightFrustumSize; // TODO: remove *0.5f ???
     float2 lsGridCenter = viewBound * (2.0 * nlsGridCenter - float2(1.0));
 
     /** Define light ray **/
     // Light ray direction in light space
-    float3 lsGridLineDir = normalize(float3(lsGridCenter, -_LIGHT_NEAR_PLANE)); // Light space grid line direction
+    float nearPlane = lightParams.lightNearPlane;
+    float farPlane = lightParams.lightFarPlane;
+    float3 lsGridLineDir = normalize(float3(lsGridCenter, -nearPlane)); // Light space grid line direction
 
     /** Plane ray intersection **/
     // Locate the potential occluder for the shading fragment
@@ -273,7 +265,7 @@ float adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, Te
     float B = lightParams.lightProj[3][2];
 
     // Change projection matrix calculation from DirectX to OpenGL
-    A += _LIGHT_NEAR_PLANE / (_LIGHT_NEAR_PLANE - _LIGHT_FAR_PLANE);
+    A += nearPlane / (nearPlane - farPlane);
     B *= 2;
 
     // Constant part is (sceneScale * K)
