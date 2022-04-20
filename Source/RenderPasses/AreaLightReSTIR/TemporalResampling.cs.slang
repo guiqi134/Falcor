@@ -40,7 +40,7 @@ static struct Data
 } gData;
 
 // Thresholds to reject neighbor reservoirs with substantially different geometry/material
-static const int maxHistoryLength = 20; 
+static const int maxHistoryLength = 20; // ???
 static const float positionThreshold = 0.1f;
 static const float normalThreshold = 0.65f;
 

@@ -190,6 +190,7 @@ namespace Falcor
                 float3 blockerCenterW = blockerTransform * float4(blockerCenter, 1.0f);
 
                 mLightNearPlane = mLightPos.y - blockerCenterW.y - 0.1f;
+                //mLightNearPlane = 0.1f;
             }
 
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[0]));

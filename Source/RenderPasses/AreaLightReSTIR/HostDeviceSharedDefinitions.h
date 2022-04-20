@@ -4,7 +4,7 @@ BEGIN_NAMESPACE_FALCOR
 
 enum class ShadowType
 {
-    ShadowRay, NewPCSSReSTIR, NewPCSS, PCSS, VSM, EVSM, MSM,
+    ShadowRay, NewPCSSReSTIR, NewPCSS, PCSS, VSM, EVSM, MSM, NewIdea
 };
 
 #ifdef HOST_CODE

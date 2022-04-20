@@ -446,6 +446,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         cb["gUseNewBlockerSearch"] = mUseNewBlockerSearch;
         cb["gUseAdaptiveDepthBias"] = mUseAdaptiveDepthBias;
         cb["gLightProjData"] = float2(mLightProj[0][0], mLightProj[1][1]);
+        cb["gTemporalReuseBlockerDepth"] = mTemporalReuseBlockerDepth;
         mpShadingPass["gReservoirs"] = mpReservoirBuffer;
         mpShadingPass["gShadingOutput"] = renderData[kOutputChannels[0].name]->asTexture();
         mpShadingPass["gShadowMap"] = shadowMapTex;
@@ -454,12 +455,18 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpShadingPass["gLightSampleTexture"] = mpLightSampleTexture;
         mpShadingPass["gBlockerSearchSamples"] = mpBlockerSearchSamples;
         mpShadingPass["gPCFSamples"] = mpPCFSamples;
+        mpShadingPass["gPrevBlockerDepths"] = mpPrevBlockerDepths;
+        mpShadingPass["gCurrBlockerDepths"] = mpCurrBlockerDepths;
         mpEmissiveSampler->setShaderData(cb["gEmissiveLightSampler"]);
         ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
         lightParams.setShaderData(cb["gLightParams"]);
         mpScene->setRaytracingShaderData(pRenderContext, mpShadingPass->getRootVar());
         mpPixelDebug->prepareProgram(mpShadingPass->getProgram(), mpShadingPass->getRootVar());
         mpShadingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
+
+        // TODO: Change to ping-pong texture
+        if (mShadowType == ShadowType::NewIdea)
+            pRenderContext->copyResource(mpPrevBlockerDepths.get(), mpCurrBlockerDepths.get());
     }
 
     {
@@ -544,6 +551,7 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     {
         dirty |= widget.checkbox("Precompute Light Samples for NewPCSS", mPrecomputeLightSamples);
         dirty |= widget.checkbox("Use New Blocker Search", mUseNewBlockerSearch);
+        dirty |= widget.checkbox("Temporal Reuse Blocker Depth", mTemporalReuseBlockerDepth);
         widget.tooltip("Use stochastic light samples and map them onto the near plane to compute average blocker for our method", true);
         dirty |= widget.var("NewPCSS Light Samples", mShadingLightSamples);
         dirty |= widget.var("Brute Force Shadow Rays", mShadowRays);
@@ -651,6 +659,13 @@ bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
         return true;
     }
 
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key8)
+    {
+        mNeedUpdate = true;
+        mShadowType = ShadowType::NewIdea;
+        return true;
+    }
+
     return false;
 }
 
@@ -684,6 +699,12 @@ AreaLightReSTIR::AreaLightReSTIR()
     index = uint(log2(mPCFSamples)) - 2;
     auto PCFSamples = poissonRectSet[index];
     mpPCFSamples = Texture::create1D(uint(PCFSamples.size()), ResourceFormat::RG32Float, 1, 1, PCFSamples.data());
+
+    // Previous blocker depths texture
+    mpPrevBlockerDepths = Texture::create2D(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight(),
+        ResourceFormat::RG32Float, 1, 1, nullptr, Resource::BindFlags::ShaderResource);
+    mpCurrBlockerDepths = Texture::create2D(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight(),
+        ResourceFormat::RG32Float, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
 }
 
 void AreaLightReSTIR::AddDefines(ComputePass::SharedPtr pass, Shader::DefineList& defines)
@@ -834,7 +855,7 @@ void AreaLightReSTIR::UpdateDefines()
     bool hasResampling = mEnableSpatialResampling || mEnableTemporalResampling;
     bool visibilityReuse = mActiveTargetPdf == 0 && hasResampling;
     bool initialBlockerSearch, shadingBlockerSearch;
-    if (mShadowType == ShadowType::ShadowRay)
+    if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewIdea)
     {
         initialBlockerSearch = false;
         shadingBlockerSearch = false;

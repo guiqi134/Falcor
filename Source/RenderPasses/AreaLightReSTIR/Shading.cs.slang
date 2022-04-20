@@ -32,6 +32,7 @@ cbuffer CB
     bool gPrecomputeLightSamples;
     bool gUseNewBlockerSearch;
     bool gUseAdaptiveDepthBias;
+    bool gTemporalReuseBlockerDepth;
     float2 gLightProjData;
 
     SamplerComparisonState gSamplerCmp;
@@ -48,9 +49,12 @@ Texture1D<float2> gBlockerSearchSamples;
 Texture1D<float2> gPCFSamples;
 
 RWStructuredBuffer<Reservoir> gReservoirs;
+Texture2D<float2> gPrevBlockerDepths;
+RWTexture2D<float2> gCurrBlockerDepths;
 RWTexture2D<float4> gShadingOutput;
 
 static const uint sampleLightMask = 2048;
+static const int maxHistoryLength = 32;
 
 groupshared float2 samplePool[sampleLightMask];
 
@@ -87,7 +91,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         BlockerSearchOutputs bso = { r.projCoords, r.shadingPosLightView };
         float bias = 0.0f;
 
-#if _NEED_BLOCKER_SEARCH
         if (gUseAdaptiveDepthBias)
         {
             bias = adaptiveDepthBias(sd.N, sd.posW, shadowMapSize.x, gShadowMap, gLinearSampler, gLightParams);
@@ -100,6 +103,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             print(bias);
         }
 
+#if _NEED_BLOCKER_SEARCH 
         if (!gUseNewBlockerSearch || gShadowType != (uint)ShadowType::NewPCSS)
         {
             print(111);
@@ -195,6 +199,114 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             // Compute final contribution
             switch (gShadowType)
             {
+            case ShadowType::NewIdea:
+            {
+                float4 lightSpacePosH = mul(float4(sd.posW, 1.0f), gLightParams.lightSpaceMat); // clipping space
+                float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
+                lightSpacePos.y *= -1; // DirectX flips the Y axis in viewport scale matrix
+                float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // NDC
+                float3 shadingPosLightView = mul(float4(sd.posW, 1.0f), gLightParams.lightView).xyz;
+                float zReceiver = abs(shadingPosLightView.z);
+
+                float blockerDepth = 0.0f;
+                uint numBlockers = 0;
+                if (gTemporalReuseBlockerDepth)
+                {
+                    // Calculate previous frame pixel position using motion vector 
+                    float2 motion = gShadingDataLoader.motionVector[threadIndex];
+                    motion.xy += (sampleNext2D(sg) - 0.5); // remove camera jitter?
+                    float2 reprojectedSamplePosition = float2(threadIndex) + motion.xy;
+                    int2 prevPos = int2(round(reprojectedSamplePosition));
+                    float2 prevBlockerDepth = gPrevBlockerDepths[prevPos];
+                    print(prevPos);
+                    print(prevBlockerDepth);
+
+                    // Map samplePos to shadow map.
+                    float3 randoms = sampleNext3D(sg);
+                    uint triangleCount = gScene.lightCollection.triangleCount;
+                    uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
+                    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+                    float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
+                    float3 lightDirView = mul(samplePosW - posWOrigin, float3x3(gLightParams.lightView));
+                    float projectionPlane = gLightParams.lightNearPlane + sampleNext1D(sg) * (zReceiver - gLightParams.lightNearPlane);
+                    //projectionPlane = gLightParams.lightNearPlane;
+                    float3 queryPosView = shadingPosLightView + lightDirView * (1.f - projectionPlane / zReceiver);
+                    float2 samplePosProj = 0.5 * float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
+
+                    blockerDepth = prevBlockerDepth.x;
+                    float sampleCount = prevBlockerDepth.y;
+                    sampleCount = min(maxHistoryLength, sampleCount);
+                    float blockerDepthSum = blockerDepth * sampleCount;
+                    float shadowMapDepth = gShadowMap.SampleLevel(gLinearSampler, samplePosProj.xy, 0).r;
+
+                    print(blockerDepthSum);
+
+                    if (shadowMapDepth < projCoords.z)
+                    {
+                        sampleCount++;
+                        float linearDepth = abs(LinearizeDepth(shadowMapDepth, gLightParams.lightNearPlane, gLightParams.lightFarPlane));
+                        blockerDepth = (blockerDepthSum + linearDepth) / sampleCount;
+                    }
+
+                    print(blockerDepth);
+                    gCurrBlockerDepths[threadIndex] = float2(blockerDepth, sampleCount);
+                }
+                else
+                {
+                    float sum = 0.0f;
+                    for (uint i = 0; i < 1; i++)
+                    {
+                        float3 randoms = sampleNext3D(sg);
+                        uint triangleCount = gScene.lightCollection.triangleCount;
+                        uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
+                        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+                        float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
+                        float3 lightDirView = mul(samplePosW - posWOrigin, float3x3(gLightParams.lightView));
+
+                        // Map samplePos to shadow map.
+                        float projectionPlane = gLightParams.lightNearPlane + sampleNext1D(sg) * (zReceiver - gLightParams.lightNearPlane);
+                        //projectionPlane = gLightParams.lightNearPlane;
+                        float3 queryPosView = shadingPosLightView + lightDirView * (1.f - projectionPlane / zReceiver);
+                        float2 samplePosProj = 0.5 * float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
+
+                        float shadowMapDepth = gShadowMap.SampleLevel(gLinearSampler, samplePosProj.xy, 0).r;
+                        if (shadowMapDepth < projCoords.z)
+                        {
+                            float linearDepth = abs(LinearizeDepth(shadowMapDepth, gLightParams.lightNearPlane, gLightParams.lightFarPlane));
+                            sum += linearDepth;
+                            numBlockers++;
+                        }
+                    }
+                    blockerDepth = numBlockers == 0 ? blockerDepth : sum / numBlockers;
+                }
+
+                print(blockerDepth);
+
+                if (blockerDepth > 0)
+                {
+                    float3 randoms = sampleNext3D(sg);
+                    uint triangleCount = gScene.lightCollection.triangleCount;
+                    uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
+                    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+                    float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
+                    float3 lightDirView = mul(samplePosW - posWOrigin, float3x3(gLightParams.lightView));
+
+                    // Map samplePos to shadow map.
+                    float3 queryPosView = shadingPosLightView + lightDirView * (1.f - blockerDepth / zReceiver);
+                    float2 samplePosProj = 0.5 * float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
+                    // Calculate visibility
+                    visibility = gShadowMap.SampleCmpLevelZero(gSamplerCmp, samplePosProj.xy, projCoords.z); // already add depth bias
+                    //visibility = gShadowMap.SampleLevel(gLinearSampler, samplePosProj.xy, 0).r < projCoords.z ? 0.0f : 1.0f;
+                }
+                else
+                {
+                    //visibility = gShadowMap.SampleCmpLevelZero(gSamplerCmp, projCoords.xy, projCoords.z); // already add depth bias
+                }
+
+                //print(visibility);
+                res = unshadowedContrib * visibility;
+            }
+            break;
             case ShadowType::NewPCSS:
                 res = unshadowedContrib;
 
@@ -238,19 +350,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     }
                     res = unshadowedContrib * sum / _LIGHT_SAMPLES;
                 }
-
-                //float sum = 0.0f;
-                //for (uint i = 0; i < _LIGHT_SAMPLES; i++)
-                //{
-                //    float3 randoms = sampleNext3D(sg);
-                //    uint triangleCount = gScene.lightCollection.triangleCount;
-                //    uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
-                //    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
-                //    float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
-                //    float3 lightDirView = mul(samplePosW - posWOrigin, float3x3(gLightParams.lightView));
-                //    sum += bso.shadingPosLightView.w ? shadowMapNewPCSS(lightDirView, bso, gSamplerCmp, gShadowMap, gLightParams, gLightProjData) : 1.0;
-                //}
-                //res = unshadowedContrib * sum / _LIGHT_SAMPLES;
 
                 break;
             case ShadowType::PCSS:

@@ -81,9 +81,10 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
 
     // Mapping penumbra size to the shadow map (divide by frustum size) using similar triangle to determine the filter size
     // The similar triangle takes sample point in area light as upper vertex and penumbra size as bottom edge
-    float2 filterRadiusUV = float2(penumbraSize * lightParams.lightFrustumSize / zView);
+    float2 filterRadiusUV = float2(penumbraSize * lightParams.lightNearPlane / zView);
     filterRadiusUV /= lightParams.lightFrustumSize;
 
+    print(lightParams.lightFrustumSize);
     print("penumbraSize = ", penumbraSize);
     print("filterRadiusUV = ", filterRadiusUV);
 
@@ -146,6 +147,7 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     searchSize /= lightParams.lightFrustumSize; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
 
     print(searchSize);
+    print(projCoords);
 
     float blockerSum = 0;
     uint numBlockers = 0;

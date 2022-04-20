@@ -52,12 +52,12 @@ namespace Falcor
 
         struct Desc
         {
-            uint32_t fps = 60;
+            uint32_t fps = 120;
             uint32_t width = 0;
             uint32_t height = 0;
             float bitrateMbps = 4;
             uint32_t gopSize = 10;
-            Codec codec = Codec::Raw;
+            Codec codec = Codec::H264;
             ResourceFormat format = ResourceFormat::BGRA8UnormSrgb;
             bool flipY = false;
             std::string filename;
