@@ -7,7 +7,7 @@ namespace Falcor
     enum class SceneName
     {
         SimpleScene, SanMiguel, BistroExterior, BistroInterior,
-        PlaneScene, Bicycle, PalmTrees,
+        OnePlaneScene, ThreePlaneScene, Bicycle, PalmTrees,
     };
 
     struct AreaLightParams
@@ -16,7 +16,7 @@ namespace Falcor
         float3 mLightPos;
         float3 mLightUp;
         float3 mRotation;
-        float2 mLightSize; // TODO: change to 2D size
+        float2 mLightSize; 
         float mFovY;
         float mLightNearPlane;
         float mLightFarPlane;
@@ -65,15 +65,14 @@ namespace Falcor
                 mLightNearPlane = 1.5f;
                 mDepthBias = 0.0005f;
             }
-            else if (name == SceneName::PlaneScene)
+            else if (name == SceneName::OnePlaneScene || name == SceneName::ThreePlaneScene)
             {
                 mLightUp = float3(0.0f, 0.0f, -1.0f);
                 mLightPos = float3(0.0f, 10.0f, 0.0f);
                 mRotation = float3(90.0f, 0.0f, 0.0f);
                 mLightSize = float2(1.0f);
-                mFovY = 140.0;
-                //mLightNearPlane = 6.0f; // three planes
-                mLightNearPlane = 3.0f; // one plane
+                mFovY = name == SceneName::OnePlaneScene ? 140.0f : 40.0f;
+                mLightNearPlane = name == SceneName::OnePlaneScene ? 3.0f : 6.0f; 
                 mDepthBias = 0.0005f;
             }
             else if (name == SceneName::Bicycle)
@@ -154,7 +153,7 @@ namespace Falcor
             const auto& meshLights = pLightCollection->getMeshLights();
             uint meshInstanceID = meshLights[0].meshInstanceID;
 
-            logInfo("meshInstanceID = " + std::to_string(meshInstanceID));
+            //logInfo("meshInstanceID = " + std::to_string(meshInstanceID));
 
             // Get all necessary data from Scene 
             const auto& pMeshInstance = pScene->getMeshInstance(meshInstanceID);
@@ -165,23 +164,34 @@ namespace Falcor
             // Compute light position, light size
             float3 size = meshBound.extent(); // Bound box size of the mesh
             float3 lightCenter = meshBound.center();
-            if (pScene->hasAnimation())
+            if (pScene->hasAnimation()) 
             {
                 mObjectToWorld = globalMatrices[pMeshInstance.globalMatrixID];
                 mLightSize = float2(size.x, size.y);
                 mLightPos = mObjectToWorld * float4(lightCenter, 1.0f);
+                //logInfo("size = " + to_string(size));
             }
             else
             {
-                auto translation = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, 0.0f));
-                auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-                mObjectToWorld = translation * rotation;
-                //mLightSize = std::max(std::max(size.x, size.y), size.z); // TODO: ???
-                mLightPos = float4(lightCenter, 1.0f);
+                auto translation = glm::translate(glm::mat4(1.0f), mLightPos);
+                auto rotationX = glm::rotate(glm::mat4(1.0f), glm::radians(mRotation.x), float3(1.0f, 0.0f, 0.0f));
+                auto rotationY = glm::rotate(glm::mat4(1.0f), glm::radians(mRotation.y), float3(0.0f, 1.0f, 0.0f));
+                auto rotationZ = glm::rotate(glm::mat4(1.0f), glm::radians(mRotation.z), float3(0.0f, 0.0f, 1.0f));
+                mObjectToWorld = translation * rotationZ * rotationY * rotationX;
+
+                float3 minPoint = glm::inverse(mObjectToWorld) * float4(meshBound.minPoint, 1.0f);
+                float3 maxPoint = glm::inverse(mObjectToWorld) * float4(meshBound.maxPoint, 1.0f);
+                //logInfo("minPoint = " + to_string(minPoint));
+                //logInfo("maxPoint = " + to_string(maxPoint));
+                size = maxPoint - minPoint; // Wrong calculation
+                //logInfo("size = " + to_string(size));
+
+                mLightSize = float2(size.x, size.y);
             }
+
             
 
-            if (name == SceneName::PlaneScene)
+            if (name == SceneName::OnePlaneScene)
             {
                 const auto& pBlockerMeshInstance = pScene->getMeshInstance(2);
                 const auto& blockerMeshBound = pScene->getMeshBounds(2);
@@ -198,7 +208,6 @@ namespace Falcor
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[2]));
             //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[3]));
 
-            //logInfo("size = " + to_string(size));
             //logInfo("mLightSize = " + to_string(mLightSize));
             //logInfo("lightCenter = " + to_string(lightCenter));
         }

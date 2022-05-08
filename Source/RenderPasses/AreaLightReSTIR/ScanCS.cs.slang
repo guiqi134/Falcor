@@ -20,14 +20,6 @@ void CSScan(uint2 DTid, uint2 Gid, uint2 GTid)
     uint2 texCoordsPlueOne = uint2(DTid.x, 2 * DTid.y + 1);
 #endif
 
-    print(groupThreadIdx);
-    print(Gid);
-    print(texCoords);
-    print(texCoordsPlueOne);
-
-    print(Input[texCoords]);
-    print(Input[texCoordsPlueOne]);
-
     // Load data from device to shared memeory
     partialSums[2 * groupThreadIdx] = Input[texCoords];
     partialSums[2 * groupThreadIdx + 1] = Input[texCoordsPlueOne];

@@ -143,16 +143,16 @@ private:
 
     uint mBlockerSearchSamples = 32u;
     uint mPCFSamples = 64u;
-    uint mShadingLightSamples = 64; 
+    uint mShadingLightSamples = 32; 
     uint mShadowMapSize = 1 << 11; // 2048
-    uint mShadowRays = 1;
+    uint mShadowRays = 16;
     bool mPrecomputeLightSamples = false;
-    bool mUseNewBlockerSearch = false; // only for NewPCSS method
+    bool mUseNewBlockerSearch = true; // only for NewPCSS method
     bool mUseAdaptiveDepthBias = false;
     bool mTemporalReuseBlockerDepth = true;
     float mConstantEpsilon = 0.003f;
 
-    ShadowType mShadowType = ShadowType::NewIdea; // Control different shadow methods
+    ShadowType mShadowType = ShadowType::NewPCSS; // Control different shadow methods
 
     // VSM, EVSM, MSM params
     float mLBRThreshold = 0.0f;
@@ -160,7 +160,7 @@ private:
     float2 mFilterSizeThreshold = float2(0.01f); 
 
     // Area light parameters
-    AreaLightParams mLightParams = AreaLightParams(SceneName::Bicycle);
+    AreaLightParams mLightParams = AreaLightParams(SceneName::OnePlaneScene);
 
     float4x4 mLightSpaceMat; // light space transform matrix
     float4x4 mLightView;

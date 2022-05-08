@@ -147,7 +147,6 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     searchSize /= lightParams.lightFrustumSize; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
 
     print(searchSize);
-    print(projCoords);
 
     float blockerSum = 0;
     uint numBlockers = 0;
@@ -173,48 +172,49 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     bso.shadingPosLightView.w = numBlockers < 1 ? false : true;
 }
 
-void blockerSearchNewPCSS(inout BlockerSearchOutputs bso, float bias, float3 posW, SampleGenerator sg, SamplerState sampler,
-    Texture2D shadowMap, LightParams lightParams, float2 lightProjData)
-{
-    float4 lightSpacePosH = mul(float4(posW, 1.0f), lightParams.lightSpaceMat); // clipping space
-    float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
-    lightSpacePos.y *= -1; // DirectX flips the Y axis in viewport scale matrix
-    float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // screen space
-    float3 shadingPosLightView = mul(float4(posW, 1.0f), lightParams.lightView).xyz;
-    float zReceiver = abs(shadingPosLightView.z);
-
-    // Blocker search
-    float blockerSum = 0;
-    uint numBlockers = 0;
-    for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
-    {
-        float3 randoms = sampleNext3D(sg);
-        uint triangleCount = gScene.lightCollection.triangleCount;
-        uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
-        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
-        float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
-        float3 lightDirView = mul(samplePosW - posW, float3x3(lightParams.lightView));
-
-        // Map light sample to near plane
-        float3 queryPosView = shadingPosLightView + lightDirView * (1.f - lightParams.lightNearPlane / zReceiver);
-        float2 samplePosProj = 0.5 * float2(-lightProjData.x, lightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
-
-        float shadowMapDepth = shadowMap.SampleLevel(sampler, samplePosProj.xy, 0).r;
-        if (shadowMapDepth < projCoords.z)
-        {
-            float linearDepth = abs(LinearizeDepth(shadowMapDepth, lightParams.lightNearPlane, lightParams.lightFarPlane));
-            blockerSum += linearDepth;
-            numBlockers++;
-        }
-    }
-    float avgBlockerDepth = blockerSum / numBlockers;
-
-    // Initialize structure
-    bso.projCoords.xyz = projCoords;
-    bso.shadingPosLightView.xyz = shadingPosLightView;
-    bso.projCoords.w = avgBlockerDepth;
-    bso.shadingPosLightView.w = numBlockers < 1 ? false : true;
-}
+//void blockerSearchNewPCSS(inout BlockerSearchOutputs bso, float bias, float3 posW, SampleGenerator sg, SamplerState sampler,
+//    Texture2D shadowMap, LightParams lightParams, float2 lightProjData)
+//{
+//    float4 lightSpacePosH = mul(float4(posW, 1.0f), lightParams.lightSpaceMat); // clipping space
+//    float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
+//    lightSpacePos.y *= -1; // DirectX flips the Y axis in viewport scale matrix
+//    float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // screen space
+//    float3 shadingPosLightView = mul(float4(posW, 1.0f), lightParams.lightView).xyz;
+//    float zReceiver = abs(shadingPosLightView.z);
+//
+//    // Blocker search
+//    float blockerSum = 0;
+//    uint numBlockers = 0;
+//    for (int i = 0; i < _BLOCKER_SEARCH_SAMPLES; i++)
+//    {
+//        float3 randoms = sampleNext3D(sg);
+//        uint triangleCount = gScene.lightCollection.triangleCount;
+//        uint triangleIndex = min((uint)(randoms.x * triangleCount), triangleCount - 1);
+//        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+//        float3 samplePosW = tri.getPosition(sample_triangle(randoms.yz));
+//        float3 lightDirView = mul(samplePosW - posW, float3x3(lightParams.lightView));
+//
+//        // Map light sample to near plane
+//        float projectionPlane = lightParams.lightNearPlane + sampleNext1D(sg) * (zReceiver - lightParams.lightNearPlane);
+//        float3 queryPosView = shadingPosLightView + lightDirView * (1.f - projectionPlane / zReceiver);
+//        float2 samplePosProj = 0.5 * float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
+//
+//        float shadowMapDepth = shadowMap.SampleLevel(sampler, samplePosProj.xy, 0).r;
+//        if (shadowMapDepth < projCoords.z)
+//        {
+//            float linearDepth = abs(LinearizeDepth(shadowMapDepth, lightParams.lightNearPlane, lightParams.lightFarPlane));
+//            blockerSum += linearDepth;
+//            numBlockers++;
+//        }
+//    }
+//    float avgBlockerDepth = blockerSum / numBlockers;
+//
+//    // Initialize structure
+//    bso.projCoords.xyz = projCoords;
+//    bso.shadingPosLightView.xyz = shadingPosLightView;
+//    bso.projCoords.w = avgBlockerDepth;
+//    bso.shadingPosLightView.w = numBlockers < 1 ? false : true;
+//}
 
 // Reference: Adaptive Depth Bias for Shadow Maps, Dou 2014
 float adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, Texture2D shadowMap, SamplerState sampler, LightParams lightParams)

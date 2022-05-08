@@ -465,7 +465,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpShadingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
 
         // TODO: Change to ping-pong texture
-        if (mShadowType == ShadowType::NewIdea)
+        if (mTemporalReuseBlockerDepth)
             pRenderContext->copyResource(mpPrevBlockerDepths.get(), mpCurrBlockerDepths.get());
     }
 
@@ -551,8 +551,8 @@ void AreaLightReSTIR::renderUI(Gui::Widgets& widget)
     {
         dirty |= widget.checkbox("Precompute Light Samples for NewPCSS", mPrecomputeLightSamples);
         dirty |= widget.checkbox("Use New Blocker Search", mUseNewBlockerSearch);
-        dirty |= widget.checkbox("Temporal Reuse Blocker Depth", mTemporalReuseBlockerDepth);
         widget.tooltip("Use stochastic light samples and map them onto the near plane to compute average blocker for our method", true);
+        dirty |= widget.checkbox("Temporal Reuse Blocker Depth", mTemporalReuseBlockerDepth);
         dirty |= widget.var("NewPCSS Light Samples", mShadingLightSamples);
         dirty |= widget.var("Brute Force Shadow Rays", mShadowRays);
 
@@ -576,6 +576,8 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
     //renderSettings.useEmissiveLights = false;
     //mpScene->setRenderSettings(renderSettings);
     //mLightParams.setSceneSettings(pScene);
+
+    logInfo("setScene() is called");
     
     mLightParams.updateSceneAreaLight(pScene);
     mLightParams.updateSceneEmissiveLight(pScene, pRenderContext);
@@ -596,7 +598,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
         mFilterSizeThreshold = float2(0.01f);
         mConstantEpsilon = 0.02f;
     }
-    else if (mLightParams.name == SceneName::PlaneScene)
+    else if (mLightParams.name == SceneName::OnePlaneScene)
     {
         mFilterSizeThreshold = float2(0.01f);
         mConstantEpsilon = 0.003f;
@@ -907,7 +909,7 @@ void AreaLightReSTIR::UpdateDefines()
         Shader::DefineList defines;
         defines.add(kStoreFinalVisibility, mStoreFinalVisibility ? "1" : "0");
         defines.add(kBruteForce, mBruteForce ? "1" : "0");
-        defines.add("_NEED_BLOCKER_SEARCH", std::to_string(shadingBlockerSearch));
+        defines.add("_NO_BLOCKER_SEARCH", std::to_string(!shadingBlockerSearch));
         defines.add("_LIGHT_SAMPLES", std::to_string(mShadingLightSamples));
         defines.add("_DEPTH_DIFFERENCE", std::to_string(mDepthDifference));
         defines.add("_LIGHT_WORLD_SIZE", to_string(mLightParams.mLightSize));
