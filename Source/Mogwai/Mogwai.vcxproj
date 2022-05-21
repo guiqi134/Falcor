@@ -41,7 +41,6 @@
   <ItemGroup>
     <None Include="Data\BSDFViewer.py" />
     <None Include="Data\config.py" />
-    <None Include="Data\ExampleBiltGraph.py" />
     <None Include="Data\ForwardRenderer.py" />
     <None Include="Data\PathTracer.py" />
   </ItemGroup>

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@
 namespace Falcor
 {
     template<typename ObjectType>
-    class dlldecl FencedPool : public std::enable_shared_from_this<FencedPool<ObjectType>>
+    class FALCOR_API FencedPool
     {
     public:
         using SharedPtr = std::shared_ptr<FencedPool<ObjectType>>;
@@ -82,14 +82,14 @@ namespace Falcor
             , mpFence(pFence)
             , mNewObjFunc(newFunc)
         {
-            assert(pFence && newFunc);
+            FALCOR_ASSERT(pFence && newFunc);
             mActiveObject = createObject();
         }
 
         ObjectType createObject()
         {
             ObjectType pObj = mNewObjFunc(mpUserData);
-            if (pObj == nullptr) throw std::exception("Failed to create new object in fenced pool");
+            if (pObj == nullptr) throw RuntimeError("Failed to create new object in fenced pool");
             return pObj;
         }
 

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,13 +36,13 @@ namespace Falcor
         mpState = ComputeState::create();
         mpState->setProgram(pProg);
         if (createVars) mpVars = ComputeVars::create(pProg.get());
-        assert(pProg && mpState && (!createVars || mpVars));
+        FALCOR_ASSERT(pProg && mpState && (!createVars || mpVars));
     }
 
-    ComputePass::SharedPtr ComputePass::create(const std::string& filename, const std::string& csEntry, const Program::DefineList& defines, bool createVars)
+    ComputePass::SharedPtr ComputePass::create(const std::filesystem::path& path, const std::string& csEntry, const Program::DefineList& defines, bool createVars)
     {
         Program::Desc d;
-        d.addShaderLibrary(filename).csEntry(csEntry);
+        d.addShaderLibrary(path).csEntry(csEntry);
         return create(d, defines, createVars);
     }
 
@@ -53,7 +53,7 @@ namespace Falcor
 
     void ComputePass::execute(ComputeContext* pContext, uint32_t nThreadX, uint32_t nThreadY, uint32_t nThreadZ)
     {
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
         uint3 threadGroupSize = mpState->getProgram()->getReflector()->getThreadGroupSize();
         uint3 groups = div_round_up(uint3(nThreadX, nThreadY, nThreadZ), threadGroupSize);
         pContext->dispatch(mpState.get(), mpVars.get(), groups);
@@ -61,7 +61,7 @@ namespace Falcor
 
     void ComputePass::executeIndirect(ComputeContext* pContext, const Buffer* pArgBuffer, uint64_t argBufferOffset)
     {
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
         pContext->dispatchIndirect(mpState.get(), mpVars.get(), pArgBuffer, argBufferOffset);
     }
 
@@ -80,6 +80,6 @@ namespace Falcor
     void ComputePass::setVars(const ComputeVars::SharedPtr& pVars)
     {
         mpVars = pVars ? pVars : ComputeVars::create(mpState->getProgram().get());
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
     }
 }

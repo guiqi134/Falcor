@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -38,7 +38,7 @@ namespace Falcor
 
     /** Abstracts the API texture objects
     */
-    class dlldecl Texture : public Resource
+    class FALCOR_API Texture : public Resource
     {
     public:
         using SharedPtr = std::shared_ptr<Texture>;
@@ -164,13 +164,13 @@ namespace Falcor
         static SharedPtr create2DMS(uint32_t width, uint32_t height, ResourceFormat format, uint32_t sampleCount, uint32_t arraySize = 1, BindFlags bindFlags = BindFlags::ShaderResource);
 
         /** Create a new texture object from a file.
-            \param[in] filename Filename of the image. Can also include a full path or relative path from a data directory.
+            \param[in] path File path of the image. Can also include a full path or relative path from a data directory.
             \param[in] generateMipLevels Whether the mip-chain should be generated.
             \param[in] loadAsSrgb Load the texture using sRGB format. Only valid for 3 or 4 component textures.
             \param[in] bindFlags The bind flags to create the texture with.
             \return A new texture, or nullptr if the texture failed to load.
         */
-        static SharedPtr createFromFile(const std::string& filename, bool generateMipLevels, bool loadAsSrgb, BindFlags bindFlags = BindFlags::ShaderResource);
+        static SharedPtr createFromFile(const std::filesystem::path& path, bool generateMipLevels, bool loadAsSrgb, BindFlags bindFlags = BindFlags::ShaderResource);
 
         /** Get a shader-resource view for the entire resource
         */
@@ -180,7 +180,7 @@ namespace Falcor
         */
         virtual UnorderedAccessView::SharedPtr getUAV() override;
 
-#if _ENABLE_CUDA
+#if FALCOR_ENABLE_CUDA
         /** Get the CUDA device address for this resource.
             \return CUDA device address.
             Throws an exception if the resource is not (or cannot be) shared with CUDA.
@@ -225,11 +225,11 @@ namespace Falcor
         /** Capture the texture to an image file.
             \param[in] mipLevel Requested mip-level
             \param[in] arraySlice Requested array-slice
-            \param[in] filename Name of the file to save.
+            \param[in] path Path of the file to save.
             \param[in] fileFormat Destination image file format (e.g., PNG, PFM, etc.)
             \param[in] exportFlags Save flags, see Bitmap::ExportFlags
         */
-        void captureToFile(uint32_t mipLevel, uint32_t arraySlice, const std::string& filename, Bitmap::FileFormat format = Bitmap::FileFormat::PngFile, Bitmap::ExportFlags exportFlags = Bitmap::ExportFlags::None);
+        void captureToFile(uint32_t mipLevel, uint32_t arraySlice, const std::filesystem::path& path, Bitmap::FileFormat format = Bitmap::FileFormat::PngFile, Bitmap::ExportFlags exportFlags = Bitmap::ExportFlags::None);
 
         /** Generates mipmaps for a specified texture object.
             \param[in] pContext Used render context.
@@ -239,11 +239,11 @@ namespace Falcor
 
         /** In case the texture was loaded from a file, use this to set the file path
         */
-        void setSourceFilename(const std::string& filename) { mSourceFilename = filename; }
+        void setSourcePath(const std::filesystem::path& path) { mSourcePath = path; }
 
         /** In case the texture was loaded from a file, get the source file path
         */
-        const std::string& getSourceFilename() const { return mSourceFilename; }
+        const std::filesystem::path& getSourcePath() const { return mSourcePath; }
 
         /** Returns the total number of texels across all mip levels and array slices.
         */
@@ -253,13 +253,18 @@ namespace Falcor
         */
         uint64_t getTextureSizeInBytes() const;
 
+        /** Compares the texture description to another texture.
+            \return True if all fields (size/format/etc) are identical.
+        */
+        bool compareDesc(const Texture* pOther) const;
+
     protected:
         Texture(uint32_t width, uint32_t height, uint32_t depth, uint32_t arraySize, uint32_t mipLevels, uint32_t sampleCount, ResourceFormat format, Type Type, BindFlags bindFlags);
         void apiInit(const void* pData, bool autoGenMips);
         void uploadInitData(const void* pData, bool autoGenMips);
 
         bool mReleaseRtvsAfterGenMips = true;
-        std::string mSourceFilename;
+        std::filesystem::path mSourcePath;
 
         uint32_t mWidth = 0;
         uint32_t mHeight = 0;

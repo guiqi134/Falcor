@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@ namespace Falcor
             mBinsX++;
             mBinsY = sampleCount / mBinsX;
         }
-        assert(mBinsX * mBinsY == sampleCount);
+        FALCOR_ASSERT(mBinsX * mBinsY == sampleCount);
 
         // Create permutation table.
         mPermutation.resize(sampleCount);
@@ -79,7 +79,7 @@ namespace Falcor
         uint32_t j = binIdx / mBinsX;
         mCurSample = (mCurSample + 1) % getSampleCount();
 
-        assert(i < mBinsX && j < mBinsY);
+        FALCOR_ASSERT(i < mBinsX && j < mBinsY);
         float x = ((float)i + u()) / mBinsX;
         float y = ((float)j + u()) / mBinsY;
         return float2(x, y) - 0.5f;

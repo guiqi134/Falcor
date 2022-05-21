@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -99,9 +99,9 @@ namespace Falcor
     {
         if (!mCapturing)
         {
-            if (saveFileDialog(VideoEncoder::getSupportedContainerForCodec(mCodec), mFilename))
+            if (saveFileDialog(VideoEncoder::getSupportedContainerForCodec(mCodec), mPath))
             {
-                assert(mStartCB);
+                FALCOR_ASSERT(mStartCB);
                 mCapturing = mStartCB();
             }
         }
@@ -122,7 +122,7 @@ namespace Falcor
     {
         if (mCapturing)
         {
-            assert(mEndCB);
+            FALCOR_ASSERT(mEndCB);
             mEndCB();
             mCapturing = false;
         }

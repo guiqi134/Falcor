@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -43,7 +43,7 @@ namespace Falcor
         This class uses a double-buffering scheme for GPU profiling to avoid GPU stalls.
         ProfilerEvent is a wrapper class which together with scoping can simplify event profiling.
     */
-    class dlldecl Profiler
+    class FALCOR_API Profiler
     {
     public:
         using SharedPtr = std::shared_ptr<Profiler>;
@@ -113,6 +113,8 @@ namespace Falcor
                 std::vector<GpuTimer::SharedPtr> pTimers;   ///< Pool of GPU timers.
                 size_t currentTimer = 0;                    ///< Next GPU timer to use from the pool.
                 GpuTimer *pActiveTimer = nullptr;           ///< Currently active GPU timer.
+
+                bool valid = false;                         ///< True when frame data is valid (after begin/end cycle).
             };
             FrameData mFrameData[2];                        ///< Double-buffered frame data to avoid GPU flushes.
 
@@ -137,7 +139,7 @@ namespace Falcor
             pybind11::dict toPython() const;
 
             std::string toJsonString() const;
-            void writeToFile(const std::string& filename) const;
+            void writeToFile(const std::filesystem::path& path) const;
 
         private:
             Capture(size_t reservedEvents, size_t reservedFrames);
@@ -146,7 +148,7 @@ namespace Falcor
             void captureEvents(const std::vector<Event*>& events);
             void finalize();
 
-            size_t mReservedFrames;
+            size_t mReservedFrames = 0;
             size_t mFrameCount = 0;
             std::vector<Event*> mEvents;
             std::vector<Lane> mLanes;
@@ -230,6 +232,8 @@ namespace Falcor
         */
         static Profiler& instance() { return *instancePtr(); }
 
+        Profiler();
+
     private:
         /** Create a new event.
             \param[in] name The event name.
@@ -254,11 +258,16 @@ namespace Falcor
         uint32_t mFrameIndex = 0;                           ///< Current frame index.
 
         Capture::SharedPtr mpCapture;                       ///< Currently active capture.
+
+        GpuFence::SharedPtr mpFence;
+        uint64_t mFenceValue = uint64_t(-1);
     };
+
+    FALCOR_ENUM_CLASS_OPERATORS(Profiler::Flags);
 
     /** Helper class for starting and ending profiling events using RAII.
         The constructor and destructor call Profiler::StartEvent() and Profiler::EndEvent().
-        The PROFILE macro wraps creation of local ProfilerEvent objects when profiling is enabled,
+        The FALCOR_PROFILE macro wraps creation of local ProfilerEvent objects when profiling is enabled,
         and does nothing when profiling is disabled, so should be used instead of directly creating ProfilerEvent objects.
     */
     class ProfilerEvent
@@ -280,16 +289,10 @@ namespace Falcor
         const std::string mName;
         Profiler::Flags mFlags;
     };
-
-#if _PROFILING_ENABLED
-#define PROFILE_ALL_FLAGS(_name) Falcor::ProfilerEvent _profileEvent##__LINE__(_name)
-#define PROFILE_SOME_FLAGS(_name, _flags) Falcor::ProfilerEvent _profileEvent##__LINE__(_name, _flags)
-
-#define GET_PROFILE(_1, _2, NAME, ...) NAME
-#define PROFILE(...) GET_PROFILE(__VA_ARGS__, PROFILE_SOME_FLAGS, PROFILE_ALL_FLAGS)(__VA_ARGS__)
-#else
-#define PROFILE(_name)
-#endif
-
-    enum_class_operators(Profiler::Flags);
 }
+
+#if FALCOR_ENABLE_PROFILER
+#define FALCOR_PROFILE(_name, ...) Falcor::ProfilerEvent _profileEvent##__LINE__(_name, __VA_ARGS__)
+#else
+#define FALCOR_PROFILE(_name, ...)
+#endif

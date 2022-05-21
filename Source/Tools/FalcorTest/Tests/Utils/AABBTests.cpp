@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -49,7 +49,7 @@ namespace Falcor
         // Setup and run GPU test.
         ctx.createProgram("Tests/Utils/AABBTests.cs.slang", "testAABB");
         ctx.allocateStructuredBuffer("result", resultSize);
-        ctx.allocateStructuredBuffer("testData", arraysize(kTestData), kTestData, sizeof(kTestData));
+        ctx.allocateStructuredBuffer("testData", (uint32_t)arraysize(kTestData), kTestData, sizeof(kTestData));
         ctx["CB"]["n"] = (uint32_t)arraysize(kTestData);
         ctx.runProgram();
 
@@ -154,7 +154,7 @@ namespace Falcor
         EXPECT_EQ(result[i].x, 5.0f) << "i = " << i; ++i;
         EXPECT_EQ(result[i].x, 13.0f) << "i = " << i; ++i;
 
-        assert(i <= resultSize);
+        FALCOR_ASSERT(i <= resultSize);
         ctx.unmapBuffer("result");
     }
 }

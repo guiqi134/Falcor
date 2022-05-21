@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -46,7 +46,6 @@ struct AliasTable
     StructuredBuffer<float> weights;    ///< List of original weights.
     uint count;                         ///< Total number of weights in the table.
     float weightSum;                    ///< Total sum of all weights in the table.
-    uint _pad[2];
 
     /** Sample from the table proportional to the weights.
         \param[in] index Uniform random index in [0..count).

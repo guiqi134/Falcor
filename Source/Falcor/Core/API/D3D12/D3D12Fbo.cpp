@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,6 +30,8 @@
 
 namespace Falcor
 {
+    struct FboData {};
+
     Fbo::Fbo()
     {
         mColorAttachments.resize(getMaxColorTargetCount());
@@ -39,10 +41,10 @@ namespace Falcor
 
     const Fbo::ApiHandle& Fbo::getApiHandle() const
     {
-        UNSUPPORTED_IN_D3D12("Fbo::getApiHandle()");
+        FALCOR_UNSUPPORTED_IN_D3D12("Fbo::getApiHandle()");
         return mApiHandle;
     }
-    
+
     uint32_t Fbo::getMaxColorTargetCount()
     {
         return D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT;

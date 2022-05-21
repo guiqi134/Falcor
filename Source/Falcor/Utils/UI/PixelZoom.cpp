@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,7 +28,7 @@
 #include "stdafx.h"
 #include "PixelZoom.h"
 #include "Core/API/RenderContext.h"
-#include "Utils/UI/UserInput.h"
+#include "Utils/UI/InputTypes.h"
 
 namespace Falcor
 {
@@ -70,7 +70,7 @@ namespace Falcor
 
     void PixelZoom::onResizeSwapChain(const Fbo* pBackbuffer)
     {
-        assert(pBackbuffer);
+        FALCOR_ASSERT(pBackbuffer);
         const Fbo::Desc& desc = pBackbuffer->getDesc();
         mpSrcBlitFbo = Fbo::create2D(pBackbuffer->getWidth(), pBackbuffer->getHeight(), desc);
         if (mpDstBlitFbo == nullptr)
@@ -120,7 +120,7 @@ namespace Falcor
     {
         if (ke.type == KeyboardEvent::Type::KeyPressed || ke.type == KeyboardEvent::Type::KeyReleased)
         {
-            if (ke.key == KeyboardEvent::Key::Z)
+            if (ke.key == Input::Key::Z)
             {
                 mShouldZoom = (ke.type == KeyboardEvent::Type::KeyPressed);
                 return true;

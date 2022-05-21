@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,7 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "RenderGraphEditor.h"
-#include "RenderGraphEditor.h"
 #include "dear_imgui/imgui.h"
 #include "dear_imgui/imgui_internal.h"
 
@@ -34,6 +33,10 @@
 
 #include <fstream>
 #include <filesystem>
+
+#if FALCOR_D3D12_AVAILABLE
+FALCOR_EXPORT_D3D12_AGILITY_SDK
+#endif
 
 namespace
 {
@@ -64,7 +67,7 @@ RenderGraphEditor::~RenderGraphEditor()
 void RenderGraphEditor::onLoad(RenderContext* pRenderContext)
 {
     mpDefaultIconTex = Texture::createFromFile(kDefaultPassIcon, false, false);
-    if (!mpDefaultIconTex) throw std::exception("Failed to load icon");
+    if (!mpDefaultIconTex) throw RuntimeError("Failed to load icon");
 
     loadAllPassLibraries();
 
@@ -78,14 +81,15 @@ void RenderGraphEditor::onLoad(RenderContext* pRenderContext)
     else createNewGraph("DefaultRenderGraph");
 }
 
-void RenderGraphEditor::onDroppedFile(const std::string& filename)
+void RenderGraphEditor::onDroppedFile(const std::filesystem::path& path)
 {
-    std::string ext = getExtensionFromFile(filename);
-    if (ext == "dll") RenderPassLibrary::instance().loadLibrary(filename);
-    else if (ext == "py")
+    if (hasExtension(path, "py"))
     {
-        if (mViewerRunning) { msgBox("Viewer is running. Please close the viewer before loading a graph file.", MsgBoxType::Ok); }
-        else loadGraphsFromFile(filename);
+        if (mViewerRunning)
+        {
+            msgBox("Viewer is running. Please close the viewer before loading a graph file.", MsgBoxType::Ok);
+        }
+        else loadGraphsFromFile(path);
     }
 }
 
@@ -151,14 +155,14 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
 
     if (fileMenu.item("Load File"))
     {
-        std::string renderGraphFilePath;
         if (mViewerRunning)
         {
             msgBox("Viewer is running. Please close the viewer before loading a graph file.", MsgBoxType::Ok);
         }
         else
         {
-            if (openFileDialog({}, renderGraphFilePath)) loadGraphsFromFile(renderGraphFilePath);
+            std::filesystem::path path;
+            if (openFileDialog({}, path)) loadGraphsFromFile(path);
         }
     }
 
@@ -181,20 +185,11 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
 
         if (saveGraph)
         {
-            std::string renderGraphFileName = mOpenGraphNames[mCurrentGraphIndex].label + ".py";
-            if (saveFileDialog(RenderGraph::kFileExtensionFilters, renderGraphFileName)) serializeRenderGraph(renderGraphFileName);
+            std::filesystem::path path = mOpenGraphNames[mCurrentGraphIndex].label + ".py";
+            if (saveFileDialog(RenderGraph::kFileExtensionFilters, path)) serializeRenderGraph(path);
         }
     }
 
-    if (fileMenu.item("Load Pass Library"))
-    {
-        std::string passLib;
-        FileDialogFilterVec filters = { {"dll"} };
-        if (openFileDialog(filters, passLib))
-        {
-            RenderPassLibrary::instance().loadLibrary(passLib);
-        }
-    }
     fileMenu.release();
 
     Gui::Menu::Dropdown windowMenu = menu.dropdown("Window");
@@ -216,11 +211,11 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
     for (size_t i = 0; i < renderPasses.size(); i++)
     {
         const auto& pass = renderPasses[i];
-        passWindow.rect({ 148.0f, 64.0f }, pGui->pickUniqueColor(pass.className), false);
+        passWindow.rect({ 148.0f, 64.0f }, pGui->pickUniqueColor(pass.info.type), false);
         passWindow.image(("RenderPass##" + std::to_string(i)).c_str(), mpDefaultIconTex, { 148.0f, 44.0f });
-        passWindow.dragDropSource(pass.className, "RenderPassType", pass.className);
-        passWindow.text(pass.className);
-        passWindow.tooltip(pass.desc, true);
+        passWindow.dragDropSource(pass.info.type.c_str(), "RenderPassType", pass.info.type);
+        passWindow.text(pass.info.type);
+        passWindow.tooltip(pass.info.desc, true);
         passWindow.nextColumn();
     }
 
@@ -264,7 +259,7 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
         mCurrentGraphIndex = selection;
     }
 
-    if (mUpdateFilePath.size())
+    if (!mUpdateFilePath.empty())
     {
         mRenderGraphUIs[mCurrentGraphIndex].writeUpdateScriptToFile(pRenderContext, mUpdateFilePath, (float)gpFramework->getFrameRate().getLastFrameTime());
     }
@@ -330,13 +325,13 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
 
         if (openViewer)
         {
-            mUpdateFilePath = getTempFilename();
+            mUpdateFilePath = getTempFilePath();
             RenderGraphExporter::save(mpGraphs[mCurrentGraphIndex], mUpdateFilePath);
 
             // load application for the editor given it the name of the mapped file
-            std::string commandLineArgs = kScriptSwitch + " " + mUpdateFilePath;
+            std::string commandLineArgs = kScriptSwitch + " " + mUpdateFilePath.string();
             mViewerProcess = executeProcess(kViewerExecutableName, commandLineArgs);
-            assert(mViewerProcess);
+            FALCOR_ASSERT(mViewerProcess);
             mViewerRunning = true;
         }
     }
@@ -384,22 +379,20 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
 
 void RenderGraphEditor::loadAllPassLibraries()
 {
-    std::string executableDirectory = getExecutableDirectory();
+    auto executableDirectory = getExecutableDirectory();
 
     // iterate through and find all render pass libraries
-    for (auto& file : std::filesystem::directory_iterator(executableDirectory))
+    for (auto& it : std::filesystem::directory_iterator(executableDirectory))
     {
-        std::string filename = file.path().string();
-        if (getExtensionFromFile(filename) == "dll")
+        const auto& path = it.path();
+        if (hasExtension(path, "dll"))
         {
             // check for addPasses()
-            DllHandle l = loadDll(filename);
-            auto pGetPass = (RenderPassLibrary::LibraryFunc)getDllProcAddress(l, "getPasses");
-
-            if (pGetPass)
+            SharedLibraryHandle l = loadSharedLibrary(path);
+            if (auto pGetPass = (RenderPassLibrary::LibraryFunc)getProcAddress(l, "getPasses"))
             {
-                releaseDll(l);
-                RenderPassLibrary::instance().loadLibrary(filename);
+                releaseSharedLibrary(l);
+                RenderPassLibrary::instance().loadLibrary(path.filename().string());
             }
         }
     }
@@ -411,34 +404,34 @@ void RenderGraphEditor::renderLogWindow(Gui::Widgets& widget)
     widget.text(mCurrentLog);
 }
 
-void RenderGraphEditor::serializeRenderGraph(const std::string& fileName)
+void RenderGraphEditor::serializeRenderGraph(const std::filesystem::path& path)
 {
-    RenderGraphExporter::save(mpGraphs[mCurrentGraphIndex], fileName);
+    RenderGraphExporter::save(mpGraphs[mCurrentGraphIndex], path);
 }
 
-void RenderGraphEditor::deserializeRenderGraph(const std::string& fileName)
+void RenderGraphEditor::deserializeRenderGraph(const std::filesystem::path& path)
 {
-    mpGraphs[mCurrentGraphIndex] = RenderGraphImporter::import(fileName);
+    mpGraphs[mCurrentGraphIndex] = RenderGraphImporter::import(path.string());
     if (mRenderGraphUIs.size() < mCurrentGraphIndex)
     {
         mRenderGraphUIs[mCurrentGraphIndex].setToRebuild();
     }
 }
 
-void RenderGraphEditor::loadGraphsFromFile(const std::string& fileName, const std::string& graphName)
+void RenderGraphEditor::loadGraphsFromFile(const std::filesystem::path& path, const std::string& graphName)
 {
-    assert(fileName.size());
+    FALCOR_ASSERT(!path.empty());
 
     // behavior is load each graph defined within the file as a separate editor ui
     std::vector <RenderGraph::SharedPtr> newGraphs;
     if (graphName.size())
     {
-        auto pGraph = RenderGraphImporter::import(graphName, fileName);
+        auto pGraph = RenderGraphImporter::import(graphName, path);
         if (pGraph) newGraphs.push_back(pGraph);
     }
     else
     {
-        newGraphs = RenderGraphImporter::importAllGraphs(fileName);
+        newGraphs = RenderGraphImporter::importAllGraphs(path);
     }
 
     for (const auto& pGraph : newGraphs)

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,6 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
-#include "FalcorExperimental.h"
 #include "CSMData.slang"
 #include "../Utils/GaussianBlur/GaussianBlur.h"
 
@@ -38,7 +37,7 @@ class CSM : public RenderPass
 public:
     using SharedPtr = std::shared_ptr<CSM>;
 
-    static const char* kDesc;
+    static const Info kInfo;
 
     enum class PartitionMode
     {
@@ -49,11 +48,10 @@ public:
 
     static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict = {});
 
-    virtual std::string getDesc() override { return kDesc; }
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void compile(RenderContext* pContext, const CompileData& compileData) override;
-    virtual void execute(RenderContext* pContext, const RenderData& renderData) override;
+    virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
+    virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual void renderUI(Gui::Widgets& widget) override;
 
@@ -164,7 +162,14 @@ private:
     {
         //This is effectively a bool, but bool only takes up 1 byte which messes up setBlob
         uint32_t shouldVisualizeCascades = 0u;
+#ifndef FALCOR_GFX_VK
+        // `padding` is not need for Vulkan, since we use `scalar` layout there so everything will
+        // be packed tightly.
+        // This is still needed for D3D12 because we are still using legacy cbuffer layout for
+        // constant buffers. We should consider switching to the new layout rules supported by dxc
+        // and remove this field.
         int3 padding;
+#endif
         glm::mat4 camInvViewProj;
         uint2 screenDim = { 0, 0 };
         uint32_t mapBitsPerChannel = 32;

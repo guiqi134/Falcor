@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,17 +31,21 @@
 
 namespace Falcor
 {
+    /** Forward declaration of backend implementation-specific FBO data.
+    */
+    struct FboData;
+
     /** Low level framebuffer object.
         This class abstracts the API's framebuffer creation and management.
     */
-    class dlldecl Fbo : public std::enable_shared_from_this<Fbo>
+    class FALCOR_API Fbo
     {
     public:
         using SharedPtr = std::shared_ptr<Fbo>;
         using SharedConstPtr = std::shared_ptr<const Fbo>;
         using ApiHandle = FboHandle;
 
-        class dlldecl Desc
+        class FALCOR_API Desc
         {
         public:
             Desc();
@@ -94,7 +98,7 @@ namespace Falcor
                 TargetDesc(ResourceFormat f, bool uav) : format(f), allowUav(uav) {}
                 ResourceFormat format = ResourceFormat::Unknown;
                 bool allowUav = false;
-                
+
                 bool operator==(const TargetDesc& other) const {return (format == other.format) && (allowUav == other.allowUav); }
 
                 bool operator!=(const TargetDesc& other) const { return !(*this == other); }
@@ -177,7 +181,7 @@ namespace Falcor
         */
         void attachColorTarget(const Texture::SharedPtr& pColorTexture, uint32_t rtIndex, uint32_t mipLevel = 0, uint32_t firstArraySlice = 0, uint32_t arraySize = kAttachEntireMipLevel);
 
-        /** Get the object's API handle.      
+        /** Get the object's API handle.
         */
         const ApiHandle& getApiHandle() const;
 
@@ -255,8 +259,8 @@ namespace Falcor
     private:
         static std::unordered_set<Desc, DescHash> sDescs;
 
-        bool verifyAttachment(const Attachment& attachment) const;
-        bool calcAndValidateProperties() const;
+        void validateAttachment(const Attachment& attachment) const;
+        void calcAndValidateProperties() const;
 
         void applyColorAttachment(uint32_t rtIndex);
         void applyDepthAttachment();
@@ -284,6 +288,6 @@ namespace Falcor
         mutable bool mIsZeroAttachment = false;
 
         mutable ApiHandle mApiHandle = {};
-        void* mpPrivateData = nullptr;
+        std::unique_ptr<FboData> mpPrivateData;
     };
 }

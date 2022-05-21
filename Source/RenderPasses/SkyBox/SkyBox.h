@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,6 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
-#include "FalcorExperimental.h"
 
 using namespace Falcor;
 
@@ -36,11 +35,10 @@ class SkyBox : public RenderPass
 public:
     using SharedPtr = std::shared_ptr<SkyBox>;
 
-    static const char* kDesc;
+    static const Info kInfo;
 
     static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
 
-    std::string getDesc() override { return kDesc; }
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
@@ -61,7 +59,7 @@ private:
     bool mLoadSrgb = true;
     Sampler::Filter mFilter = Sampler::Filter::Linear;
     Texture::SharedPtr mpTexture;
-    std::string mTexName;
+    std::filesystem::path mTexPath;
 
     Scene::SharedPtr mpCubeScene;
     GraphicsProgram::SharedPtr mpProgram;

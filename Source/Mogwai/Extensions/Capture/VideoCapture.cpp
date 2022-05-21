@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -45,7 +45,7 @@ namespace Mogwai
 
         Texture::SharedPtr createTextureForBlit(const Texture* pSource)
         {
-            assert(pSource->getType() == Texture::Type::Texture2D);
+            FALCOR_ASSERT(pSource->getType() == Texture::Type::Texture2D);
             return Texture::create2D(pSource->getWidth(), pSource->getHeight(), ResourceFormat::RGBA8UnormSrgb, 1, 1, nullptr, Texture::BindFlags::RenderTarget);
         }
     }
@@ -87,7 +87,7 @@ namespace Mogwai
             Texture::SharedPtr pTex = pGraph->getOutput(i)->asTexture();
             if (!pTex || pTex->getType() != Texture::Type::Texture2D)
             {
-                logError("Can't video capture " + outputName + ". The output is not a Texture2D");
+                reportError("Can't video capture " + outputName + ". The output is not a Texture2D");
                 continue;
             }
 
@@ -104,7 +104,7 @@ namespace Mogwai
             d.height = pTex->getHeight();
             d.width = pTex->getWidth();
             d.format = pTex->getFormat();
-            d.filename = getOutputNamePrefix(outputName) + std::to_string(r.first) + "." + std::to_string(r.second) + "." + VideoEncoder::getSupportedContainerForCodec(d.codec)[0].ext;
+            d.path = getOutputNamePrefix(outputName) + std::to_string(r.first) + "." + std::to_string(r.second) + "." + VideoEncoder::getSupportedContainerForCodec(d.codec)[0].ext;
             encoder.output = outputName;
             encoder.pEncoder = VideoEncoder::create(d);
             mEncoders.push_back(std::move(encoder));
@@ -206,7 +206,7 @@ namespace Mogwai
     void VideoCapture::addRanges(const std::string& graphName, const range_vec& ranges)
     {
         auto pGraph = mpRenderer->getGraph(graphName).get();
-        if (!pGraph) throw std::runtime_error("Can't find a graph named '" + graphName + "'");
+        if (!pGraph) throw RuntimeError("Can't find a graph named '{}'", graphName);
         this->addRanges(pGraph, ranges);
     }
 

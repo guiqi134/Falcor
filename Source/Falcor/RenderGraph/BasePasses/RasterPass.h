@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,19 +31,19 @@
 
 namespace Falcor
 {
-    class dlldecl RasterPass : public BaseGraphicsPass, public std::enable_shared_from_this<RasterPass>
+    class FALCOR_API RasterPass : public BaseGraphicsPass
     {
     public:
         using SharedPtr = ParameterBlockSharedPtr<RasterPass>;
 
         /** Create a new object.
-            \param[in] filename Program filename.
+            \param[in] path Program file path.
             \param[in] vsEntry Vertex shader entry point. If this string is empty (""), it will use a default vertex shader which transforms and outputs all default vertex attributes.
             \param[in] psEntry Pixel shader entry point
             \param[in] programDefines Optional list of macro definitions to set into the program. The macro definitions will be set on all shader stages.
             \return A new object, or throws an exception if creation failed.
         */
-        static SharedPtr create(const std::string& filename, const std::string& vsEntry, const std::string& psEntry, const Program::DefineList& defines = Program::DefineList());
+        static SharedPtr create(const std::filesystem::path& path, const std::string& vsEntry, const std::string& psEntry, const Program::DefineList& defines = Program::DefineList());
 
         /** Create a new object.
             \param[in] progDesc The program description.
@@ -56,14 +56,14 @@ namespace Falcor
             \param[in] vertexCount Number of vertices to draw
             \param[in] startVertexLocation The location of the first vertex to read from the vertex buffers (offset in vertices)
         */
-        void draw(RenderContext* pContext, uint32_t vertexCount, uint32_t startVertexLocation);
+        void draw(RenderContext* pRenderContext, uint32_t vertexCount, uint32_t startVertexLocation);
 
         /** Indexed draw call.
             \param[in] indexCount Number of indices to draw
             \param[in] startIndexLocation The location of the first index to read from the index buffer (offset in indices)
             \param[in] baseVertexLocation A value which is added to each index before reading a vertex from the vertex buffer
         */
-        void drawIndexed(RenderContext* pContext, uint32_t indexCount, uint32_t startIndexLocation, int32_t baseVertexLocation);
+        void drawIndexed(RenderContext* pRenderContext, uint32_t indexCount, uint32_t startIndexLocation, int32_t baseVertexLocation);
 
     protected:
         RasterPass(const Program::Desc& progDesc, const Program::DefineList& programDefines);

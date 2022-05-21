@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,8 +26,10 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ProjectTemplate.h"
-#include "AccumulationPass.h"
-//#include "AmbientOcclusionPass.h"
+
+#if FALCOR_D3D12_AVAILABLE
+FALCOR_EXPORT_D3D12_AGILITY_SDK
+#endif
 
 uint32_t mSampleGuiWidth = 250;
 uint32_t mSampleGuiHeight = 200;

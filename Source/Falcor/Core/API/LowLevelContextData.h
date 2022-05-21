@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,11 +28,15 @@
 #pragma once
 #include "GpuFence.h"
 
+#if FALCOR_D3D12_AVAILABLE
+#include "Core/API/Shared/D3D12DescriptorPool.h"
+#endif
+
 namespace Falcor
 {
     struct LowLevelContextApiData;
 
-    class dlldecl LowLevelContextData : public std::enable_shared_from_this<LowLevelContextData>
+    class FALCOR_API LowLevelContextData
     {
     public:
         using SharedPtr = std::shared_ptr<LowLevelContextData>;
@@ -59,6 +63,8 @@ namespace Falcor
 
         const CommandListHandle& getCommandList() const { return mpList; }
         const CommandQueueHandle& getCommandQueue() const { return mpQueue; }
+        const D3D12CommandListHandle& getD3D12CommandList() const;
+        const D3D12CommandQueueHandle& getD3D12CommandQueue() const;
         const CommandAllocatorHandle& getCommandAllocator() const { return mpAllocator; }
         const GpuFence::SharedPtr& getFence() const { return mpFence; }
         LowLevelContextApiData* getApiData() const { return mpApiData; }
@@ -67,9 +73,14 @@ namespace Falcor
         // Used in DXR
         void setCommandList(CommandListHandle pList) { mpList = pList; }
 #endif
+#ifdef FALCOR_GFX
+        void closeCommandBuffer();
+        void openCommandBuffer();
+        void beginDebugEvent(const char* name);
+        void endDebugEvent();
+#endif
     protected:
         LowLevelContextData(CommandQueueType type, CommandQueueHandle queue);
-
         LowLevelContextApiData* mpApiData = nullptr;
         CommandQueueType mType;
         CommandListHandle mpList;

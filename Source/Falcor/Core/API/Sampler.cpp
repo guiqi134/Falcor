@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -46,6 +46,9 @@ namespace Falcor
     {
         gSamplerData.objectCount--;
         if (gSamplerData.objectCount <= 1) gSamplerData.pDefaultSampler = nullptr;
+#ifdef FALCOR_GFX
+        gpDevice->releaseResource(mApiHandle);
+#endif
     }
 
     Sampler::Desc& Sampler::Desc::setFilterMode(Filter minFilter, Filter magFilter, Filter mipFilter)
@@ -96,6 +99,25 @@ namespace Falcor
         return *this;
     }
 
+    bool Sampler::Desc::operator==(const Sampler::Desc& other) const
+    {
+        if (mMagFilter != other.mMagFilter) return false;
+        if (mMinFilter != other.mMinFilter) return false;
+        if (mMipFilter != other.mMipFilter) return false;
+        if (mMaxAnisotropy != other.mMaxAnisotropy) return false;
+        if (mMaxLod != other.mMaxLod) return false;
+        if (mMinLod != other.mMinLod) return false;
+        if (mLodBias != other.mLodBias) return false;
+        if (mComparisonMode != other.mComparisonMode) return false;
+        if (mReductionMode != other.mReductionMode) return false;
+        if (mModeU != other.mModeU) return false;
+        if (mModeV != other.mModeV) return false;
+        if (mModeW != other.mModeW) return false;
+        if (mBorderColor != other.mBorderColor) return false;
+
+        return true;
+    }
+
     Sampler::SharedPtr Sampler::getDefault()
     {
         if (gSamplerData.pDefaultSampler == nullptr)
@@ -105,7 +127,7 @@ namespace Falcor
         return gSamplerData.pDefaultSampler;
     }
 
-    SCRIPT_BINDING(Sampler)
+    FALCOR_SCRIPT_BINDING(Sampler)
     {
         pybind11::class_<Sampler, Sampler::SharedPtr>(m, "Sampler");
 

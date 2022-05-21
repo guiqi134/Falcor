@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "stdafx.h"
 #include "Core/API/Sampler.h"
-#include "D3D12State.h"
+#include "Core/API/D3D12/D3D12State.h"
 #include "Core/API/Device.h"
 
 namespace Falcor
@@ -42,11 +42,16 @@ namespace Falcor
         SharedPtr pSampler = SharedPtr(new Sampler(desc));
         D3D12_SAMPLER_DESC d3dDesc;
         initD3D12SamplerDesc(pSampler.get(), d3dDesc);
-        DescriptorSet::Layout layout;
-        layout.addRange(DescriptorSet::Type::Sampler, 0, 1);
-        pSampler->mApiHandle = DescriptorSet::create(gpDevice->getCpuDescriptorPool(), layout);
+        D3D12DescriptorSet::Layout layout;
+        layout.addRange(ShaderResourceType::Sampler, 0, 1);
+        pSampler->mApiHandle = D3D12DescriptorSet::create(gpDevice->getD3D12CpuDescriptorPool(), layout);
         gpDevice->getApiHandle()->CreateSampler(&d3dDesc, pSampler->mApiHandle->getCpuHandle(0));
 
         return pSampler;
+    }
+
+    D3D12DescriptorCpuHandle Sampler::getD3D12CpuHeapHandle() const
+    {
+        return mApiHandle->getCpuHandle(0);
     }
 }

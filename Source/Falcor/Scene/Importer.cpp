@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -42,16 +42,15 @@ namespace Falcor
         return sFileExtensionsFilters;
     }
 
-    bool Importer::import(const std::string& filename, SceneBuilder& builder, const SceneBuilder::InstanceMatrices& instances, const Dictionary& dict)
+    void Importer::import(const std::filesystem::path& path, SceneBuilder& builder, const SceneBuilder::InstanceMatrices& instances, const Dictionary& dict)
     {
-        auto ext = getExtensionFromFile(filename);
+        auto ext = getExtensionFromPath(path);
         auto it = sImportFunctions.find(ext);
         if (it == sImportFunctions.end())
         {
-            logError("Error when loading '" + filename + "'. Unknown file extension.");
-            return false;
+            throw ImporterError(path, "Unknown file extension.");
         }
-        return it->second(filename, builder, instances, dict);
+        it->second(path, builder, instances, dict);
     }
 
     void Importer::registerImporter(const Desc& desc)
@@ -60,9 +59,14 @@ namespace Falcor
 
         for (const auto& ext : desc.extensions)
         {
-            assert(sImportFunctions.find(ext) == sImportFunctions.end());
+            FALCOR_ASSERT(sImportFunctions.find(ext) == sImportFunctions.end());
             sImportFunctions[ext] = desc.import;
             sFileExtensionsFilters.push_back(ext);
         }
+    }
+
+    FALCOR_SCRIPT_BINDING(Importer)
+    {
+        pybind11::register_exception<ImporterError>(m, "ImporterError");
     }
 }

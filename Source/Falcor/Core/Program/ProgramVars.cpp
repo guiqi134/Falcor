@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,9 +26,9 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "stdafx.h"
-#include "ProgramVars.h"
-#include "GraphicsProgram.h"
-#include "ComputeProgram.h"
+#include "Core/Program/ProgramVars.h"
+#include "Core/Program/GraphicsProgram.h"
+#include "Core/Program/ComputeProgram.h"
 #include "Core/API/ComputeContext.h"
 #include "Core/API/RenderContext.h"
 
@@ -36,34 +36,9 @@
 
 namespace Falcor
 {
-    static bool compareRootSets(const DescriptorSet::Layout& a, const DescriptorSet::Layout& b)
-    {
-        if (a.getRangeCount() != b.getRangeCount()) return false;
-        if (a.getVisibility() != b.getVisibility()) return false;
-        for (uint32_t i = 0; i < a.getRangeCount(); i++)
-        {
-            const auto& rangeA = a.getRange(i);
-            const auto& rangeB = b.getRange(i);
-            if (rangeA.baseRegIndex != rangeB.baseRegIndex) return false;
-            if (rangeA.descCount != rangeB.descCount) return false;
-#ifdef FALCOR_D3D12
-            if (rangeA.regSpace != rangeB.regSpace) return false;
-#endif
-            if (rangeA.type != rangeB.type) return false;
-        }
-        return true;
-    }
-
-    ProgramVars::ProgramVars(
-        const ProgramReflection::SharedConstPtr& pReflector)
-        : ParameterBlock(pReflector->getProgramVersion(), pReflector->getDefaultParameterBlock())
-        , mpReflector(pReflector)
-    {
-        assert(pReflector);
-    }
-
     void ProgramVars::addSimpleEntryPointGroups()
     {
+#ifdef FALCOR_D3D12
         auto& entryPointGroups = mpReflector->getEntryPointGroups();
         auto groupCount = entryPointGroups.size();
         for( size_t gg = 0; gg < groupCount; ++gg )
@@ -72,6 +47,7 @@ namespace Falcor
             auto pGroupVars = EntryPointGroupVars::create(pGroup, uint32_t(gg));
             mpEntryPointGroupVars.push_back(pGroupVars);
         }
+#endif
     }
 
     GraphicsVars::GraphicsVars(const ProgramReflection::SharedConstPtr& pReflector)
@@ -82,25 +58,25 @@ namespace Falcor
 
     GraphicsVars::SharedPtr GraphicsVars::create(const ProgramReflection::SharedConstPtr& pReflector)
     {
-        if (pReflector == nullptr) throw std::exception("Can't create a GraphicsVars object without a program reflector");
+        if (pReflector == nullptr) throw ArgumentError("Can't create a GraphicsVars object without a program reflector");
         return SharedPtr(new GraphicsVars(pReflector));
     }
 
     GraphicsVars::SharedPtr GraphicsVars::create(const GraphicsProgram* pProg)
     {
-        if (pProg == nullptr) throw std::exception("Can't create a GraphicsVars object without a program");
+        if (pProg == nullptr) throw ArgumentError("Can't create a GraphicsVars object without a program");
         return create(pProg->getReflector());
     }
 
     ComputeVars::SharedPtr ComputeVars::create(const ProgramReflection::SharedConstPtr& pReflector)
     {
-        if (pReflector == nullptr) throw std::exception("Can't create a ComputeVars object without a program reflector");
+        if (pReflector == nullptr) throw ArgumentError("Can't create a ComputeVars object without a program reflector");
         return SharedPtr(new ComputeVars(pReflector));
     }
 
     ComputeVars::SharedPtr ComputeVars::create(const ComputeProgram* pProg)
     {
-        if (pProg == nullptr) throw std::exception("Can't create a ComputeVars object without a program");
+        if (pProg == nullptr) throw ArgumentError("Can't create a ComputeVars object without a program");
         return create(pProg->getReflector());
     }
 
@@ -110,230 +86,126 @@ namespace Falcor
         addSimpleEntryPointGroups();
     }
 
-    template<bool forGraphics>
-    void bindRootSet(DescriptorSet::SharedPtr const& pSet, CopyContext* pContext, RootSignature* pRootSignature, uint32_t rootIndex)
+
+    RtProgramVars::RtProgramVars(const RtProgram::SharedPtr& pProgram, const RtBindingTable::SharedPtr& pBindingTable)
+        : ProgramVars(pProgram->getReflector())
     {
-        if (forGraphics)
+        if (pProgram == nullptr)
         {
-            pSet->bindForGraphics(pContext, pRootSignature, rootIndex);
+            throw ArgumentError("RtProgramVars must have a raytracing program attached to it");
         }
-        else
+        if (pBindingTable == nullptr || !pBindingTable->getRayGen().isValid())
         {
-            pSet->bindForCompute(pContext, pRootSignature, rootIndex);
+            throw ArgumentError("RtProgramVars must have a raygen program attached to it");
         }
+
+        init(pBindingTable);
     }
 
-    template<bool forGraphics>
-    void bindRootDescriptor(CopyContext* pContext, uint32_t rootIndex, const Resource::SharedPtr& pResource, bool isUav)
+    RtProgramVars::SharedPtr RtProgramVars::create(const RtProgram::SharedPtr& pProgram, const RtBindingTable::SharedPtr& pBindingTable)
     {
-        auto pBuffer = pResource->asBuffer();
-        assert(!pResource || pBuffer); // If a resource is bound, it must be a buffer
-        uint64_t gpuAddress = pBuffer ? pBuffer->getGpuAddress() : 0;
-
-        if (forGraphics)
-        {
-            if (isUav)
-                pContext->getLowLevelData()->getCommandList()->SetGraphicsRootUnorderedAccessView(rootIndex, gpuAddress);
-            else
-                pContext->getLowLevelData()->getCommandList()->SetGraphicsRootShaderResourceView(rootIndex, gpuAddress);
-        }
-        else
-        {
-            if (isUav)
-                pContext->getLowLevelData()->getCommandList()->SetComputeRootUnorderedAccessView(rootIndex, gpuAddress);
-            else
-                pContext->getLowLevelData()->getCommandList()->SetComputeRootShaderResourceView(rootIndex, gpuAddress);
-        }
+        return SharedPtr(new RtProgramVars(pProgram, pBindingTable));
     }
 
-    template<bool forGraphics>
-    void bindRootConstants(CopyContext* pContext, uint32_t rootIndex, ParameterBlock* pParameterBlock, const ParameterBlockReflection* pParameterBlockReflector)
+    void RtProgramVars::init(const RtBindingTable::SharedPtr& pBindingTable)
     {
-        uint32_t count = uint32_t(pParameterBlockReflector->getElementType()->getByteSize() / sizeof(uint32_t));
-        void const* pSrc = pParameterBlock->getRawData();
-        if (forGraphics)
+        mRayTypeCount = pBindingTable->getRayTypeCount();
+        mGeometryCount = pBindingTable->getGeometryCount();
+
+        // We must create sub-shader-objects for all the entry point
+        // groups that are used by the supplied binding table.
+        //
+        FALCOR_ASSERT(mpProgramVersion);
+        FALCOR_ASSERT(dynamic_cast<RtProgram*>(mpProgramVersion->getProgram().get()));
+        auto pProgram = static_cast<RtProgram*>(mpProgramVersion->getProgram().get());
+        auto pReflector = mpProgramVersion->getReflector();
+
+        auto& rtDesc = pProgram->getRtDesc();
+        std::set<int32_t> entryPointGroupIndices;
+
+        // Ray generation and miss programs are easy: we just allocate space
+        // for one parameter block per entry-point of the given type in the binding table.
+        //
+        const auto& info = pBindingTable->getRayGen();
+        FALCOR_ASSERT(info.isValid());
+        mRayGenVars.resize(1);
+#if defined(FALCOR_D3D12)
+        mRayGenVars[0].pVars = EntryPointGroupVars::create(pReflector->getEntryPointGroup(info.groupIndex), info.groupIndex);
+#elif defined(FALCOR_GFX)
+        mRayGenVars[0].entryPointGroupIndex = info.groupIndex;
+#endif
+        entryPointGroupIndices.insert(info.groupIndex);
+
+        uint32_t missCount = pBindingTable->getMissCount();
+        mMissVars.resize(missCount);
+
+        for (uint32_t i = 0; i < missCount; ++i)
         {
-            pContext->getLowLevelData()->getCommandList()->SetGraphicsRoot32BitConstants(
-                rootIndex,
-                count,
-                pSrc,
-                0);
-        }
-        else
-        {
-            pContext->getLowLevelData()->getCommandList()->SetComputeRoot32BitConstants(
-                rootIndex,
-                count,
-                pSrc,
-                0);
-        }
-    }
-
-    template<bool forGraphics>
-    bool bindParameterBlockSets(
-        ParameterBlock*                 pParameterBlock,
-        const ParameterBlockReflection* pParameterBlockReflector,
-        CopyContext*                    pContext,
-        RootSignature*                  pRootSignature,
-        bool                            bindRootSig,
-        uint32_t&                       descSetIndex,
-        uint32_t&                       rootConstIndex)
-    {
-        auto defaultConstantBufferInfo = pParameterBlockReflector->getDefaultConstantBufferBindingInfo();
-        if( defaultConstantBufferInfo.useRootConstants )
-        {
-            uint32_t rootIndex = rootConstIndex++;
-
-            bindRootConstants<forGraphics>(pContext, rootIndex, pParameterBlock, pParameterBlockReflector);
-        }
-
-        auto descriptorSetCount = pParameterBlockReflector->getDescriptorSetCount();
-        for(uint32_t s = 0; s < descriptorSetCount; ++s)
-        {
-            auto pSet = pParameterBlock->getDescriptorSet(s);
-
-            uint32_t rootIndex = descSetIndex++;
-
-            bindRootSet<forGraphics>(pSet, pContext, pRootSignature, rootIndex);
-        }
-
-        // Iterate over parameter blocks to recursively bind their descriptor sets.
-        auto parameterBlockRangeCount = pParameterBlockReflector->getParameterBlockSubObjectRangeCount();
-        for(uint32_t i = 0; i < parameterBlockRangeCount; ++i)
-        {
-            auto resourceRangeIndex = pParameterBlockReflector->getParameterBlockSubObjectRangeIndex(i);
-            auto& resourceRange = pParameterBlockReflector->getResourceRange(resourceRangeIndex);
-            auto& bindingInfo = pParameterBlockReflector->getResourceRangeBindingInfo(resourceRangeIndex);
-
-            auto pSubObjectReflector = bindingInfo.pSubObjectReflector;
-            auto objectCount = resourceRange.count;
-
-            for(uint32_t i = 0; i < objectCount; ++i)
+            const auto& info = pBindingTable->getMiss(i);
+            if (!info.isValid())
             {
-                auto pSubBlock = pParameterBlock->getParameterBlock(resourceRangeIndex, i);
-                if(!bindParameterBlockSets<forGraphics>(pSubBlock.get(), pSubObjectReflector.get(), pContext, pRootSignature, bindRootSig, descSetIndex, rootConstIndex))
-                {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
-
-    template<bool forGraphics>
-    bool bindParameterBlockRootDescs(
-        ParameterBlock*                 pParameterBlock,
-        const ParameterBlockReflection* pParameterBlockReflector,
-        CopyContext*                    pContext,
-        RootSignature*                  pRootSignature,
-        bool                            bindRootSig,
-        uint32_t&                       rootDescIndex)
-    {
-        auto rootDescriptorRangeCount = pParameterBlockReflector->getRootDescriptorRangeCount();
-        for (uint32_t i = 0; i < rootDescriptorRangeCount; ++i)
-        {
-            auto resourceRangeIndex = pParameterBlockReflector->getRootDescriptorRangeIndex(i);
-            auto& resourceRange = pParameterBlockReflector->getResourceRange(resourceRangeIndex);
-
-            assert(resourceRange.count == 1); // Root descriptors cannot be arrays
-            auto [pResource, isUav] = pParameterBlock->getRootDescriptor(resourceRangeIndex, 0);
-
-            bindRootDescriptor<forGraphics>(pContext, rootDescIndex++, pResource, isUav);
-        }
-
-        // Iterate over constant buffers and parameter blocks to recursively bind their root descriptors.
-        uint32_t resourceRangeCount = pParameterBlockReflector->getResourceRangeCount();
-        for (uint32_t resourceRangeIndex = 0; resourceRangeIndex < resourceRangeCount; ++resourceRangeIndex)
-        {
-            auto& resourceRange = pParameterBlockReflector->getResourceRange(resourceRangeIndex);
-            auto& bindingInfo = pParameterBlockReflector->getResourceRangeBindingInfo(resourceRangeIndex);
-
-            if (bindingInfo.flavor != ParameterBlockReflection::ResourceRangeBindingInfo::Flavor::ConstantBuffer &&
-                bindingInfo.flavor != ParameterBlockReflection::ResourceRangeBindingInfo::Flavor::ParameterBlock)
+                logWarning("Raytracing binding table has no shader at miss index {}. Is that intentional?", i);
                 continue;
-
-            auto pSubObjectReflector = bindingInfo.pSubObjectReflector;
-            auto objectCount = resourceRange.count;
-
-            for (uint32_t i = 0; i < objectCount; ++i)
-            {
-                auto pSubBlock = pParameterBlock->getParameterBlock(resourceRangeIndex, i);
-                if (!bindParameterBlockRootDescs<forGraphics>(pSubBlock.get(), pSubObjectReflector.get(), pContext, pRootSignature, bindRootSig, rootDescIndex))
-                {
-                    return false;
-                }
             }
+
+#if defined(FALCOR_D3D12)
+            mMissVars[i].pVars = EntryPointGroupVars::create(pReflector->getEntryPointGroup(info.groupIndex), info.groupIndex);
+#elif defined(FALCOR_GFX)
+            mMissVars[i].entryPointGroupIndex = info.groupIndex;
+#endif
+            entryPointGroupIndices.insert(info.groupIndex);
         }
 
-        return true;
-    }
+        // Hit groups are more complicated than ray generation and miss shaders.
+        // We typically want a distinct parameter block per declared hit group
+        // and per geometry in the scene.
+        //
+        // We need to take this extra complexity into account when allocating
+        // space for the hit group parameter blocks.
+        //
+        uint32_t hitCount = mRayTypeCount * mGeometryCount;
+        mHitVars.resize(hitCount);
 
-    template<bool forGraphics>
-    bool bindRootSetsCommon(ParameterBlock* pVars, CopyContext* pContext, bool bindRootSig, RootSignature* pRootSignature)
-    {
-        if(!pVars->prepareDescriptorSets(pContext)) return false;
-
-        uint32_t descSetIndex = pRootSignature->getDescriptorSetBaseIndex();
-        uint32_t rootDescIndex = pRootSignature->getRootDescriptorBaseIndex();
-        uint32_t rootConstIndex = pRootSignature->getRootConstantBaseIndex();
-
-        if (!bindParameterBlockSets<forGraphics>(pVars, pVars->getSpecializedReflector().get(), pContext, pRootSignature, bindRootSig, descSetIndex, rootConstIndex)) return false;
-        if (!bindParameterBlockRootDescs<forGraphics>(pVars, pVars->getSpecializedReflector().get(), pContext, pRootSignature, bindRootSig, rootDescIndex)) return false;
-
-        return true;
-    }
-
-    template<bool forGraphics>
-    bool applyProgramVarsCommon(ParameterBlock* pVars, CopyContext* pContext, bool bindRootSig, RootSignature* pRootSignature)
-    {
-        if (bindRootSig)
+        for (uint32_t rayType = 0; rayType < mRayTypeCount; rayType++)
         {
-            if (forGraphics)
+            for (uint32_t geometryID = 0; geometryID < mGeometryCount; geometryID++)
             {
-                pRootSignature->bindForGraphics(pContext);
-            }
-            else
-            {
-                pRootSignature->bindForCompute(pContext);
+                const auto& info = pBindingTable->getHitGroup(rayType, geometryID);
+                if (!info.isValid()) continue;
+
+#if defined(FALCOR_D3D12)
+                mHitVars[mRayTypeCount * geometryID + rayType].pVars = EntryPointGroupVars::create(pReflector->getEntryPointGroup(info.groupIndex), info.groupIndex);
+#elif defined(FALCOR_GFX)
+                mHitVars[mRayTypeCount * geometryID + rayType].entryPointGroupIndex = info.groupIndex;
+#endif
+                entryPointGroupIndices.insert(info.groupIndex);
             }
         }
 
-        return bindRootSetsCommon<forGraphics>(pVars, pContext, bindRootSig, pRootSignature);
-    }
+        mUniqueEntryPointGroupIndices.assign(entryPointGroupIndices.begin(), entryPointGroupIndices.end());
+        FALCOR_ASSERT(!mUniqueEntryPointGroupIndices.empty());
 
-    bool ProgramVars::updateSpecializationImpl() const
-    {
-        ParameterBlock::SpecializationArgs specializationArgs;
-        collectSpecializationArgs(specializationArgs);
-        if( specializationArgs.size() == 0 )
+        // Build list of vars for all entry point groups.
+        // Note that there may be nullptr entries, as not all hit groups need to be assigned.
+        FALCOR_ASSERT(mRayGenVars.size() == 1);
+#if defined(FALCOR_D3D12)
+        mpEntryPointGroupVars.push_back(mRayGenVars[0].pVars);
+        for (auto entryPointGroupInfo : mMissVars)
         {
-            mpSpecializedReflector = ParameterBlock::mpReflector;
-            return false;
+            mpEntryPointGroupVars.push_back(entryPointGroupInfo.pVars);
         }
-
-        // TODO: Want a caching step here, if possible...
-
-        auto pProgramKernels = mpProgramVersion->getKernels(this);
-        mpSpecializedReflector = pProgramKernels->getReflector()->getDefaultParameterBlock();
-        return false;
+        for (auto entryPointGroupInfo : mHitVars)
+        {
+            mpEntryPointGroupVars.push_back(entryPointGroupInfo.pVars);
+        }
+#endif
     }
 
-    bool ComputeVars::apply(ComputeContext* pContext, bool bindRootSig, RootSignature* pRootSignature)
+    RtEntryPointGroupKernels* RtProgramVars::getUniqueRtEntryPointGroupKernels(const ProgramKernels::SharedConstPtr& pKernels, int32_t uniqueEntryPointGroupIndex)
     {
-        return applyProgramVarsCommon<false>(this, pContext, bindRootSig, pRootSignature);
+        if (uniqueEntryPointGroupIndex < 0) return nullptr;
+        auto pEntryPointGroup = pKernels->getUniqueEntryPointGroup(uniqueEntryPointGroupIndex);
+        FALCOR_ASSERT(dynamic_cast<RtEntryPointGroupKernels*>(pEntryPointGroup.get()));
+        return static_cast<RtEntryPointGroupKernels*>(pEntryPointGroup.get());
     }
-
-    bool GraphicsVars::apply(RenderContext* pContext, bool bindRootSig, RootSignature* pRootSignature)
-    {
-        return applyProgramVarsCommon<true>(this, pContext, bindRootSig, pRootSignature);
-    }
-
-    void ComputeVars::dispatchCompute(ComputeContext* pContext, uint3 const& threadGroupCount)
-    {
-        auto pProgram = std::dynamic_pointer_cast<ComputeProgram>(getReflection()->getProgramVersion()->getProgram());
-        assert(pProgram);
-        pProgram->dispatchCompute(pContext, this, threadGroupCount);
-    }
-
 }

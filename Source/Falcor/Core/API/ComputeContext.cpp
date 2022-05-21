@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,27 +36,7 @@ namespace Falcor
         pCtx->bindDescriptorHeaps(); // TODO: Should this be done here?
         return pCtx;
     }
-    
-    bool ComputeContext::applyComputeVars(ComputeVars* pVars, RootSignature* pRootSignature)
-    {
-        bool varsChanged = (pVars != mpLastBoundComputeVars);
 
-        // FIXME TODO Temporary workaround
-        varsChanged = true;
-
-        if (pVars->apply(this, varsChanged, pRootSignature) == false)
-        {
-            logWarning("ComputeContext::applyComputeVars() - applying ComputeVars failed, most likely because we ran out of descriptors. Flushing the GPU and retrying");
-            flush(true);
-            if (!pVars->apply(this, varsChanged, pRootSignature))
-            {
-                logError("ComputeVars::applyComputeVars() - applying ComputeVars failed, most likely because we ran out of descriptors");
-                return false;
-            }
-        }
-        return true;
-    }
-    
     void ComputeContext::flush(bool wait)
     {
         CopyContext::flush(wait);

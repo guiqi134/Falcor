@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -188,12 +188,12 @@ namespace Falcor
         return create(vertices, indices);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createFromFile(const std::string& filename, bool smoothNormals)
+    TriangleMesh::SharedPtr TriangleMesh::createFromFile(const std::filesystem::path& path, bool smoothNormals)
     {
-        std::string fullPath;
-        if (!findFileInDataDirectories(filename, fullPath))
+        std::filesystem::path fullPath;
+        if (!findFileInDataDirectories(path, fullPath))
         {
-            logWarning("Error when loading triangle mesh. Can't find mesh file '" + filename + "'");
+            logWarning("Error when loading triangle mesh. Can't find mesh file '{}'.", path);
             return nullptr;
         }
 
@@ -205,10 +205,21 @@ namespace Falcor
             (smoothNormals ? aiProcess_GenSmoothNormals : aiProcess_GenNormals) |
             aiProcess_PreTransformVertices;
 
-        auto scene = importer.ReadFile(fullPath.c_str(), flags);
+        const aiScene* scene = nullptr;
+
+        if (hasExtension(fullPath, "gz"))
+        {
+            auto decompressed = decompressFile(fullPath);
+            scene = importer.ReadFileFromMemory(decompressed.data(), decompressed.size(), flags);
+        }
+        else
+        {
+            scene = importer.ReadFile(fullPath.string().c_str(), flags);
+        }
+
         if (!scene)
         {
-            logWarning("Failed to load triangle mesh from '" + fullPath + "' (" + importer.GetErrorString() + ")");
+            logWarning("Failed to load triangle mesh from '{}': {}", fullPath, importer.GetErrorString());
             return nullptr;
         }
 
@@ -255,7 +266,7 @@ namespace Falcor
     uint32_t TriangleMesh::addVertex(float3 position, float3 normal, float2 texCoord)
     {
         mVertices.emplace_back(Vertex{position, normal, texCoord});
-        assert(mVertices.size() < std::numeric_limits<uint32_t>::max());
+        FALCOR_ASSERT(mVertices.size() < std::numeric_limits<uint32_t>::max());
         return (uint32_t)(mVertices.size() - 1);
     }
 
@@ -268,14 +279,22 @@ namespace Falcor
 
     void TriangleMesh::applyTransform(const Transform& transform)
     {
-        auto transformMat = transform.getMatrix();
-        auto invTransposeMat = (glm::mat3)glm::transpose(glm::inverse(transformMat));
+        applyTransform(transform.getMatrix());
+    }
+
+    void TriangleMesh::applyTransform(const glm::mat4& transform)
+    {
+        auto invTranspose = (glm::mat3)glm::transpose(glm::inverse(transform));
 
         for (auto& vertex : mVertices)
         {
-            vertex.position = (transformMat * float4(vertex.position, 1.f)).xyz;
-            vertex.normal = glm::normalize(invTransposeMat * vertex.normal);
+            vertex.position = (transform * float4(vertex.position, 1.f)).xyz;
+            vertex.normal = glm::normalize(invTranspose * vertex.normal);
         }
+
+        // Check if triangle winding has flipped and adjust winding order accordingly.
+        bool flippedWinding = glm::determinant((glm::mat3)transform) < 0.f;
+        if (flippedWinding) mFrontFaceCW = !mFrontFaceCW;
     }
 
     TriangleMesh::TriangleMesh()
@@ -287,7 +306,7 @@ namespace Falcor
         , mFrontFaceCW(frontFaceCW)
     {}
 
-    SCRIPT_BINDING(TriangleMesh)
+    FALCOR_SCRIPT_BINDING(TriangleMesh)
     {
         pybind11::class_<TriangleMesh, TriangleMesh::SharedPtr> triangleMesh(m, "TriangleMesh");
         triangleMesh.def_property("name", &TriangleMesh::getName, &TriangleMesh::setName);
@@ -301,7 +320,7 @@ namespace Falcor
         triangleMesh.def_static("createDisk", &TriangleMesh::createDisk, "radius"_a = 1.f, "segments"_a = 32);
         triangleMesh.def_static("createCube", &TriangleMesh::createCube, "size"_a = float3(1.f));
         triangleMesh.def_static("createSphere", &TriangleMesh::createSphere, "radius"_a = 1.f, "segmentsU"_a = 32, "segmentsV"_a = 32);
-        triangleMesh.def_static("createFromFile", &TriangleMesh::createFromFile, "filename"_a, "smoothNormals"_a = false);
+        triangleMesh.def_static("createFromFile", &TriangleMesh::createFromFile, "path"_a, "smoothNormals"_a = false);
 
         pybind11::class_<TriangleMesh::Vertex> vertex(triangleMesh, "Vertex");
         vertex.def_readwrite("position", &TriangleMesh::Vertex::position);

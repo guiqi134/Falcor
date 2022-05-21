@@ -52,16 +52,16 @@ class falcor.**Renderer**
 | `videoCapture`  | `VideoCapture`  | Video capture.                  |
 | `timingCapture` | `TimingCapture` | Timing capture.                 |
 
-| Method                                                      | Description                                                     |
-|-------------------------------------------------------------|-----------------------------------------------------------------|
-| `script(filename)`                                          | Run a script.                                                   |
-| `loadScene(filename, buildFlags=SceneBuilderFlags.Default)` | Load a scene. See available build flags below.                  |
-| `unloadScene()`                                             | Explicitly unload the scene to free memory.                     |
-| `saveConfig(filename)`                                      | Save the current state to a config file.                        |
-| `addGraph(graph)`                                           | Add a render graph.                                             |
-| `removeGraph(graph)`                                        | Remove a render graph. `graph` can be a render graph or a name. |
-| `getGraph(name)`                                            | Get a render graph by name.                                     |
-| `resizeSwapChain(width, height)`                            | Resize the window/swapchain.                                    |
+| Method                                                  | Description                                                     |
+|---------------------------------------------------------|-----------------------------------------------------------------|
+| `script(path)`                                          | Run a script.                                                   |
+| `loadScene(path, buildFlags=SceneBuilderFlags.Default)` | Load a scene. See available build flags below.                  |
+| `unloadScene()`                                         | Explicitly unload the scene to free memory.                     |
+| `saveConfig(path)`                                      | Save the current state to a config file.                        |
+| `addGraph(graph)`                                       | Add a render graph.                                             |
+| `removeGraph(graph)`                                    | Remove a render graph. `graph` can be a render graph or a name. |
+| `getGraph(name)`                                        | Get a render graph by name.                                     |
+| `resizeSwapChain(width, height)`                        | Resize the window/swapchain.                                    |
 
 #### Clock
 
@@ -210,6 +210,7 @@ exit()
 
 
 #### VideoCapture
+
 The video capture will always capture the marked graph output. You can use `graph.markOutput()` and `graph.unmarkOutput()` to control which outputs to dump.
 
 enum falcor.**Codec**
@@ -251,9 +252,9 @@ m.videoCapture.addRanges(m.activeGraph, [[30, 300]])
 
 class falcor.**TimingCapture**
 
-| Method                       | Description                                      |
-|------------------------------|--------------------------------------------------|
-| `captureFrameTime(filename)` | Start writing frame times to the given filename. |
+| Method                   | Description                                       |
+|--------------------------|---------------------------------------------------|
+| `captureFrameTime(path)` | Start writing frame times to the given file path. |
 
 Example:
 ```python
@@ -286,19 +287,25 @@ class falcor.**RenderGraph**
 |----------|-------|---------------------------|
 | `name`   | `str` | Name of the render graph. |
 
-| Method                         | Description                                                                        |
-|--------------------------------|------------------------------------------------------------------------------------|
-| `RenderGraph(name)`            | Create a new render graph.                                                         |
-| `addPass(pass, name)`          | Add a render pass to the graph.                                                    |
-| `removePass(name)`             | Remove a render pass from the graph.                                               |
-| `updatePass(name, dict)`       | Update a render pass with new configuration options in `dict`.                     |
-| `getPass(name)`                | Get a pass by name.                                                                |
-| `addEdge(src, dst)`            | Add an edge to the render graph.                                                   |
-| `removeEdge(src, dst)`         | Remove an edge from the render graph.                                              |
-| `markOutput(name)`             | Mark an output to be selectable in Mogwai and writing files when capturing frames. |
-| `unmarkOutput(name)`           | Unmark an output.                                                                  |
-| `getOutput(index)`             | Get an output by index.                                                            |
-| `getOutput(name)`              | Get an output by name.                                                             |
+| Method                         | Description                                                                                  |
+|--------------------------------|----------------------------------------------------------------------------------------------|
+| `RenderGraph(name)`            | Create a new render graph.                                                                   |
+| `addPass(pass, name)`          | Add a render pass to the graph.                                                              |
+| `removePass(name)`             | Remove a render pass from the graph.                                                         |
+| `updatePass(name, dict)`       | Update a render pass with new configuration options in `dict`.                               |
+| `getPass(name)`                | Get a pass by name.                                                                          |
+| `addEdge(src, dst)`            | Add an edge to the render graph.                                                             |
+| `removeEdge(src, dst)`         | Remove an edge from the render graph.                                                        |
+| `markOutput(name, mask)`       | Mark a render pass output as graph output. `mask` is an optional `TextureChannelFlags` enum. |
+| `unmarkOutput(name)`           | Unmark an output.                                                                            |
+| `getOutput(index)`             | Get an output by index.                                                                      |
+| `getOutput(name)`              | Get an output by name.                                                                       |
+
+**Note:**
+* `markOutput` marks an output to be selectable in Mogwai and for frame capture. The first marked output will be the default output in Mogwai.
+* The output is identified by name on the form `renderPass.outputName`.
+* The function takes an optional `mask` parameter to specify which color channels to capture for frame capture. If no mask is given, the default is RGB and ignore alpha.
+* An output can be marked multiple times with different masks. Each version will be written to a separate file by frame capture.
 
 #### RenderPass
 
@@ -307,6 +314,7 @@ class falcor.**RenderPass**
 | Property | Type  | Description                                |
 |----------|-------|--------------------------------------------|
 | `name`   | `str` | Name of the render pass (readonly).        |
+| `type`   | `str` | Type name of the render pass (readonly).   |
 | `desc`   | `str` | Description of the render pass (readonly). |
 
 | Method            | Description                                                     |
@@ -353,18 +361,19 @@ class falcor.**AABB**
 | `include(b)`      | Include another AABB in the AABB. |
 | `intersection(b)` | Intersect with another AABB.      |
 
+
 ### Scene API
 
 #### SceneRenderSettings
 
 class falcor.**SceneRenderSettings**
 
-| Property            | Type   | Description                                        |
-|---------------------|--------|----------------------------------------------------|
-| `useEnvLight`       | `bool` | Enable/disable lighting from environment map.      |
-| `useAnalyticLights` | `bool` | Enable/disable lighting from analytic lights.      |
-| `useEmissiveLights` | `bool` | Enable/disable lighting from emissive lights.      |
-| `useVolumes`        | `bool` | Enable/disable rendering of heterogeneous volumes. |
+| Property            | Type   | Description                                   |
+|---------------------|--------|-----------------------------------------------|
+| `useEnvLight`       | `bool` | Enable/disable lighting from environment map. |
+| `useAnalyticLights` | `bool` | Enable/disable lighting from analytic lights. |
+| `useEmissiveLights` | `bool` | Enable/disable lighting from emissive lights. |
+| `useGridVolumes`    | `bool` | Enable/disable rendering of grid volumes.     |
 
 #### Scene
 
@@ -385,17 +394,20 @@ class falcor.**Scene**
 | `cameras`        | `list(Camera)`          | List of cameras.                                                        |
 | `lights`         | `list(Light)`           | List of lights.                                                         |
 | `materials`      | `list(Material)`        | List of materials.                                                      |
-| `volumes`        | `list(Volume)`          | List of volumes.                                                        |
+| `volumes`        | `list(Volume)`          | **DEPRECATED**: Use `gridVolumes` instead.                              |
+| `gridVolumes`    | `list(GridVolume)`      | List of grid volumes.                                                   |
 
 | Method                               | Description                                            |
 |--------------------------------------|--------------------------------------------------------|
-| `setEnvMap(filename)`                | Load an environment map from an image.                 |
+| `setEnvMap(path)`                    | Load an environment map from an image.                 |
 | `getLight(index)`                    | Return a light by index.                               |
 | `getLight(name)`                     | Return a light by name.                                |
 | `getMaterial(index)`                 | Return a material by index.                            |
 | `getMaterial(name)`                  | Return a material by name.                             |
-| `getVolume(index)`                   | Return a volume by index.                              |
-| `getVolume(name)`                    | Return a volume by name.                               |
+| `getVolume(index)`                   | **DEPRECATED**: Use `getGridVolume` instead.           |
+| `getGridVolume(index)`               | Return a grid volume by index.                         |
+| `getVolume(name)`                    | **DEPRECATED**: Use `getGridVolume` instead.           |
+| `getGridVolume(name)`                | Return a grid volume by name.                          |
 | `addViewpoint()`                     | Add current camera's viewpoint to the viewpoint list.  |
 | `addViewpoint(position, target, up)` | Add a viewpoint to the viewpoint list.                 |
 | `removeViewpoint()`                  | Remove selected viewpoint.                             |
@@ -426,48 +438,77 @@ class falcor.**Camera**
 
 class falcor.**EnvMap**
 
-| Property    | Type     | Description                                    |
-|-------------|----------|------------------------------------------------|
-| `filename`  | `str`    | Filename of loaded environment map (readonly). |
-| `rotation`  | `float3` | Rotation angles in degrees (XYZ).              |
-| `intensity` | `float`  | Intensity (scalar multiplier).                 |
+| Property    | Type     | Description                                     |
+|-------------|----------|-------------------------------------------------|
+| `path`      | `str`    | File path of loaded environment map (readonly). |
+| `rotation`  | `float3` | Rotation angles in degrees (XYZ).               |
+| `intensity` | `float`  | Intensity (scalar multiplier).                  |
+
+| Static method          | Description                           |
+|------------------------|---------------------------------------|
+| `createFromFile(path)` | Create a environment map from a file. |
 
 #### Material
+
+**DEPRECATED**: Use `StandardMaterial` instead.
+
+#### StandardMaterial
 
 enum falcor.**MaterialTextureSlot**
 
 `BaseColor`, `Specular`, `Emissive`, `Normal`, `Transmission`, `Displacement`
 
-class falcor.**Material**
+enum falcor.**AlphaMode**
 
-| Property               | Type     | Description                                          |
-|------------------------|----------|------------------------------------------------------|
-| `name`                 | `str`    | Name of the material.                                |
-| `baseColor`            | `float4` | Base color (linear RGB) and opacity (alpha).         |
-| `specularParams`       | `float4` | Specular parameters.                                 |
-| `roughness`            | `float`  | Roughness (0 = smooth, 1 = rough).                   |
-| `metallic`             | `float`  | Metallic (0 = dielectric, 1 = conductive).           |
-| `transmissionColor`    | `float3` | Transmission color.                                  |
-| `diffuseTransmission`  | `float`  | Diffuse transmission (0 = opaque, 1 = transparent).  |
-| `specularTransmission` | `float`  | Specular transmission (0 = opaque, 1 = transparent). |
-| `indexOfRefraction`    | `float`  | Index of refraction.                                 |
-| `emissiveColor`        | `float3` | Emissive color (linear RGB).                         |
-| `emissiveFactor`       | `float`  | Multiplier for emissive color.                       |
-| `alphaMode`            | `int`    | Alpha mode (0 = opaque, 1 = masked).                 |
-| `alphaThreshold`       | `float`  | Alpha masking threshold (0-1).                       |
-| `doubleSided`          | `bool`   | Enable double sided rendering.                       |
-| `thinSurface`          | `bool`   | Enable thin surface rendering.                       |
-| `nestedPriority`       | `int`    | Nested priority for nested dielectrics.              |
-| `volumeAbsorption`     | `float3` | Volume absorption coefficient.                       |
-| `volumeScattering`     | `float3` | Volume scattering coefficient.                       |
-| `volumeAnisotropy`     | `float`  | Volume phase function anisotropy (g).                |
-| `displacementScale`    | `float`  | Displacement mapping scale value.                    |
-| `displacementOffset`   | `float`  | Displacement mapping offset value.                   |
+`Opaque`, `Mask`
 
-| Method                                      | Description                                |
-|---------------------------------------------|--------------------------------------------|
-| `clearTexture(slot)`                        | Clears one of the texture slots.           |
-| `loadTexture(slot, filename, useSrgb=True)` | Load one of the texture slots from a file. |
+enum falcor.**ShadingModel**
+
+`MetalRough`, `SpecGloss`
+
+class falcor.**StandardMaterial**
+
+| Property               | Type           | Description                                          |
+|------------------------|----------------|------------------------------------------------------|
+| `name`                 | `str`          | Name of the material.                                |
+| `shadingModel`         | `ShadingModel` | Shading model (readonly).                            |
+| `baseColor`            | `float4`       | Base color (linear RGB) and opacity (alpha).         |
+| `specularParams`       | `float4`       | Specular parameters.                                 |
+| `roughness`            | `float`        | Roughness (0 = smooth, 1 = rough).                   |
+| `metallic`             | `float`        | Metallic (0 = dielectric, 1 = conductive).           |
+| `transmissionColor`    | `float3`       | Transmission color.                                  |
+| `diffuseTransmission`  | `float`        | Diffuse transmission (0 = opaque, 1 = transparent).  |
+| `specularTransmission` | `float`        | Specular transmission (0 = opaque, 1 = transparent). |
+| `indexOfRefraction`    | `float`        | Index of refraction.                                 |
+| `emissiveColor`        | `float3`       | Emissive color (linear RGB).                         |
+| `emissiveFactor`       | `float`        | Multiplier for emissive color.                       |
+| `alphaMode`            | `AlphaMode`    | Alpha mode (opaque or mask)                          |
+| `alphaThreshold`       | `float`        | Alpha masking threshold (0-1).                       |
+| `doubleSided`          | `bool`         | Enable double sided rendering.                       |
+| `thinSurface`          | `bool`         | Enable thin surface rendering.                       |
+| `nestedPriority`       | `int`          | Nested priority for nested dielectrics.              |
+| `volumeAbsorption`     | `float3`       | Volume absorption coefficient.                       |
+| `volumeScattering`     | `float3`       | Volume scattering coefficient.                       |
+| `volumeAnisotropy`     | `float`        | Volume phase function anisotropy (g).                |
+| `displacementScale`    | `float`        | Displacement mapping scale value.                    |
+| `displacementOffset`   | `float`        | Displacement mapping offset value.                   |
+
+| Method                                  | Description                                |
+|-----------------------------------------|--------------------------------------------|
+| `clearTexture(slot)`                    | Clears one of the texture slots.           |
+| `loadTexture(slot, path, useSrgb=True)` | Load one of the texture slots from a file. |
+
+#### HairMaterial
+
+class falcor.**HairMaterial**
+
+Interface identical to `StandardMaterial`
+
+#### ClothMaterial
+
+class falcor.**ClothMaterial**
+
+Interface identical to `StandardMaterial`
 
 #### Grid
 
@@ -489,19 +530,23 @@ class falcor.**Grid**
 |--------------------------------------------------------------|---------------------------------------------|
 | `createSphere(radius, voxelSize, blendRange=2.0)`            | Create a sphere grid.                       |
 | `createBox(width, height, depth, voxelSize, blendRange=2.0)` | Create a box grid.                          |
-| `createFromFile(filename, gridname)`                         | Create a grid from an OpenVDB/NanoVDB file. |
+| `createFromFile(path, gridname)`                             | Create a grid from an OpenVDB/NanoVDB file. |
 
 #### Volume
 
-enum falcor.Volume.**GridSlot**
+**DEPRECATED**: Use `GridVolume` instead.
+
+#### GridVolume
+
+enum falcor.GridVolume.**GridSlot**
 
 `Density`, `Emission`
 
-enum falcor.Volume.**EmissionMode**
+enum falcor.GridVolume.**EmissionMode**
 
 `Direct`, `Blackbody`
 
-class falcor.**Volume**
+class falcor.**GridVolume**
 
 | Property              | Type           | Description                                             |
 |-----------------------|----------------|---------------------------------------------------------|
@@ -519,11 +564,11 @@ class falcor.**Volume**
 | `emissionMode`        | `EmissionMode` | Emission mode (Direct, Blackbody).                      |
 | `emissionTemperature` | `float`        | Emission base temperature (K).                          |
 
-| Method                                        | Description                                                                         |
-|-----------------------------------------------|-------------------------------------------------------------------------------------|
-| `loadGrid(slot, filename, gridname)`          | Load a grid slot from an OpenVDB/NanoVDB file.                                      |
-| `loadGridSequence(slot, filenames, gridname)` | Load a grid slot from a sequence of OpenVDB/NanoVDB files.                          |
-| `loadGridSequence(slot, path, gridname)`      | Load a grid slot from a sequence of OpenVDB/NanoVDB files contained in a directory. |
+| Method                                    | Description                                                                         |
+|-------------------------------------------|-------------------------------------------------------------------------------------|
+| `loadGrid(slot, path, gridname)`          | Load a grid slot from an OpenVDB/NanoVDB file.                                      |
+| `loadGridSequence(slot, paths, gridname)` | Load a grid slot from a sequence of OpenVDB/NanoVDB files.                          |
+| `loadGridSequence(slot, path, gridname)`  | Load a grid slot from a sequence of OpenVDB/NanoVDB files contained in a directory. |
 
 #### Light
 
@@ -636,7 +681,7 @@ class falcor.**TriangleMesh**
 | `createQuad(size=float2(1))`                         | Creates a quad mesh, centered at the origin with normal pointing in positive Y direction.                                                         |
 | `createCube(size=float3(1))`                         | Creates a cube mesh, centered at the origin.                                                                                                      |
 | `createSphere(radius=1, segmentsU=32, segmentsV=16)` | Creates a UV sphere mesh, centered at the origin with poles in positive/negative Y direction.                                                     |
-| `createFromFile(filename,smoothNormals=False)`       | Creates a triangle mesh from a file. If no normals are defined in the file, `smoothNormals` can be used generate smooth instead of facet normals. |
+| `createFromFile(path, smoothNormals=False)`          | Creates a triangle mesh from a file. If no normals are defined in the file, `smoothNormals` can be used generate smooth instead of facet normals. |
 
 #### SceneBuiler
 
@@ -670,7 +715,8 @@ class falcor.**SceneBuilder**
 | `flags`          | `SceneBuilderFlags`   | Scene builder flags (readonly).                  |
 | `renderSettings` | `SceneRenderSettings` | Settings to determine how the scene is rendered. |
 | `materials`      | `list(Material)`      | List of materials (readonly).                    |
-| `volumes`        | `list(Volume)`        | List of volumes (readonly).                      |
+| `volumes`        | `list(Volume)`        | **DEPRECATED**: Use `gridVolumes` instead.       |
+| `gridVolumes`    | `list(GridVolume)`    | List of grid volumes (readonly).                 |
 | `lights`         | `list(Light)`         | List of lights (readonly).                       |
 | `cameras`        | `list(Camera)`        | List of cameras (readonly).                      |
 | `animations`     | `list(Animation)`     | List of animations (readonly).                   |
@@ -678,27 +724,57 @@ class falcor.**SceneBuilder**
 | `selectedCamera` | `Camera`              | Default selected camera.                         |
 | `cameraSpeed`    | `float`               | Speed of the interactive camera.                 |
 
-| Method                                          | Description                                                                                                     |
-|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `importScene(filename, dict, instances)`        | Load a scene from an asset file. `dict` contains optional data. `instances` is an optional list of `Transform`. |
-| `addTriangleMesh(triangleMesh, material)`       | Add a triangle mesh to the scene and return its ID.                                                             |
-| `addMaterial(material)`                         | Add a material and return its ID.                                                                               |
-| `getMaterial(name)`                             | Return a material by name. The first material with matching name is returned or `None` if none was found.       |
-| `loadMaterialTexture(material, slot, filename)` | Request loading a material texture asynchronously. Use `Material.loadTexture` for synchronous loading.          |
-| `waitForMaterialTextureLoading()`               | Wait until all material textures are loaded.                                                                    |
-| `addVolume(volume)`                             | Add a volume and return its ID.                                                                                 |
-| `getVolume(name)`                               | Return a volume by name. The first volume with matching name is returned or `None` if none was found.           |
-| `addLight(light)`                               | Add a light and return its ID.                                                                                  |
-| `getLight(name)`                                | Return a light by name. The first light with matching name is returned or `None` if none was found.             |
-| `addCamera(camera)`                             | Add a camera and return its ID.                                                                                 |
-| `addAnimation(animation)`                       | Add an animation.                                                                                               |
-| `createAnimation(animatable, name, duration)`   | Create an animation for an animatable object. Returns the new animation or `None` if one already exists.        |
-| `addNode(name, transform, parent)`              | Add a node and return its ID.                                                                                   |
-| `addMeshInstance(nodeID, meshID)`               | Add a mesh instance.                                                                                            |
-| `addCustomPrimitive(userID, aabb)`              | Add a custom primitive. 'aabb' is an AABB specifying its bounds.                                                |
+| Method                                        | Description                                                                                                     |
+|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `importScene(path, dict, instances)`          | Load a scene from an asset file. `dict` contains optional data. `instances` is an optional list of `Transform`. |
+| `addTriangleMesh(triangleMesh, material)`     | Add a triangle mesh to the scene and return its ID.                                                             |
+| `addMaterial(material)`                       | Add a material and return its ID.                                                                               |
+| `getMaterial(name)`                           | Return a material by name. The first material with matching name is returned or `None` if none was found.       |
+| `loadMaterialTexture(material, slot, path)`   | Request loading a material texture asynchronously. Use `Material.loadTexture` for synchronous loading.          |
+| `waitForMaterialTextureLoading()`             | Wait until all material textures are loaded.                                                                    |
+| `addVolume(volume)`                           | **DEPRECATED**: Use `addGridVolume` instead.                                                                    |
+| `addGridVolume(gridVolume)`                   | Add a grid volume and return its ID.                                                                            |
+| `getVolume(name)`                             | **DEPRECATED**: Use `getGridVolume` instead.                                                                    |
+| `getGridVolume(name)`                         | Return a grid volume by name. The first volume with matching name is returned or `None` if none was found.      |
+| `addLight(light)`                             | Add a light and return its ID.                                                                                  |
+| `getLight(name)`                              | Return a light by name. The first light with matching name is returned or `None` if none was found.             |
+| `addCamera(camera)`                           | Add a camera and return its ID.                                                                                 |
+| `addAnimation(animation)`                     | Add an animation.                                                                                               |
+| `createAnimation(animatable, name, duration)` | Create an animation for an animatable object. Returns the new animation or `None` if one already exists.        |
+| `addNode(name, transform, parent)`            | Add a node and return its ID.                                                                                   |
+| `addMeshInstance(nodeID, meshID)`             | Add a mesh instance.                                                                                            |
+| `addCustomPrimitive(userID, aabb)`            | Add a custom primitive. 'aabb' is an AABB specifying its bounds.                                                |
 
+
+### Render Pass Helpers
+
+#### IOSize
+
+enum falcor.RenderPassHelpers.**IOSize**
+
+| Enum              | Description                                                                                                               |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------|
+| Default           | Use the default size. The size is determined based on whatever is bound (the system will use the window size by default). |
+| Fixed             | Use fixed size in pixels.                                                                                                 |
+| Full              | Use full window size.                                                                                                     |
+| Half              | Use half window size.                                                                                                     |
+| Quarter           | Use quarter window size.                                                                                                  |
+| Double            | Use double window size.                                                                                                   |
+
+Some render passes have options to set output resolution using the `IOSize` enum.
+Usage examples (add these options to the scripting dictionary when creating the render pass):
+
+```python
+'outputSize': IOSize.Half
+```
+
+```python
+'outputSize': IOSize.Fixed, 'fixedOutputSize': uint2(128,64)
+```
 
 ### Render Passes
+
+**Note:** These docs are not complete. See the source code for the full set of exported methods and properties.
 
 #### AccumulatePass
 
@@ -712,6 +788,11 @@ class falcor.**AccumulatePass**
 |-----------|-------------------------------------------------------------------------------------------|
 | `reset()` | Reset accumulation. This is useful when the pass has been created with 'autoReset': False |
 
+| Property                | Type        | Description                                                                   |
+|-------------------------|-------------|-------------------------------------------------------------------------------|
+| `outputSize`            | `IOSize`    | Set output resolution.                                                        |
+| `fixedOutputSize`       | `uint2`     | Fixed output resolution in (width, height) pixels when using `IOSize.Fixed`.  |
+
 #### ToneMapper
 
 enum falcor.**ToneMapOp**
@@ -720,16 +801,49 @@ enum falcor.**ToneMapOp**
 
 class falcor.**ToneMapper**
 
-| Property                | Type        | Description                                                  |
-|-------------------------|-------------|--------------------------------------------------------------|
-| `exposureCompensation`  | `float`     | Exposure compensation (applies in manual and auto exposure). |
-| `autoExposure`          | `bool`      | Enable/disable auto exposure.                                |
-| `exposureValue`         | `float`     | Exposure value in manual mode.                               |
-| `filmSpeed`             | `float`     | ISO film speed in manual mode.                               |
-| `whiteBalance`          | `bool`      | Enable/disable white balancing.                              |
-| `whitePoint`            | `float`     | White point in Kelvin.                                       |
-| `operator`              | `ToneMapOp` | Tone mapping operator.                                       |
-| `clamp`                 | `bool`      | Enable/disable clamping to [0..1] range.                     |
+| Property                | Type        | Description                                                                   |
+|-------------------------|-------------|-------------------------------------------------------------------------------|
+| `exposureCompensation`  | `float`     | Exposure compensation (applies in manual and auto exposure).                  |
+| `autoExposure`          | `bool`      | Enable/disable auto exposure.                                                 |
+| `exposureValue`         | `float`     | Exposure value in manual mode.                                                |
+| `filmSpeed`             | `float`     | ISO film speed in manual mode.                                                |
+| `whiteBalance`          | `bool`      | Enable/disable white balancing.                                               |
+| `whitePoint`            | `float`     | White point in Kelvin.                                                        |
+| `operator`              | `ToneMapOp` | Tone mapping operator.                                                        |
+| `clamp`                 | `bool`      | Enable/disable clamping to [0..1] range.                                      |
+| `outputSize`            | `IOSize`    | Set output resolution.                                                        |
+| `fixedOutputSize`       | `uint2`     | Fixed output resolution in (width, height) pixels when using `IOSize.Fixed`.  |
+
+#### SimplePostFX
+
+class falcor.**SimplePostFX**
+
+| Property                | Type        | Description                                                                   |
+|-------------------------|-------------|-------------------------------------------------------------------------------|
+| `outputSize`            | `IOSize`    | Set output resolution.                                                        |
+| `fixedOutputSize`       | `uint2`     | Fixed output resolution in (width, height) pixels when using `IOSize.Fixed`.  |
+
+#### GBuffer passes
+
+class falcor.**GBufferRaster**
+class falcor.**VBufferRaster**
+class falcor.**GBufferRT**
+class falcor.**VBufferRT**
+
+| Property                | Type        | Description                                                                   |
+|-------------------------|-------------|-------------------------------------------------------------------------------|
+| `outputSize`            | `IOSize`    | Set output resolution.                                                        |
+| `fixedOutputSize`       | `uint2`     | Fixed output resolution in (width, height) pixels when using `IOSize.Fixed`.  |
+
+#### ImageLoader
+
+class falcor.**ImageLoader**
+
+| Property                | Type        | Description                                                                   |
+|-------------------------|-------------|-------------------------------------------------------------------------------|
+| `outputSize`            | `IOSize`    | Set output resolution.                                                        |
+
+When `IOSize.Fixed` is used, the render pass output is at the native resolution of the loaded image. In all other modes the image is bilinearly rescaled to the desired output resolution.
 
 #### GaussianBlur
 

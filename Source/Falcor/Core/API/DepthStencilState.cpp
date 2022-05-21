@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -80,11 +80,11 @@ namespace Falcor
 
     const DepthStencilState::StencilDesc& DepthStencilState::getStencilDesc(Face face) const
     {
-        assert(face != Face::FrontAndBack);
+        FALCOR_ASSERT(face != Face::FrontAndBack);
         return (face == Face::Front) ? mDesc.mStencilFront : mDesc.mStencilBack;
     }
 
-    SCRIPT_BINDING(DepthStencilState)
+    FALCOR_SCRIPT_BINDING(DepthStencilState)
     {
         pybind11::class_<DepthStencilState, DepthStencilState::SharedPtr>(m, "DepthStencilState");
     }

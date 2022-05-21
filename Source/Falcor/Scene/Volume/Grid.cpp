@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,13 +27,14 @@
  **************************************************************************/
 #include "stdafx.h"
 #include "Grid.h"
-#pragma warning(disable:4146 4244 4267 4275 4996)
+#pragma warning(push)
+#pragma warning(disable : 4146 4244 4267 4275 4996)
 #include <nanovdb/util/IO.h>
 #include <nanovdb/util/GridStats.h>
 #include <nanovdb/util/GridBuilder.h>
 #include <nanovdb/util/OpenToNanoVDB.h>
 #include <openvdb/openvdb.h>
-#pragma warning(default:4146 4244 4267 4275 4996)
+#pragma warning(pop)
 #include <glm/gtc/type_ptr.hpp>
 #include "GridConverter.h"
 
@@ -70,27 +71,26 @@ namespace Falcor
         return SharedPtr(new Grid(std::move(handle)));
     }
 
-    Grid::SharedPtr Grid::createFromFile(const std::string& filename, const std::string& gridname)
+    Grid::SharedPtr Grid::createFromFile(const std::filesystem::path& path, const std::string& gridname)
     {
-        std::string fullpath;
-        if (!findFileInDataDirectories(filename, fullpath))
+        std::filesystem::path fullPath;
+        if (!findFileInDataDirectories(path, fullPath))
         {
-            logWarning("Error when loading grid. Can't find grid file '" + filename + "'");
+            logWarning("Error when loading grid. Can't find grid file '{}'.", path);
             return nullptr;
         }
 
-        auto ext = getExtensionFromFile(fullpath);
-        if (ext == "nvdb")
+        if (hasExtension(fullPath, "nvdb"))
         {
-            return createFromNanoVDBFile(fullpath, gridname);
+            return createFromNanoVDBFile(fullPath, gridname);
         }
-        else if (ext == "vdb")
+        else if (hasExtension(fullPath, "vdb"))
         {
-            return createFromOpenVDBFile(fullpath, gridname);
+            return createFromOpenVDBFile(fullPath, gridname);
         }
         else
         {
-            logWarning("Error when loading grid. Unsupported grid file '" + filename + "'");
+            logWarning("Error when loading grid. Unsupported grid file '{}'.", fullPath);
             return nullptr;
         }
     }
@@ -207,15 +207,15 @@ namespace Falcor
         mBrickedGrid = NanoVDBGridConverter(mpFloatGrid).convert();
     }
 
-    Grid::SharedPtr Grid::createFromNanoVDBFile(const std::string& path, const std::string& gridname)
+    Grid::SharedPtr Grid::createFromNanoVDBFile(const std::filesystem::path& path, const std::string& gridname)
     {
-        if (!nanovdb::io::hasGrid(path, gridname))
+        if (!nanovdb::io::hasGrid(path.string(), gridname))
         {
-            logWarning("Error when loading grid. Can't find grid '" + gridname + "' in '" + path + "'");
+            logWarning("Error when loading grid. Can't find grid '{}' in '{}'.", gridname, path);
             return nullptr;
         }
 
-        auto handle = nanovdb::io::readGrid(path, gridname);
+        auto handle = nanovdb::io::readGrid(path.string(), gridname);
         if (!handle)
         {
             logWarning("Error when loading grid.");
@@ -225,24 +225,24 @@ namespace Falcor
         auto floatGrid = handle.grid<float>();
         if (!floatGrid || floatGrid->gridType() != nanovdb::GridType::Float)
         {
-            logWarning("Error when loading grid. Grid '" + gridname + "' in '" + path + "' is not of type float");
+            logWarning("Error when loading grid. Grid '{}' in '{}' is not of type float.", gridname, path);
             return nullptr;
         }
 
         if (floatGrid->isEmpty())
         {
-            logWarning("Grid '" + gridname + "' in '" + path + "' is empty");
+            logWarning("Grid '{}' in '{}' is empty.", gridname, path);
             return nullptr;
         }
 
         return SharedPtr(new Grid(std::move(handle)));
     }
 
-    Grid::SharedPtr Grid::createFromOpenVDBFile(const std::string& path, const std::string& gridname)
+    Grid::SharedPtr Grid::createFromOpenVDBFile(const std::filesystem::path& path, const std::string& gridname)
     {
         openvdb::initialize();
 
-        openvdb::io::File file(path);
+        openvdb::io::File file(path.string());
         file.open();
 
         openvdb::GridBase::Ptr baseGrid;
@@ -259,19 +259,19 @@ namespace Falcor
 
         if (!baseGrid)
         {
-            logWarning("Error when loading grid. Can't find grid '" + gridname + "' in '" + path + "'");
+            logWarning("Error when loading grid. Can't find grid '{}' in '{}'.", gridname, path);
             return nullptr;
         }
 
         if (!baseGrid->isType<openvdb::FloatGrid>())
         {
-            logWarning("Error when loading grid. Grid '" + gridname + "' in '" + path + "' is not of type float");
+            logWarning("Error when loading grid. Grid '{}' in '{}' is not of type float.", gridname, path);
             return nullptr;
         }
 
         if (baseGrid->empty())
         {
-            logWarning("Grid '" + gridname + "' in '" + path + "' is empty");
+            logWarning("Grid '{}' in '{}' is empty.", gridname, path);
             return nullptr;
         }
 
@@ -282,7 +282,7 @@ namespace Falcor
     }
 
 
-    SCRIPT_BINDING(Grid)
+    FALCOR_SCRIPT_BINDING(Grid)
     {
         pybind11::class_<Grid, Grid::SharedPtr> grid(m, "Grid");
         grid.def_property_readonly("voxelCount", &Grid::getVoxelCount);
@@ -295,6 +295,6 @@ namespace Falcor
 
         grid.def_static("createSphere", &Grid::createSphere, "radius"_a, "voxelSize"_a, "blendRange"_a = 3.f);
         grid.def_static("createBox", &Grid::createBox, "width"_a, "height"_a, "depth"_a, "voxelSize"_a, "blendRange"_a = 3.f);
-        grid.def_static("createFromFile", &Grid::createFromFile, "filename"_a, "gridname"_a);
+        grid.def_static("createFromFile", &Grid::createFromFile, "path"_a, "gridname"_a);
     }
 }

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -40,10 +40,10 @@ namespace Falcor
         {
             std::string getTitle() const
             {
-                return getFilenameFromPath(filename) + "/" + name + " (" + (cpuFunc ? "CPU" : "GPU") + ")";
+                return path.filename().string() + "/" + name + " (" + (cpuFunc ? "CPU" : "GPU") + ")";
             }
 
-            std::string filename;
+            std::filesystem::path path;
             std::string name;
             std::string skipMessage;
             CPUTestFunc cpuFunc;
@@ -72,18 +72,18 @@ namespace Falcor
 
     }   // end anonymous namespace
 
-    void registerCPUTest(const std::string& filename, const std::string& name,
+    void registerCPUTest(const std::filesystem::path& path, const std::string& name,
                          const std::string& skipMessage, CPUTestFunc func)
     {
         if (!testRegistry) testRegistry = new std::vector<Test>;
-        testRegistry->push_back({ filename, name, skipMessage, std::move(func), {} });
+        testRegistry->push_back({ path, name, skipMessage, std::move(func), {} });
     }
 
-    void registerGPUTest(const std::string& filename, const std::string& name,
+    void registerGPUTest(const std::filesystem::path& path, const std::string& name,
                          const std::string& skipMessage, GPUTestFunc func)
     {
         if (!testRegistry) testRegistry = new std::vector<Test>;
-        testRegistry->push_back({ filename, name, skipMessage, {}, std::move(func) });
+        testRegistry->push_back({ path, name, skipMessage, {}, std::move(func) });
     }
 
     inline TestResult runTest(const Test& test, RenderContext* pRenderContext)
@@ -140,7 +140,7 @@ namespace Falcor
         return result;
     }
 
-    int32_t runTests(std::ostream& stream, RenderContext* pRenderContext, const std::string &testFilter)
+    int32_t runTests(std::ostream& stream, RenderContext* pRenderContext, const std::string &testFilter, uint32_t repeatCount)
     {
         if (testRegistry == nullptr) return 0;
 
@@ -158,7 +158,7 @@ namespace Falcor
         std::sort(tests.begin(), tests.end(),
             [](const Test &a, const Test &b)
         {
-            return (a.filename + "/" + a.name) < (b.filename + "/" + b.name);
+            return (a.path / a.name).string() < (b.path / b.name).string();
         });
 
         stream << "Running " << std::to_string(tests.size()) << " tests" << std::endl;
@@ -167,21 +167,26 @@ namespace Falcor
 
         for (const auto& test : tests)
         {
-            stream << "  " << padStringToLength(test.getTitle(), 60) << ": " << std::flush;
-
-            TestResult result = runTest(test, pRenderContext);
-
-            switch (result.status)
+            for (uint32_t repeatIndex = 0; repeatIndex < repeatCount; ++repeatIndex)
             {
-            case TestResult::Status::Passed: stream << colored("PASSED", TermColor::Green, stream); break;
-            case TestResult::Status::Failed: stream << colored("FAILED", TermColor::Red, stream); break;
-            case TestResult::Status::Skipped: stream << colored("SKIPPED", TermColor::Yellow, stream); break;
+                stream << "  " << padStringToLength(test.getTitle(), 60) << ": ";
+                if (repeatCount > 1) stream << "[" << (repeatIndex + 1) << "/" << repeatCount << "] ";
+                stream << std::flush;
+
+                TestResult result = runTest(test, pRenderContext);
+
+                switch (result.status)
+                {
+                case TestResult::Status::Passed: stream << colored("PASSED", TermColor::Green, stream); break;
+                case TestResult::Status::Failed: stream << colored("FAILED", TermColor::Red, stream); break;
+                case TestResult::Status::Skipped: stream << colored("SKIPPED", TermColor::Yellow, stream); break;
+                }
+
+                stream << " (" << std::to_string(result.elapsedMS) << " ms)" << std::endl;
+                for (const auto& m : result.messages) stream << "    "  << m << std::endl;
+
+                if (result.status == TestResult::Status::Failed) ++failureCount;
             }
-
-            stream << " (" << std::to_string(result.elapsedMS) << " ms)" << std::endl;
-            for (const auto& m : result.messages) stream << "    "  << m << std::endl;
-
-            if (result.status == TestResult::Status::Failed) ++failureCount;
         }
 
         return failureCount;
@@ -189,7 +194,7 @@ namespace Falcor
 
     ///////////////////////////////////////////////////////////////////////////
 
-    void GPUUnitTestContext::createProgram(const std::string& path,
+    void GPUUnitTestContext::createProgram(const std::filesystem::path& path,
                                            const std::string& entry,
                                            const Program::DefineList& programDefines,
                                            Shader::CompilerFlags flags,
@@ -210,19 +215,19 @@ namespace Falcor
         // Create shader variables.
         ProgramReflection::SharedConstPtr pReflection = mpProgram->getReflector();
         mpVars = ComputeVars::create(pReflection);
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
 
         // Try to use shader reflection to query thread group size.
         // ((1,1,1) is assumed if it's not specified.)
         mThreadGroupSize = pReflection->getThreadGroupSize();
-        assert(mThreadGroupSize.x >= 1 && mThreadGroupSize.y >= 1 && mThreadGroupSize.z >= 1);
+        FALCOR_ASSERT(mThreadGroupSize.x >= 1 && mThreadGroupSize.y >= 1 && mThreadGroupSize.z >= 1);
     }
 
     void GPUUnitTestContext::allocateStructuredBuffer(const std::string& name, uint32_t nElements, const void* pInitData, size_t initDataSize)
     {
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
         mStructuredBuffers[name].pBuffer = Buffer::createStructured(mpProgram.get(), name, nElements);
-        assert(mStructuredBuffers[name].pBuffer);
+        FALCOR_ASSERT(mStructuredBuffers[name].pBuffer);
         if (pInitData)
         {
             size_t expectedDataSize = mStructuredBuffers[name].pBuffer->getStructSize() * mStructuredBuffers[name].pBuffer->getElementCount();
@@ -234,7 +239,7 @@ namespace Falcor
 
     void GPUUnitTestContext::runProgram(const uint3& dimensions)
     {
-        assert(mpVars);
+        FALCOR_ASSERT(mpVars);
         for (const auto& buffer : mStructuredBuffers)
         {
             mpVars->setBuffer(buffer.first, buffer.second.pBuffer);
@@ -257,7 +262,7 @@ namespace Falcor
 
     void GPUUnitTestContext::unmapBuffer(const char* bufferName)
     {
-        assert(mStructuredBuffers.find(bufferName) != mStructuredBuffers.end());
+        FALCOR_ASSERT(mStructuredBuffers.find(bufferName) != mStructuredBuffers.end());
         if (!mStructuredBuffers[bufferName].mapped) throw ErrorRunningTestException(std::string(bufferName) + ": buffer not mapped");
         mStructuredBuffers[bufferName].pBuffer->unmap();
         mStructuredBuffers[bufferName].mapped = false;
@@ -265,7 +270,7 @@ namespace Falcor
 
     const void* GPUUnitTestContext::mapRawRead(const char* bufferName)
     {
-        assert(mStructuredBuffers.find(bufferName) != mStructuredBuffers.end());
+        FALCOR_ASSERT(mStructuredBuffers.find(bufferName) != mStructuredBuffers.end());
         if (mStructuredBuffers.find(bufferName) == mStructuredBuffers.end())
         {
             throw ErrorRunningTestException(std::string(bufferName) + ": couldn't find buffer to map");

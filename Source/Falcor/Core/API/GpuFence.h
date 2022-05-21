@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@ namespace Falcor
     /** This class can be used to synchronize GPU and CPU execution
         It's value monotonically increasing - every time a signal is sent, it will change the value first
     */
-    class dlldecl GpuFence : public std::enable_shared_from_this<GpuFence>
+    class FALCOR_API GpuFence
     {
     public:
         using SharedPtr = std::shared_ptr<GpuFence>;
@@ -52,9 +52,17 @@ namespace Falcor
         */
         const ApiHandle& getApiHandle() const { return mApiHandle; }
 
+        /** Get the internal D3D12 handle. Available only when D3D12 is the underlying API.
+        */
+        const D3D12FenceHandle& getD3D12Handle() const;
+
         /** Get the last value the GPU has signaled
         */
         uint64_t getGpuValue() const;
+
+        /** Sets the current GPU value to a specific value (signals the fence from the CPU side).
+        */
+        void setGpuValue(uint64_t val);
 
         /** Get the current CPU value
         */

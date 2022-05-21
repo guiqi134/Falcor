@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -54,13 +54,13 @@ namespace Falcor
         gpDevice->getRenderContext()->blit(pCurrentFbo->getColorTexture(0)->getSRV(), mpTargetFBO->getRenderTargetView(0));
 
         // Tell the GUI the swap-chain size changed
-        if(mpGui) mpGui->onWindowResize(width, height);
+        if (mpGui) mpGui->onWindowResize(width, height);
 
         // Resize the pixel zoom
-        if(mpPixelZoom) mpPixelZoom->onResizeSwapChain(gpDevice->getSwapChainFbo().get());
+        if (mpPixelZoom) mpPixelZoom->onResizeSwapChain(gpDevice->getSwapChainFbo().get());
 
         // Call the user callback
-        if(mpRenderer) mpRenderer->onResizeSwapChain(width, height);
+        if (mpRenderer) mpRenderer->onResizeSwapChain(width, height);
     }
 
     void Sample::handleRenderFrame()
@@ -72,14 +72,12 @@ namespace Falcor
     {
         if (mSuppressInput)
         {
-            if (keyEvent.key == KeyboardEvent::Key::Escape) mpWindow->shutdown();
+            if (keyEvent.key == Input::Key::Escape) mpWindow->shutdown();
             return;
         }
 
-        if (keyEvent.type == KeyboardEvent::Type::KeyPressed)       mPressedKeys.insert(keyEvent.key);
-        else if (keyEvent.type == KeyboardEvent::Type::KeyReleased) mPressedKeys.erase(keyEvent.key);
-
         if (mShowUI && mpGui->onKeyboardEvent(keyEvent)) return;
+        mInputState.onKeyEvent(keyEvent);
         if (mpRenderer && mpRenderer->onKeyEvent(keyEvent)) return;
 
         // Checks if should toggle zoom
@@ -88,51 +86,51 @@ namespace Falcor
         // Consume system messages first
         if (keyEvent.type == KeyboardEvent::Type::KeyPressed)
         {
-            if (keyEvent.mods.isShiftDown && keyEvent.key == KeyboardEvent::Key::F12)
+            if (keyEvent.hasModifier(Input::Modifier::Shift) && keyEvent.key == Input::Key::F12)
             {
                 initVideoCapture();
             }
-            else if (keyEvent.mods.isCtrlDown)
+            else if (keyEvent.hasModifier(Input::Modifier::Ctrl))
             {
                 switch (keyEvent.key)
                 {
-                case KeyboardEvent::Key::Pause:
-                case KeyboardEvent::Key::Space:
+                case Input::Key::Pause:
+                case Input::Key::Space:
                     mRendererPaused = !mRendererPaused;
                     break;
                 default:
                     break;
                 }
             }
-            else if (!keyEvent.mods.isAltDown && !keyEvent.mods.isCtrlDown && !keyEvent.mods.isShiftDown)
+            else if (keyEvent.mods == Input::ModifierFlags::None)
             {
                 switch (keyEvent.key)
                 {
-                case KeyboardEvent::Key::F12:
+                case Input::Key::F12:
                     mCaptureScreen = true;
                     break;
-#if _PROFILING_ENABLED
-                case KeyboardEvent::Key::P:
+#if FALCOR_ENABLE_PROFILER
+                case Input::Key::P:
                     Profiler::instance().setEnabled(!Profiler::instance().isEnabled());
                     break;
 #endif
-                case KeyboardEvent::Key::V:
+                case Input::Key::V:
                     mVsyncOn = !mVsyncOn;
                     gpDevice->toggleVSync(mVsyncOn);
                     mFrameRate.reset();
                     mClock.setTime(0);
                     break;
-                case KeyboardEvent::Key::F2:
+                case Input::Key::F2:
                     toggleUI(!mShowUI);
                     break;
-                case KeyboardEvent::Key::F5:
+                case Input::Key::F5:
                     {
                         HotReloadFlags reloaded = HotReloadFlags::None;
                         if (Program::reloadAllPrograms()) reloaded |= HotReloadFlags::Program;
                         if (mpRenderer) mpRenderer->onHotReload(reloaded);
                     }
                     break;
-                case KeyboardEvent::Key::Escape:
+                case Input::Key::Escape:
                     if (mVideoCapture.pVideoCapture)
                     {
                         endVideoCapture();
@@ -142,8 +140,8 @@ namespace Falcor
                         mpWindow->shutdown();
                     }
                     break;
-                case KeyboardEvent::Key::Pause:
-                case KeyboardEvent::Key::Space:
+                case Input::Key::Pause:
+                case Input::Key::Space:
                     mClock.isPaused() ? mClock.play() : mClock.pause();
                     break;
                 default:
@@ -153,17 +151,28 @@ namespace Falcor
         }
     }
 
-    void Sample::handleDroppedFile(const std::string& filename)
-    {
-        if(mpRenderer) mpRenderer->onDroppedFile(filename);
-    }
-
     void Sample::handleMouseEvent(const MouseEvent& mouseEvent)
     {
         if (mSuppressInput) return;
         if (mShowUI && mpGui->onMouseEvent(mouseEvent)) return;
+        mInputState.onMouseEvent(mouseEvent);
         if (mpRenderer && mpRenderer->onMouseEvent(mouseEvent)) return;
         if (mpPixelZoom->onMouseEvent(mouseEvent)) return;
+    }
+
+    void Sample::handleGamepadEvent(const GamepadEvent& gamepadEvent)
+    {
+        if (mpRenderer) mpRenderer->onGamepadEvent(gamepadEvent);
+    }
+
+    void Sample::handleGamepadState(const GamepadState& gamepadState)
+    {
+        if (mpRenderer) mpRenderer->onGamepadState(gamepadState);
+    }
+
+    void Sample::handleDroppedFile(const std::filesystem::path& path)
+    {
+        if (mpRenderer) mpRenderer->onDroppedFile(path);
     }
 
     // Sample functions
@@ -180,7 +189,7 @@ namespace Falcor
         mpGui.reset();
         mpTargetFBO.reset();
         mpPixelZoom.reset();
-        if(gpDevice) gpDevice->cleanup();
+        if (gpDevice) gpDevice->cleanup();
         gpDevice.reset();
         OSServices::stop();
     }
@@ -193,46 +202,50 @@ namespace Falcor
             s.startScripting();
             s.runInternal(config, argc, argv);
         }
-        catch (const std::exception & e)
+        catch (const std::exception& e)
         {
-            logError("Caught exception:\n\n" + std::string(e.what()) + "\n\nEnable breaking on exceptions in the debugger to get a full stack trace.");
+            reportError("Caught exception:\n\n" + std::string(e.what()) + "\n\nEnable breaking on exceptions in the debugger to get a full stack trace.");
         }
         Logger::shutdown();
     }
 
-    void Sample::run(const std::string& filename, IRenderer::UniquePtr& pRenderer, uint32_t argc, char** argv)
+    void Sample::run(const std::filesystem::path& path, IRenderer::UniquePtr& pRenderer, uint32_t argc, char** argv)
     {
         Sample s(pRenderer);
         try
         {
-            auto err = [filename](std::string_view msg) {logError("Error in Sample::Run(). '" + filename + "' " + msg); };
-
             s.startScripting(); // We have to do that before running the script
-            std::string fullpath;
             SampleConfig c;
 
-            if (findFileInDataDirectories(filename, fullpath))
+            std::filesystem::path fullPath;
+            if (findFileInDataDirectories(path, fullPath))
             {
                 Scripting::Context ctx;
-                Scripting::runScriptFromFile(fullpath, ctx);
+                Scripting::runScriptFromFile(fullPath, ctx);
                 auto configs = ctx.getObjects<SampleConfig>();
-                if (configs.empty()) err("doesn't contain any SampleConfig objects");
+                if (configs.empty())
+                {
+                    logWarning("Configuration '{}' does not contain any SampleConfig objects. Using default configuration.", path);
+                }
                 else
                 {
-                    if (configs.size() > 1) err("contains multiple SampleConfig objects. Using the first one");
+                    if (configs.size() > 1)
+                    {
+                        logWarning("Configuration '{}' does contain multiple SampleConfig objects. Using first the first one.", path);
+                    }
                     c = configs[0];
                 }
             }
             else
             {
-                err("doesn't exist. Using default configuration");
+                logWarning("Configuration '{}' does not exist. Using default configuration.", path);
             }
 
             s.runInternal(c, argc, argv);
         }
-        catch (const std::exception & e)
+        catch (const std::exception& e)
         {
-            logError("Caught exception:\n\n" + std::string(e.what()) + "\n\nEnable breaking on exceptions in the debugger to get a full stack trace.");
+            reportError("Caught exception:\n\n" + std::string(e.what()) + "\n\nEnable breaking on exceptions in the debugger to get a full stack trace.");
         }
 
         Logger::shutdown();
@@ -242,7 +255,7 @@ namespace Falcor
     {
         gpFramework = this;
 
-        Logger::showBoxOnError(config.showMessageBoxOnError);
+        setShowMessageBoxOnError(config.showMessageBoxOnError);
 
         OSServices::start();
         Threading::start();
@@ -255,11 +268,6 @@ namespace Falcor
 
         // Create the window
         mpWindow = Window::create(config.windowDesc, this);
-        if (mpWindow == nullptr)
-        {
-            logError("Failed to create device and window");
-            return;
-        }
 
         // Show the progress bar (unless window is minimized)
         ProgressBar::SharedPtr pBar;
@@ -268,14 +276,9 @@ namespace Falcor
         // Create device
         Device::Desc d = config.deviceDesc;
         gpDevice = Device::create(mpWindow, config.deviceDesc);
-        if (gpDevice == nullptr)
-        {
-            logError("Failed to create device");
-            return;
-        }
 
         // Set global shader defines
-        Program::DefineList globalDefines = {{ "_ENABLE_NVAPI", _ENABLE_NVAPI ? "1" : "0" }};
+        Program::DefineList globalDefines = {{ "FALCOR_NVAPI_AVAILABLE", FALCOR_NVAPI_AVAILABLE ? "1" : "0" }};
         Program::addGlobalDefines(globalDefines);
 
         Clock::start();
@@ -290,7 +293,7 @@ namespace Falcor
 
 #ifdef _WIN32
         // Set the icon
-        setWindowIcon("Framework\\Nvidia.ico", mpWindow->getApiHandle());
+        setWindowIcon("Framework/Nvidia.ico", mpWindow->getApiHandle());
 #endif
 
         // Load and run
@@ -337,8 +340,8 @@ namespace Falcor
             return 0u;
         };
 
-        static const Gui::DropdownList dropdownList = initDropDown(resolutions, arraysize(resolutions));
-        uint32_t currentVal = initDropDownVal(resolutions, arraysize(resolutions), screenDims);
+        static const Gui::DropdownList dropdownList = initDropDown(resolutions, (uint32_t)arraysize(resolutions));
+        uint32_t currentVal = initDropDownVal(resolutions, (uint32_t)arraysize(resolutions), screenDims);
 
         widget.var("Screen Resolution", screenDims);
         if (widget.dropdown("Change Resolution", dropdownList, currentVal) && (currentVal != 0)) gpFramework->resizeSwapChain(resolutions[currentVal].x, resolutions[currentVal].y);
@@ -347,19 +350,19 @@ namespace Falcor
     std::string Sample::getKeyboardShortcutsStr()
     {
         constexpr char help[] =
-            "  'F2'      - Show\\Hide GUI\n"
-            "  'F5'      - Reload shaders\n"
-            "  'ESC'     - Quit\n"
-            "  'V'       - Toggle VSync\n"
-            "  'F3'      - Capture current camera location\n"
-            "  'F12'     - Capture screenshot\n"
-            "  'Shift+F12'  - Video capture\n"
-            "  'Pause|Space'      - Pause\\resume the global timer\n"
-            "  'Ctrl+Pause|Space' - Pause\\resume the renderer\n"
-            "  'Z'       - Zoom in on a pixel\n"
-            "  'MouseWheel' - Change level of zoom\n"
-#if _PROFILING_ENABLED
-            "  'P'       - Enable profiling\n"
+            "ESC - Quit\n"
+            "F2 - Show/hide UI\n"
+            "F3 - Capture current camera location\n"
+            "F5 - Reload shaders\n"
+            "F12 - Capture screenshot\n"
+            "Shift+F12 - Capture video\n"
+            "V - Toggle VSync\n"
+            "Pause|Space - Pause/resume the global timer\n"
+            "Ctrl+Pause|Space - Pause/resume the renderer\n"
+            "Z - Zoom in on a pixel\n"
+            "MouseWheel - Change level of zoom\n"
+#if FALCOR_ENABLE_PROFILER
+            "P - Enable/disable profiler\n"
 #endif
             ;
 
@@ -412,7 +415,7 @@ namespace Falcor
 
     void Sample::renderUI()
     {
-        PROFILE("renderUI");
+        FALCOR_PROFILE("renderUI");
 
         auto& profiler = Profiler::instance();
 
@@ -420,7 +423,7 @@ namespace Falcor
         {
             mpGui->beginFrame();
 
-            if(mShowUI) mpRenderer->onGuiRender(mpGui.get());
+            if (mShowUI) mpRenderer->onGuiRender(mpGui.get());
             if (mVideoCapture.displayUI && mVideoCapture.pUI)
             {
                 Gui::Window w(mpGui.get(), "Video Capture", mVideoCapture.displayUI, { 350, 250 }, { 300, 280 });
@@ -462,7 +465,7 @@ namespace Falcor
         if (mVideoCapture.fixedTimeDelta) { mClock.setTime(mVideoCapture.currentTime); }
 
         {
-            PROFILE("onFrameRender");
+            FALCOR_PROFILE("onFrameRender");
 
             // The swap-chain FBO might have changed between frames, so get it
             if (!mRendererPaused)
@@ -487,7 +490,7 @@ namespace Falcor
             pSwapChainFbo = gpDevice->getSwapChainFbo(); // The UI might have triggered a swap-chain resize, invalidating the previous FBO
             if (mpPixelZoom) mpPixelZoom->render(pRenderContext, pSwapChainFbo.get());
 
-#if _PROFILING_ENABLED
+#if FALCOR_ENABLE_PROFILER
             Profiler::instance().endFrame();
 #endif
             // Capture video frame after UI is rendered
@@ -495,35 +498,28 @@ namespace Falcor
             if (mCaptureScreen) captureScreen();
 
             {
-                PROFILE("present", Profiler::Flags::Internal);
+                FALCOR_PROFILE("present", Profiler::Flags::Internal);
                 gpDevice->present();
             }
         }
 
+        mInputState.endFrame();
+
         Console::instance().flush();
     }
 
-    std::string Sample::captureScreen(const std::string explicitFilename, const std::string explicitOutputDirectory)
+    std::filesystem::path Sample::captureScreen(const std::string explicitFilename, const std::filesystem::path explicitDirectory)
     {
         mCaptureScreen = false;
 
-        std::string filename = explicitFilename != "" ? explicitFilename : getExecutableName();
-        std::string outputDirectory = explicitOutputDirectory != "" ? explicitOutputDirectory : getExecutableDirectory();
+        std::string filename = explicitFilename.empty() ? getExecutableName() : explicitFilename;
+        std::filesystem::path directory = explicitDirectory.empty() ? getExecutableDirectory() : explicitDirectory;
 
-        std::string pngFile;
-        if (findAvailableFilename(filename, outputDirectory, "png", pngFile))
-        {
-            Texture::SharedPtr pTexture;
-            pTexture = gpDevice->getSwapChainFbo()->getColorTexture(0);
-            pTexture->captureToFile(0, 0, pngFile);
-        }
-        else
-        {
-            logError("Could not find available filename when capturing screen");
-            return "";
-        }
-
-         return pngFile;
+        std::filesystem::path path = findAvailableFilename(filename, directory, "png");
+        Texture::SharedPtr pTexture;
+        pTexture = gpDevice->getSwapChainFbo()->getColorTexture(0);
+        pTexture->captureToFile(0, 0, path);
+        return path;
     }
 
     void Sample::initUI()
@@ -537,11 +533,6 @@ namespace Falcor
     void Sample::resizeSwapChain(uint32_t width, uint32_t height)
     {
         mpWindow->resize(width, height);
-    }
-
-    bool Sample::isKeyPressed(const KeyboardEvent::Key& key)
-    {
-        return mPressedKeys.find(key) != mPressedKeys.cend();
     }
 
     void Sample::initVideoCapture()
@@ -559,7 +550,7 @@ namespace Falcor
         VideoEncoder::Desc desc;
         desc.flipY = false;
         desc.codec = mVideoCapture.pUI->getCodec();
-        desc.filename = mVideoCapture.pUI->getFilename();
+        desc.path = mVideoCapture.pUI->getPath();
         const auto& pSwapChainFbo = gpDevice->getSwapChainFbo();
         desc.format = pSwapChainFbo->getColorTexture(0)->getFormat();
         desc.fps = mVideoCapture.pUI->getFPS();
@@ -571,7 +562,7 @@ namespace Falcor
         mVideoCapture.pVideoCapture = VideoEncoder::create(desc);
         if (!mVideoCapture.pVideoCapture) return false;
 
-        assert(mVideoCapture.pVideoCapture);
+        FALCOR_ASSERT(mVideoCapture.pVideoCapture);
         mVideoCapture.pFrame.resize(desc.width*desc.height * 4);
         mVideoCapture.fixedTimeDelta = 1 / (double)desc.fps;
 
@@ -623,7 +614,7 @@ namespace Falcor
         SampleConfig c;
         c.deviceDesc = gpDevice->getDesc();
         c.windowDesc = mpWindow->getDesc();
-        c.showMessageBoxOnError = Logger::isBoxShownOnError();
+        c.showMessageBoxOnError = getShowMessageBoxOnError();
         c.timeScale = (float)mClock.getTimeScale();
         c.pauseTime = mClock.isPaused();
         c.showUI = mShowUI;
@@ -632,12 +623,12 @@ namespace Falcor
 
     void Sample::saveConfigToFile()
     {
-        std::string filename;
-        if (saveFileDialog(Scripting::kFileExtensionFilters, filename))
+        std::filesystem::path path;
+        if (saveFileDialog(Scripting::kFileExtensionFilters, path))
         {
             SampleConfig c = getConfig();
             std::string s = "sampleConfig = " + ScriptBindings::repr(c) + "\n";
-            std::ofstream(filename) << s;
+            std::ofstream(path) << s;
         }
     }
 

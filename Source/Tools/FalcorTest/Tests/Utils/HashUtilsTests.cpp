@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -64,7 +64,7 @@ namespace Falcor
 
         // Verify that the generated hashes match the CPU version.
         const uint32_t* result = (const uint32_t*)pResultBuffer->map(Buffer::MapType::Read);
-        assert(result);
+        FALCOR_ASSERT(result);
         for (uint32_t i = 0; i < pResultBuffer->getElementCount(); i++)
         {
             EXPECT_EQ(result[i], jenkinsHash(i)) << "i = " << i;
@@ -107,7 +107,7 @@ namespace Falcor
 
         // Verify that all possible 32-bit hashes has occured (all bits set).
         const uint32_t* result = (const uint32_t*)pResultBuffer->map(Buffer::MapType::Read);
-        assert(result);
+        FALCOR_ASSERT(result);
         for (uint32_t i = 0; i < pResultBuffer->getElementCount(); i++)
         {
             EXPECT_EQ(result[i], 0xffffffff) << "i = " << i;

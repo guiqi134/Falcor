@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "SideBySidePass.h"
 
-const char* SideBySidePass::kDesc = "Allows the user to compare two inputs side-by-side.";
+const RenderPass::Info SideBySidePass::kInfo { "SideBySidePass", "Allows the user to compare two inputs side-by-side." };
 
 namespace
 {
@@ -38,6 +38,7 @@ namespace
 }
 
 SideBySidePass::SideBySidePass()
+    : ComparisonPass(kInfo)
 {
     createProgram();
 }
@@ -50,7 +51,7 @@ SideBySidePass::SharedPtr SideBySidePass::create(RenderContext* pRenderContext, 
         if (key == kImageLeftBound) pPass->mImageLeftBound = value;
         else if (!pPass->parseKeyValuePair(key, value))
         {
-            logWarning("Unknown field '" + key + "' in a SideBySidePass dictionary");
+            logWarning("Unknown field '{}' in a SideBySidePass dictionary.", key);
         }
     }
     return pPass;
@@ -62,10 +63,10 @@ void SideBySidePass::createProgram()
     mpSplitShader = FullScreenPass::create(kSplitShader);
 }
 
-void SideBySidePass::execute(RenderContext* pContext, const RenderData& renderData)
+void SideBySidePass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     mpSplitShader["GlobalCB"]["gLeftBound"] = mImageLeftBound;
-    ComparisonPass::execute(pContext, renderData);
+    ComparisonPass::execute(pRenderContext, renderData);
 }
 
 void SideBySidePass::renderUI(Gui::Widgets& widget)

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -81,7 +81,7 @@ namespace Falcor
             // Use setBlob() to update part of the buffer from the CPU.
             if (count > 0)
             {
-                assert(index + blob.size() <= numElems);
+                FALCOR_ASSERT(index + blob.size() <= numElems);
                 pBuffer->setBlob(blob.data(), index * sizeof(uint32_t), blob.size() * sizeof(uint32_t));
             }
 

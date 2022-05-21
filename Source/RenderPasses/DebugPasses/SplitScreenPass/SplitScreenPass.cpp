@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "SplitScreenPass.h"
 
-const char* SplitScreenPass::kDesc = "Allows the user to split the screen between two inputs.";
+const RenderPass::Info SplitScreenPass::kInfo { "SplitScreenPass", "Allows the user to split the screen between two inputs." };
 
 namespace
 {
@@ -60,6 +60,7 @@ namespace
 }
 
 SplitScreenPass::SplitScreenPass()
+    : ComparisonPass(kInfo)
 {
     mpArrowTex = Texture::create2D(16, 16, ResourceFormat::R8Unorm, 1, Texture::kMaxPossible, kArrowArray);
     mClock = gpFramework->getGlobalClock();
@@ -73,7 +74,7 @@ SplitScreenPass::SharedPtr SplitScreenPass::create(RenderContext* pRenderContext
     {
         if (!pPass->parseKeyValuePair(key, value))
         {
-            logWarning("Unknown field '" + key + "' in a SplitScreenPass dictionary");
+            logWarning("Unknown field '{}' in a SplitScreenPass dictionary.", key);
         }
     }
     return pPass;
@@ -85,14 +86,14 @@ void SplitScreenPass::createProgram()
     mpSplitShader = FullScreenPass::create(kSplitShader);
 }
 
-void SplitScreenPass::execute(RenderContext* pContext, const RenderData& renderData)
+void SplitScreenPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     mpSplitShader["GlobalCB"]["gDividerColor"] = mMouseOverDivider ? kColorSelected : kColorUnselected;
     mpSplitShader["GlobalCB"]["gMousePosition"] = mMousePos;
     mpSplitShader["GlobalCB"]["gDrawArrows"] = mDrawArrows && mMouseOverDivider;
     mpSplitShader["gArrowTex"] = mpArrowTex;
 
-    ComparisonPass::execute(pContext, renderData);
+    ComparisonPass::execute(pRenderContext, renderData);
 }
 
 bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
@@ -107,7 +108,7 @@ bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
     mMousePos = glm::clamp(mMousePos, int2(0, 0), int2(pDstFbo->getWidth() - 1, pDstFbo->getHeight() - 1));
 
     // Actually process our events
-    if (mMouseOverDivider && mouseEvent.type == MouseEvent::Type::LeftButtonDown)
+    if (mMouseOverDivider && mouseEvent.type == MouseEvent::Type::ButtonDown && mouseEvent.button == Input::MouseButton::Left)
     {
         mDividerGrabbed = true;
         handled = true;
@@ -117,7 +118,7 @@ bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
     }
     else if (mDividerGrabbed)
     {
-        if (mouseEvent.type == MouseEvent::Type::LeftButtonUp)
+        if (mouseEvent.type == MouseEvent::Type::ButtonUp && mouseEvent.button == Input::MouseButton::Left)
         {
             mDividerGrabbed = false;
             handled = true;

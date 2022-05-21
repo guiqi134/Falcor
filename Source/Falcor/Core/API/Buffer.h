@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@ namespace Falcor
     /** Low-level buffer object
         This class abstracts the API's buffer creation and management
     */
-    class dlldecl Buffer : public Resource
+    class FALCOR_API Buffer : public Resource
     {
     public:
         using SharedPtr = std::shared_ptr<Buffer>;
@@ -172,6 +172,15 @@ namespace Falcor
         */
         static SharedPtr createFromApiHandle(ApiHandle handle, size_t size, Resource::BindFlags bindFlags, CpuAccess cpuAccess);
 
+        /** Create a new buffer from an existing D3D12 handle. Available only when D3D12 is the underlying graphics API.
+            \param[in] handle Handle of already allocated resource.
+            \param[in] size The size of the buffer in bytes.
+            \param[in] bindFlags Buffer bind flags. Flags must match the bind flags of the original resource.
+            \param[in] cpuAccess Flags indicating how the buffer can be updated. Flags must match those of the heap the original resource is allocated on.
+            \return A pointer to a new buffer object, or throws an exception if creation failed.
+        */
+        static SharedPtr createFromD3D12Handle(D3D12ResourceHandle handle, size_t size, Resource::BindFlags bindFlags, CpuAccess cpuAccess);
+
         /** Get a shader-resource view.
             \param[in] firstElement The first element of the view. For raw buffers, an element is a single float
             \param[in] elementCount The number of elements to bind
@@ -192,7 +201,7 @@ namespace Falcor
         */
         virtual UnorderedAccessView::SharedPtr getUAV() override;
 
-#if _ENABLE_CUDA
+#if FALCOR_ENABLE_CUDA
         /** Get the CUDA device address for this resource.
             \return CUDA device address.
             Throws an exception if the buffer is not shared.
@@ -220,9 +229,9 @@ namespace Falcor
             \param[in] pData Pointer to the source data.
             \param[in] offset Byte offset into the destination buffer, indicating where to start copy into.
             \param[in] size Number of bytes to copy.
-            If offset and size will cause an out-of-bound access to the buffer, an error will be logged and the update will fail.
+            Throws an exception if data causes out-of-bound access to the buffer.
         */
-        virtual bool setBlob(const void* pData, size_t offset, size_t size);
+        virtual void setBlob(const void* pData, size_t offset, size_t size);
 
         /** Get the offset from the beginning of the GPU resource
         */
@@ -393,7 +402,7 @@ namespace Falcor
             a2s(Write);
             a2s(Read);
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return "";
         }
 #undef a2s
@@ -408,7 +417,7 @@ namespace Falcor
             t2s(Write);
             t2s(WriteDiscard);
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return "";
         }
 #undef t2s

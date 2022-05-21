@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "stdafx.h"
-#if _ENABLE_CUDA
+#if FALCOR_ENABLE_CUDA
 #include "CUDAProgram.h"
 
 // This file implements the CUDA-specific logic that allows the `Program`,
@@ -81,13 +81,13 @@ namespace Falcor
     // to that for `ComputeProgram`.
 
     CUDAProgram::SharedPtr CUDAProgram::createFromFile(
-        const std::string& filename,
+        const std::filesystem::path& path,
         const std::string& csEntry,
         const DefineList& programDefines,
         Shader::CompilerFlags flags,
         const std::string& shaderModel)
     {
-        Desc d(filename);
+        Desc d(path);
         if (!shaderModel.empty()) d.setShaderModel(shaderModel);
         d.setCompilerFlags(flags);
         d.csEntry(csEntry);
@@ -95,12 +95,17 @@ namespace Falcor
     }
 
     CUDAProgram::SharedPtr CUDAProgram::create(
-        const Program::Desc& desc,
+        const Desc& desc,
         const DefineList& programDefines)
     {
-        SharedPtr pProg = SharedPtr(new CUDAProgram);
-        pProg->init(desc, programDefines);
+        auto pProg = SharedPtr(new CUDAProgram(desc, programDefines));
+        registerProgramForReload(pProg);
         return pProg;
+    }
+
+    CUDAProgram::CUDAProgram(const Desc& desc, const DefineList& programDefines)
+        : ComputeProgram(desc, programDefines)
+    {
     }
 
     // The first place where an interesting difference arises is when
@@ -137,7 +142,7 @@ namespace Falcor
     // types, so it is necessary to declare it here in a source file instead
     // of a header.
     //
-    class dlldecl CUDAProgramKernels : public ProgramKernels
+    class FALCOR_API CUDAProgramKernels : public ProgramKernels
     {
     public:
         using SharedPtr = std::shared_ptr<CUDAProgramKernels>;
@@ -153,6 +158,8 @@ namespace Falcor
         */
         static SharedPtr create(
             const ProgramVersion* pVersion,
+            slang::IComponentType* pSpecializedSlangGlobalScope,
+            const std::vector<slang::IComponentType*>& pTypeConformanceSpecializedEntryPoints,
             const ProgramReflection::SharedPtr& pReflector,
             const UniqueEntryPointGroups& uniqueEntryPointGroups,
             std::string& log,
@@ -207,6 +214,8 @@ namespace Falcor
     //
     ProgramKernels::SharedPtr CUDAProgram::createProgramKernels(
         const ProgramVersion* pVersion,
+        slang::IComponentType* pSpecializedSlangGlobalScope,
+        const std::vector<slang::IComponentType*>& pTypeConformanceSpecializedEntryPoints,
         const ProgramReflection::SharedPtr& pReflector,
         const ProgramKernels::UniqueEntryPointGroups& uniqueEntryPointGroups,
         std::string& log,
@@ -214,6 +223,8 @@ namespace Falcor
     {
         return CUDAProgramKernels::create(
             pVersion,
+            pSpecializedSlangGlobalScope,
+            pTypeConformanceSpecializedEntryPoints,
             pReflector,
             uniqueEntryPointGroups,
             log,
@@ -238,7 +249,7 @@ namespace Falcor
     {
         if (result != 0)
         {
-            throw std::exception(what);
+            throw RuntimeError(what);
         }
     }
 
@@ -246,7 +257,7 @@ namespace Falcor
     {
         if (result != 0)
         {
-            throw std::exception(what);
+            throw RuntimeError(what);
         }
     }
 
@@ -255,8 +266,8 @@ namespace Falcor
     // passes it to `checkCUDAResult` for translation to an exception
     // (if needed).
     //
-#define FALCOR_CUDA_THROW_ON_FAIL(EXPR) \
-    checkCUDAResult(EXPR, "CUDA failure in '" #EXPR "'")
+#define FALCOR_CUDA_THROW_ON_FAIL(_expr) \
+    checkCUDAResult(_expr, "CUDA failure in '" #_expr "'")
 
     // With the utilities in place, we can now work through the steps
     // of loading Slang-compiled PTX code via the CUDA API.
@@ -294,13 +305,13 @@ namespace Falcor
         auto pComputeShader = getShader(ShaderType::Compute);
         if(!pComputeShader)
         {
-            throw std::exception("expected CUDA program to have a single compute entry point");
+            throw RuntimeError("Expected CUDA program to have a single compute entry point");
         }
 
         // The binary "blob" stored on the compute entry point is the PTX
         // code for the kernel, and we load it into the CUDA API as a module.
         //
-        FALCOR_CUDA_THROW_ON_FAIL(cuModuleLoadData(&mCudaModule, pComputeShader->getD3DBlob()->GetBufferPointer()));
+        FALCOR_CUDA_THROW_ON_FAIL(cuModuleLoadData(&mCudaModule, pComputeShader->getBlobData().data));
 
         // The CUDA module could in principle contain zero or more entry points
         // or other global symbols, so that we need to query for the global
@@ -457,7 +468,7 @@ namespace Falcor
         // (The details are implemented later in this file)
         //
         auto pEntryPointArgs = pGlobalVars->getEntryPointGroupVars(0);
-        assert(pEntryPointArgs);
+        FALCOR_ASSERT(pEntryPointArgs);
         size_t entryPointArgsSize = 0;
         void* entryPointArgsData = pEntryPointArgs->getCUDAHostBuffer(entryPointArgsSize);
 
@@ -559,6 +570,7 @@ namespace Falcor
         FALCOR_CUDA_THROW_ON_FAIL(cuCtxSynchronize());
     }
 
+#ifdef FALCOR_D3D12
     // The main missing detail that came up in dispatching CUDA
     // compute was the problem of getting host- or device-memory
     // buffers from a `ParameterBlock` (reminder: `ProgramVars`
@@ -638,7 +650,7 @@ namespace Falcor
         //
         if (mUnderlyingCUDABuffer.kind != bufferKind)
         {
-            throw std::exception("Inconsistent CUDA buffer kind requested");
+            throw RuntimeError("Inconsistent CUDA buffer kind requested");
         }
 
         // Whether or not we were able to use the cached buffer,
@@ -734,8 +746,8 @@ namespace Falcor
         // in the `mData` array of the parameter block, and we can
         // simply copy that data over to the CUDA buffer.
         //
-        auto dataSize = mData.size();
-        assert(dataSize <= bufferSize);
+        auto dataSize = getSize();
+        FALCOR_ASSERT(dataSize <= bufferSize);
         FALCOR_CUDA_THROW_ON_FAIL(cudaMemcpy(pBufferData, mData.data(), dataSize, memcpyKind));
 
         // For fields with "extraordinary" types (buffers, textures, etc.)
@@ -763,7 +775,7 @@ namespace Falcor
             // Each resource range represents one or more values with the
             // same descriptor type.
             //
-            DescriptorSet::Type descriptorType = resourceRange.descriptorType;
+            ShaderResourceType descriptorType = resourceRange.descriptorType;
             size_t descriptorCount = resourceRange.count;
 
             // We will go ahead and loop through all of the descriptors, and set each
@@ -801,7 +813,7 @@ namespace Falcor
                 //
                 if (descriptorIndex != 0)
                 {
-                    throw std::exception("unsupported: resource/object arrays in CUDA parameter block");
+                    throw RuntimeError("Unsupported: resource/object arrays in CUDA parameter block");
                 }
 
                 // The remaining work to be done depends entirely on the kind of
@@ -842,11 +854,11 @@ namespace Falcor
                     switch (descriptorType)
                     {
                     default:
-                        should_not_get_here();
+                        FALCOR_UNREACHABLE();
                         return;
 
-                    case DescriptorSet::Type::RawBufferSrv:
-                    case DescriptorSet::Type::StructuredBufferSrv:
+                    case ShaderResourceType::RawBufferSrv:
+                    case ShaderResourceType::StructuredBufferSrv:
                         {
                             // A Slang `StructuredBuffer<X>` translates to CUDA as a
                             // structure with two fields:
@@ -888,8 +900,8 @@ namespace Falcor
                         }
                         break;
 
-                    case DescriptorSet::Type::RawBufferUav:
-                    case DescriptorSet::Type::StructuredBufferUav:
+                    case ShaderResourceType::RawBufferUav:
+                    case ShaderResourceType::StructuredBufferUav:
                         {
                             // The logic for seting a `RW(StructuredBuffer|ByteAddressBuffer)`
                             // is identical to that above for read-only buffers, with the
@@ -906,7 +918,7 @@ namespace Falcor
                         }
                         break;
 
-                    case DescriptorSet::Type::Sampler:
+                    case ShaderResourceType::Sampler:
                         // CUDA does not support separate samplers, so there is no
                         // meaningful translation of a Slang `SamplerState` over to CUDA.
                         // We can simply skip over these ranges.
@@ -918,10 +930,10 @@ namespace Falcor
                         // would make a lot of existing Falcor shader code incompatible with CUDA.
                         break;
 
-                    case DescriptorSet::Type::TextureSrv:
-                    case DescriptorSet::Type::TextureUav:
-                    case DescriptorSet::Type::TypedBufferSrv:
-                    case DescriptorSet::Type::TypedBufferUav:
+                    case ShaderResourceType::TextureSrv:
+                    case ShaderResourceType::TextureUav:
+                    case ShaderResourceType::TypedBufferSrv:
+                    case ShaderResourceType::TypedBufferUav:
                         // Slang translates any read-only texture/buffer that involves format
                         // conversion/interpretation into a `CUtexObject`.
                         //
@@ -932,7 +944,7 @@ namespace Falcor
                         // support to resources/views for querying the CUDA texture/surface object
                         // handle.
                         //
-                        throw std::exception("unexpected: interface-type field in CUDA parameter block");
+                        throw RuntimeError("Unexpected: interface-type field in CUDA parameter block");
                         break;
                     }
                     break;
@@ -960,7 +972,7 @@ namespace Falcor
                         // For now we simply fail if there are any interface-type fields in
                         // the parameter block.
                         //
-                        throw std::exception("unexpected: interface-type field in CUDA parameter block");
+                        throw RuntimeError("Unexpected: interface-type field in CUDA parameter block");
                     }
                     break;
                 }
@@ -1081,6 +1093,6 @@ namespace Falcor
 
         return (char*)bufferAddress + offset;
     }
-
+#endif // FALCOR_D3D12
 }
 #endif

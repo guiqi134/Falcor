@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -34,6 +34,10 @@ using namespace Falcor;
 class ErrorMeasurePass : public RenderPass
 {
 public:
+    using SharedPtr = std::shared_ptr<ErrorMeasurePass>;
+
+    static const Info kInfo;
+
     enum class OutputId
     {
         Source,
@@ -42,11 +46,8 @@ public:
         Count
     };
 
-    using SharedPtr = std::shared_ptr<ErrorMeasurePass>;
-
     static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
 
-    virtual std::string getDesc() override { return "Measures error with respect to a reference image"; }
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
@@ -86,8 +87,8 @@ private:
     std::ofstream           mMeasurementsFile;
 
     // UI variables
-    std::string             mReferenceImagePath;                ///< Path to the reference used in the comparison.
-    std::string             mMeasurementsFilePath;              ///< Path to the output file where measurements are stored (.csv).
+    std::filesystem::path   mReferenceImagePath;                ///< Path to the reference used in the comparison.
+    std::filesystem::path   mMeasurementsFilePath;              ///< Path to the output file where measurements are stored (.csv).
 
     bool                    mIgnoreBackground = true;           ///< If true, do not measure error on pixels that belong to the background.
     bool                    mComputeSquaredDifference = true;   ///< Compute the square difference when creating the difference image.

@@ -52,6 +52,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <None Include="Data\ForwardRenderer.py">
+      <Filter>Data</Filter>
+    </None>
     <None Include="Data\config.py">
       <Filter>Data</Filter>
     </None>

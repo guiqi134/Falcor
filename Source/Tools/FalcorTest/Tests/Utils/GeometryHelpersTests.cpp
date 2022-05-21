@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -392,7 +392,7 @@ namespace Falcor
             {{ float2(1.50f, 2.25f), float2(2.50f, 3.00f), float2(2.50f, 2.50f) }, -0.0625f},   // Clipped 3 verts (area -1/16)
             {{ float2(0.50f, 2.75f), float2(0.50f, 3.25f), float2(1.50f, 2.75f) }, -0.0625f},   // Clipped 3 verts (area -1/16)
             {{ float2(1.00f, 3.00f), float2(2.00f, 1.50f), float2(1.25f, 1.50f) }, -0.25f},     // Clipped 3 verts (area -1/4)
-            {{ float2(1.50f, 2.25f), float2(1.50f, 2.75f), float2(2.50f, 2.25f) }, -0.1875f},   // Clipped 4 verts, two vert inside, one outside (area -3/16) 
+            {{ float2(1.50f, 2.25f), float2(1.50f, 2.75f), float2(2.50f, 2.25f) }, -0.1875f},   // Clipped 4 verts, two vert inside, one outside (area -3/16)
             {{ float2(1.25f, 2.25f), float2(1.75f, 2.75f), float2(1.75f, 1.75f) }, -0.21875f},  // Clipped 4 verts, two vert inside, one outside (area -7/32)
             {{ float2(1.75f, 1.75f), float2(1.75f, 2.75f), float2(2.25f, 1.75f) }, -0.125f},    // Clipped 4 verts, one vert inside, two outside (area -1/8)
             {{ float2(1.25f, 2.50f), float2(0.50f, 3.25f), float2(2.75f, 3.00f) }, -0.375f},    // Clipped 4 verts, one vert inside, two outside (area -3/8)
@@ -446,7 +446,7 @@ namespace Falcor
                 pos.push_back(float3(tests[i].p[1], 0.f));
                 pos.push_back(float3(tests[i].p[2], 0.f));
             }
-            assert(pos.size() == 3 * tests.size());
+            FALCOR_ASSERT(pos.size() == 3 * tests.size());
             return Buffer::createStructured(sizeof(float3), (uint32_t)pos.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, pos.data(), false);
         };
 
@@ -521,12 +521,12 @@ namespace Falcor
             for (int j = 0; j < m; j++)
             {
                 float v = (j + 0.5f) / m;
-                float y = (1.f - v) * b.minPos.y + v * b.maxPos.y;
+                float y = lerp(b.minPos.y, b.maxPos.y, v);
 
                 for (int k = 0; k < m; k++)
                 {
                     float u = (k + 0.5f) / m;
-                    float x = (1.f - u) * b.minPos.x + u * b.maxPos.x;
+                    float x = lerp(b.minPos.x, b.maxPos.x, u);
 
                     if (t.isInside(float2(x, y))) hits++;
                 }

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -82,7 +82,7 @@ namespace Falcor
         {
             d3d |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         }
-        
+
         return d3d;
     }
 
@@ -131,7 +131,7 @@ namespace Falcor
         case Resource::State::AccelerationStructure:
             return D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return D3D12_RESOURCE_STATE_GENERIC_READ;
         }
     }
@@ -158,9 +158,15 @@ namespace Falcor
             }
             else
             {
-                throw std::exception("Resource::getSharedApiHandle(): failed to create shared handle");
+                throw RuntimeError("Failed to create shared handle");
             }
         }
         return mSharedApiHandle;
     }
+
+    const D3D12ResourceHandle& Resource::getD3D12Handle() const
+    {
+        return mApiHandle;
+    }
+
 }

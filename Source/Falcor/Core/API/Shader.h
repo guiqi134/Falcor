@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+#include "Core/Framework.h"
 #include <map>
 #include <initializer_list>
 
@@ -36,7 +37,7 @@ namespace Falcor
     /** Minimal smart pointer for working with COM objects.
     */
     template<typename T>
-    struct dlldecl ComPtr
+    struct FALCOR_API ComPtr
     {
     public:
         /// Type of the smart pointer itself
@@ -129,15 +130,18 @@ namespace Falcor
         T* mpObject;
     };
 
+    /** Forward declaration of backend implementation-specific Shader data.
+    */
+    struct ShaderData;
+
     /** Low-level shader object
         This class abstracts the API's shader creation and management
     */
-    class dlldecl Shader : public std::enable_shared_from_this<Shader>
+    class FALCOR_API Shader
     {
     public:
         using SharedPtr = std::shared_ptr<Shader>;
         using SharedConstPtr = std::shared_ptr<const Shader>;
-        using ApiHandle = ShaderHandle;
 
         typedef ComPtr<ISlangBlob> Blob;
 
@@ -150,6 +154,12 @@ namespace Falcor
             FloatingPointModePrecise    = 0x8,
             GenerateDebugInfo           = 0x10,
             MatrixLayoutColumnMajor     = 0x20, // Falcor is using row-major, use this only to compile external shaders that have no Falcor dependencies.
+        };
+
+        struct BlobData
+        {
+            const void* data;
+            size_t size;
         };
 
         class DefineList : public std::map<std::string, std::string>
@@ -180,24 +190,83 @@ namespace Falcor
             DefineList(std::initializer_list<std::pair<const std::string, std::string>> il) : std::map<std::string, std::string>(il) {}
         };
 
+
+        /** Representing a shader implementation of an interface.
+            When linked into a `ProgramVersion`, the specialized shader will contain
+            the implementation of the specified type in a dynamic dispatch function.
+        */
+        struct TypeConformance
+        {
+            std::string mTypeName;
+            std::string mInterfaceName;
+            TypeConformance() = default;
+            TypeConformance(std::string const& typeName, std::string const& interfaceName)
+                : mTypeName(typeName)
+                , mInterfaceName(interfaceName)
+            {}
+            bool operator<(TypeConformance const& other) const
+            {
+                return mTypeName < other.mTypeName || mTypeName == other.mTypeName && mInterfaceName < other.mInterfaceName;
+            }
+            bool operator==(TypeConformance const& other) const
+            {
+                return mTypeName == other.mTypeName && mInterfaceName == other.mInterfaceName;
+            }
+            struct HashFunction
+            {
+                size_t operator()(const TypeConformance& conformance) const
+                {
+                    size_t hash = std::hash<std::string>()(conformance.mTypeName);
+                    hash = hash ^ std::hash<std::string>()(conformance.mInterfaceName);
+                    return hash;
+                }
+            };
+        };
+
+        class TypeConformanceList : public std::map<TypeConformance, uint32_t>
+        {
+        public:
+            /** Adds a type conformance. If the type conformance exists, it will be replaced.
+                \param[in] typeName The name of the implementation type.
+                \param[in] interfaceName The name of the interface type.
+                \param[in] id Optional. The id representing the implementation type for this interface. If it is -1, Slang will automatically assign a unique Id for the type.
+                \return The updated list of type conformances.
+            */
+            TypeConformanceList& add(const std::string& typeName, const std::string& interfaceName, uint32_t id = -1) { (*this)[TypeConformance(typeName, interfaceName)] = id; return *this; }
+
+            /** Removes a type conformance. If the type conformance doesn't exist, the call will be silently ignored.
+                \param[in] typeName The name of the implementation type.
+                \param[in] interfaceName The name of the interface type.
+                \return The updated list of type conformances.
+            */
+            TypeConformanceList& remove(const std::string& typeName, const std::string& interfaceName) { (*this).erase(TypeConformance(typeName, interfaceName)); return *this; }
+
+            /** Add a type conformance list to the current list
+            */
+            TypeConformanceList& add(const TypeConformanceList& cl) { for (const auto& p : cl) add(p.first.mTypeName, p.first.mInterfaceName, p.second); return *this; }
+
+            /** Remove a type conformance list from the current list
+            */
+            TypeConformanceList& remove(const TypeConformanceList& cl) { for (const auto& p : cl) remove(p.first.mTypeName, p.first.mInterfaceName); return *this; }
+
+            TypeConformanceList() = default;
+            TypeConformanceList(std::initializer_list<std::pair<const TypeConformance, uint32_t>> il) : std::map<TypeConformance, uint32_t>(il) {}
+        };
+
         /** Create a shader object
-            \param[in] shaderBlog A blob containing the shader code
-            \param[in] Type The Type of the shader
+            \param[in] linkedSlangEntryPoint The Slang IComponentType that defines the shader entry point.
+            \param[in] type The Type of the shader
             \param[out] log This string will contain the error log message in case shader compilation failed
             \return If success, a new shader object, otherwise nullptr
         */
-        static SharedPtr create(const Blob& shaderBlob, ShaderType type, std::string const&  entryPointName, CompilerFlags flags, std::string& log)
+        static SharedPtr create(ComPtr<slang::IComponentType> linkedSlangEntryPoint, ShaderType type, std::string const&  entryPointName, CompilerFlags flags, std::string& log)
         {
             SharedPtr pShader = SharedPtr(new Shader(type));
             pShader->mEntryPointName = entryPointName;
-            return pShader->init(shaderBlob, entryPointName, flags, log) ? pShader : nullptr;
+            return pShader->init(linkedSlangEntryPoint, entryPointName, flags, log) ? pShader : nullptr;
         }
 
         virtual ~Shader();
-
-        /** Get the API handle.
-        */
-        const ApiHandle& getApiHandle() const { return mApiHandle; }
 
         /** Get the shader Type
         */
@@ -207,18 +276,22 @@ namespace Falcor
         */
         const std::string& getEntryPoint() const { return mEntryPointName; }
 
-#ifdef FALCOR_D3D12
+#if FALCOR_D3D12_AVAILABLE
         ID3DBlobPtr getD3DBlob() const;
+        D3D12_SHADER_BYTECODE getD3D12ShaderByteCode() const
+        {
+            return D3D12_SHADER_BYTECODE{ getD3DBlob()->GetBufferPointer(), getD3DBlob()->GetBufferSize() };
+        }
 #endif
+        BlobData getBlobData() const;
 
     protected:
         // API handle depends on the shader Type, so it stored be stored as part of the private data
-        bool init(const Blob& shaderBlob, const std::string&  entryPointName, CompilerFlags flags, std::string& log);
+        bool init(ComPtr<slang::IComponentType> linkedSlangEntryPoint, const std::string& entryPointName, CompilerFlags flags, std::string& log);
         Shader(ShaderType Type);
         ShaderType mType;
         std::string mEntryPointName;
-        ApiHandle mApiHandle;
-        void* mpPrivateData = nullptr;
+        std::unique_ptr<ShaderData> mpPrivateData;
     };
-    enum_class_operators(Shader::CompilerFlags);
+    FALCOR_ENUM_CLASS_OPERATORS(Shader::CompilerFlags);
 }

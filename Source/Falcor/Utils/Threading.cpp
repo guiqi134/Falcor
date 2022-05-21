@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -60,7 +60,7 @@ namespace Falcor
 
     Threading::Task Threading::dispatchTask(const std::function<void(void)>& func)
     {
-        assert(gData.initialized);
+        FALCOR_ASSERT(gData.initialized);
 
         std::thread& t = gData.threads[gData.current];
         if (t.joinable()) t.join();
@@ -84,12 +84,11 @@ namespace Falcor
 
     bool Threading::Task::isRunning()
     {
-        logError("Threading::Task::isRunning() not implemented");
-        return true;
+        FALCOR_UNIMPLEMENTED();
     }
 
     void Threading::Task::finish()
     {
-        logError("Threading::Task::finish() not implemented");
+        FALCOR_UNIMPLEMENTED();
     }
 }

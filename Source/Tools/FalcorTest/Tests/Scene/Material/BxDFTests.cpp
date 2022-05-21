@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -49,14 +49,14 @@ namespace Falcor
         struct BxdfConfig
         {
             std::string name;
-            float3 wo;
+            float3 wi;
             float4 params;
 
-            static std::vector<float3> getWo(const std::vector<BxdfConfig>& configs)
+            static std::vector<float3> getWi(const std::vector<BxdfConfig>& configs)
             {
-                std::vector<float3> wo;
-                std::transform(configs.begin(), configs.end(), std::back_inserter(wo), [](auto const& config) { return config.wo; });
-                return wo;
+                std::vector<float3> wi;
+                std::transform(configs.begin(), configs.end(), std::back_inserter(wi), [](auto const& config) { return config.wi; });
+                return wi;
             }
 
             static std::vector<float4> getParams(const std::vector<BxdfConfig>& configs)
@@ -67,7 +67,7 @@ namespace Falcor
             }
         };
 
-        void dumpHistogram(const std::string& filename, const double* pData, double factor, uint32_t width, uint32_t height)
+        void dumpHistogram(const std::filesystem::path& path, const double* pData, double factor, uint32_t width, uint32_t height)
         {
             std::vector<float> img(width * height * 3, 0);
             for (uint32_t y = 0; y < height; ++y)
@@ -81,7 +81,7 @@ namespace Falcor
                     img[index + 2] = value;
                 }
             }
-            Bitmap::saveImage(filename, width, height, Bitmap::FileFormat::ExrFile, Bitmap::ExportFlags::None, ResourceFormat::RGB32Float, true, img.data());
+            Bitmap::saveImage(path, width, height, Bitmap::FileFormat::ExrFile, Bitmap::ExportFlags::None, ResourceFormat::RGB32Float, true, img.data());
         }
 
         struct SamplingTestSpec
@@ -98,9 +98,9 @@ namespace Falcor
 
         void setupSamplingTest(GPUUnitTestContext& ctx, const SamplingTestSpec& spec, const std::string& csEntry)
         {
-            assert(!spec.bxdf.empty());
-            assert(!spec.bxdfConfigs.empty());
-            assert(spec.sampleCount > spec.threadSampleCount && spec.sampleCount % spec.threadSampleCount == 0);
+            FALCOR_ASSERT(!spec.bxdf.empty());
+            FALCOR_ASSERT(!spec.bxdfConfigs.empty());
+            FALCOR_ASSERT(spec.sampleCount > spec.threadSampleCount && spec.sampleCount % spec.threadSampleCount == 0);
 
             uint32_t testCount = (uint32_t)spec.bxdfConfigs.size();
             uint32_t binCount = spec.phiBinCount * spec.cosThetaBinCount;
@@ -118,9 +118,9 @@ namespace Falcor
             var["threadSampleCount"] = spec.threadSampleCount;
             var["binSampleCount"] = spec.binSampleCount;
 
-            auto testWo = BxdfConfig::getWo(spec.bxdfConfigs);
-            auto pTestWoBuffer = Buffer::createStructured(var["testWo"], testCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testWo.data());
-            var["testWo"] = pTestWoBuffer;
+            auto testWi = BxdfConfig::getWi(spec.bxdfConfigs);
+            auto pTestWiBuffer = Buffer::createStructured(var["testWi"], testCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testWi.data());
+            var["testWi"] = pTestWiBuffer;
 
             auto testParams = BxdfConfig::getParams(spec.bxdfConfigs);
             auto pTestParamsBuffer = Buffer::createStructured(var["testParams"], testCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testParams.data());
@@ -301,7 +301,7 @@ namespace Falcor
             ctx,
             {
                 "DiffuseReflectionDisney",
-                "bxdf.albedo = float3(1.f); bxdf.linearRoughness = 0.5f;",
+                "bxdf.albedo = float3(1.f); bxdf.roughness = 0.5f;",
                 {
                     { "perp",    perp,      { 0.f, 0.f, 0.f, 0.f } },
                     { "oblique", oblique,   { 0.f, 0.f, 0.f, 0.f } },
@@ -313,7 +313,7 @@ namespace Falcor
             ctx,
             {
                 "DiffuseReflectionFrostbite",
-                "bxdf.albedo = float3(1.f); bxdf.linearRoughness = 0.5f;",
+                "bxdf.albedo = float3(1.f); bxdf.roughness = 0.5f;",
                 {
                     { "perp",    perp,      { 0.f, 0.f, 0.f, 0.f } },
                     { "oblique", oblique,   { 0.f, 0.f, 0.f, 0.f } },

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -37,11 +37,11 @@ namespace Falcor
         return SharedPtr(new EnvMap(pTexture));
     }
 
-    EnvMap::SharedPtr EnvMap::create(const std::string& filename)
+    EnvMap::SharedPtr EnvMap::createFromFile(const std::filesystem::path& path)
     {
         // Load environment map from file. Set it to generate mips and use linear color.
-        auto pTexture = Texture::createFromFile(filename, true, false);
-        if (!pTexture) throw std::exception("Failed to load environment map texture");
+        auto pTexture = Texture::createFromFile(path, true, false);
+        if (!pTexture) return nullptr;
         return create(pTexture);
     }
 
@@ -51,7 +51,7 @@ namespace Falcor
         if (widgets.var("Rotation XYZ", rotation, -360.f, 360.f, 0.5f)) setRotation(rotation);
         widgets.var("Intensity", mData.intensity, 0.f, 1000000.f);
         widgets.var("Color tint", mData.tint, 0.f, 1.f);
-        widgets.text("EnvMap: " + mpEnvMap->getSourceFilename());
+        widgets.text("EnvMap: " + mpEnvMap->getSourcePath().string());
     }
 
     void EnvMap::setRotation(float3 degreesXYZ)
@@ -79,7 +79,7 @@ namespace Falcor
 
     void EnvMap::setShaderData(const ShaderVar& var) const
     {
-        assert(var.isValid());
+        FALCOR_ASSERT(var.isValid());
 
         // Set variables.
         var["data"].setBlob(mData);
@@ -107,11 +107,11 @@ namespace Falcor
         return mpEnvMap ? mpEnvMap->getTextureSizeInBytes() : 0;
     }
 
-    EnvMap::EnvMap(const Texture::SharedPtr& texture)
+    EnvMap::EnvMap(const Texture::SharedPtr& pTexture)
     {
-        if (!texture) throw std::exception("Failed to create environment map without texture");
+        checkArgument(pTexture != nullptr, "'pTexture' must be a valid texture");
 
-        mpEnvMap = texture;
+        mpEnvMap = pTexture;
 
         // Create sampler.
         // The lat-long map wraps around horizontally, but not vertically. Set the sampler to only wrap in U.
@@ -121,11 +121,12 @@ namespace Falcor
         mpEnvSampler = Sampler::create(samplerDesc);
     }
 
-    SCRIPT_BINDING(EnvMap)
+    FALCOR_SCRIPT_BINDING(EnvMap)
     {
         pybind11::class_<EnvMap, EnvMap::SharedPtr> envMap(m, "EnvMap");
-        envMap.def(pybind11::init(pybind11::overload_cast<const std::string&>(&EnvMap::create)), "filename"_a);
-        envMap.def_property_readonly("filename", &EnvMap::getFilename);
+        envMap.def(pybind11::init(pybind11::overload_cast<const std::filesystem::path&>(&EnvMap::createFromFile)), "path"_a);
+        envMap.def_static("createFromFile", &EnvMap::createFromFile, "path"_a);
+        envMap.def_property_readonly("path", &EnvMap::getPath);
         envMap.def_property("rotation", &EnvMap::getRotation, &EnvMap::setRotation);
         envMap.def_property("intensity", &EnvMap::getIntensity, &EnvMap::setIntensity);
         envMap.def_property("tint", &EnvMap::getTint, &EnvMap::setTint);

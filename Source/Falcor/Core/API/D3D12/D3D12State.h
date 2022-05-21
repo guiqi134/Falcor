@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,11 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#pragma  once
-#include <vector>
-#include "Core/API/RootSignature.h"
+#pragma once
 #include "Core/API/VAO.h"
 #include "Core/API/GraphicsStateObject.h"
+#include <vector>
 
 namespace Falcor
 {
@@ -43,7 +42,7 @@ namespace Falcor
     struct InputLayoutDesc
     {
         std::vector<D3D12_INPUT_ELEMENT_DESC> elements;
-        std::vector<std::unique_ptr<char[]>> names; // Can't use strings directly because the vector size is unknown and vector reallocations will change the addresses we used in INPUT_ELEMENT_DESC 
+        std::vector<std::unique_ptr<char[]>> names; // Can't use strings directly because the vector size is unknown and vector reallocations will change the addresses we used in INPUT_ELEMENT_DESC
     };
 
     void initD3D12BlendDesc(const BlendState* pFalcorDesc, D3D12_BLEND_DESC& d3dDesc);
@@ -52,17 +51,6 @@ namespace Falcor
     void initD3D12VertexLayout(const VertexLayout* pLayout, InputLayoutDesc& inputDesc);
     void initD3D12SamplerDesc(const Sampler* pSampler, D3D12_SAMPLER_DESC& desc);
     void initD3D12GraphicsStateDesc(const GraphicsStateObject::Desc& gsoDesc, D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, InputLayoutDesc& layoutDesc);
-
-    struct RootSignatureParams
-    {
-        using RootParameterVec = std::vector<D3D12_ROOT_PARAMETER1>;
-        RootParameterVec rootParams;
-        std::vector<std::vector<D3D12_DESCRIPTOR_RANGE1>> d3dRanges;
-        uint32_t signatureSizeInBytes;
-        std::vector<uint32_t> elementByteOffset;
-    };
-
-    void initD3D12RootParams(const RootSignature::Desc& desc, RootSignatureParams& params);
 
     inline D3D_PRIMITIVE_TOPOLOGY getD3DPrimitiveTopology(Vao::Topology topology)
     {
@@ -79,7 +67,7 @@ namespace Falcor
         case Vao::Topology::TriangleStrip:
             return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
         }
     }
@@ -97,7 +85,7 @@ namespace Falcor
         case GraphicsStateObject::PrimitiveType::Patch:
             return D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED;
         }
     }

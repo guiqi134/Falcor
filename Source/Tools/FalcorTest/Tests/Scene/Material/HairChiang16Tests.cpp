@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -82,9 +82,9 @@ namespace Falcor
         // Load reference data.
         std::ifstream fin;
 
-        std::string fullpath;
-        findFileInDataDirectories("pbrt_hair_bsdf.dat", fullpath);
-        fin.open(fullpath, std::ios::in | std::ios::binary);
+        std::filesystem::path fullPath;
+        findFileInDataDirectories("pbrt_hair_bsdf.dat", fullPath);
+        fin.open(fullPath, std::ios::in | std::ios::binary);
         if (!fin.is_open())
         {
             throw ErrorRunningTestException("Cannot find reference data file 'pbrt_hair_bsdf.dat'.");
@@ -95,14 +95,14 @@ namespace Falcor
         fin.close();
 
         std::vector<float3> sigmaA(testCount);
-        std::vector<float3> wo(testCount);
         std::vector<float3> wi(testCount);
+        std::vector<float3> wo(testCount);
         std::vector<float3> resultRef(testCount);
         for (uint32_t i = 0; i < testCount; i++)
         {
             sigmaA[i] = float3(buf[4 * testCount + i], buf[5 * testCount + i], buf[6 * testCount + i]);
-            wo[i] = float3(buf[8 * testCount + i], buf[9 * testCount + i], buf[10 * testCount + i]);
-            wi[i] = float3(buf[11 * testCount + i], buf[12 * testCount + i], buf[13 * testCount + i]);
+            wi[i] = float3(buf[8 * testCount + i], buf[9 * testCount + i], buf[10 * testCount + i]);
+            wo[i] = float3(buf[11 * testCount + i], buf[12 * testCount + i], buf[13 * testCount + i]);
             resultRef[i] = float3(buf[14 * testCount + i], buf[15 * testCount + i], buf[16 * testCount + i]);
         }
 
@@ -119,8 +119,8 @@ namespace Falcor
         ctx.allocateStructuredBuffer("gIoR", testCount, buf.data() + 3 * testCount);
         ctx.allocateStructuredBuffer("gSigmaA", testCount, sigmaA.data(), sigmaA.size() * sizeof(float3));
         ctx.allocateStructuredBuffer("gH", testCount, buf.data() + 7 * testCount);
-        ctx.allocateStructuredBuffer("gWo", testCount, wo.data(), wo.size() * sizeof(float3));
         ctx.allocateStructuredBuffer("gWi", testCount, wi.data(), wi.size() * sizeof(float3));
+        ctx.allocateStructuredBuffer("gWo", testCount, wo.data(), wo.size() * sizeof(float3));
         ctx.allocateStructuredBuffer("gResultOurs", testCount);
         ctx["TestCB"]["resultSize"] = testCount;
 

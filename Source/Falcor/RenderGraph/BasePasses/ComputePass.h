@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,24 +26,24 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "..\RenderPass.h"
-#include "Core\Program\ShaderVar.h"
+#include "../RenderPass.h"
+#include "Core/Program/ShaderVar.h"
 
 namespace Falcor
 {
-    class dlldecl ComputePass : public std::enable_shared_from_this<ComputePass>
+    class FALCOR_API ComputePass
     {
     public:
         using SharedPtr = ParameterBlockSharedPtr<ComputePass>;
 
         /** Create a new compute pass from file.
-            \param[in] filename Compute program filename.
+            \param[in] path Compute program file path.
             \param[in] csEntry Name of the entry point in the program. If not specified "main" will be used.
             \param[in] defines Optional list of macro definitions to set into the program.
             \param[in] createVars Create program vars automatically, otherwise use setVars().
             \return A new object, or throws an exception if creation failed.
         */
-        static SharedPtr create(const std::string& filename, const std::string& csEntry = "main", const Program::DefineList& defines = Program::DefineList(), bool createVars = true);
+        static SharedPtr create(const std::filesystem::path& path, const std::string& csEntry = "main", const Program::DefineList& defines = Program::DefineList(), bool createVars = true);
 
         /** Create a new compute pass.
             \param[in] desc The program's description.
@@ -74,9 +74,14 @@ namespace Falcor
         */
         virtual void executeIndirect(ComputeContext* context, const Buffer* pArgBuffer, uint64_t argBufferOffset = 0);
 
-        /** Get the vars
+        /** Check if a vars object exists. If not, use setVars() to set or create a new vars object.
+            \return True if a vars object exists.
         */
-        const ComputeVars::SharedPtr& getVars() const { assert(mpVars); return mpVars; };
+        bool hasVars() const { return mpVars != nullptr; }
+
+        /** Get the vars.
+        */
+        const ComputeVars::SharedPtr& getVars() const { FALCOR_ASSERT(mpVars); return mpVars; };
 
         ShaderVar getRootVar() const { return mpVars->getRootVar(); }
 

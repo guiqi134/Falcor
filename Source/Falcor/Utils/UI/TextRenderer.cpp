@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -85,7 +85,7 @@ namespace Falcor
             vpTransform[1][1] = -2 / height;
             vpTransform[3][0] = -1;
             vpTransform[3][1] = 1;
-#ifdef FALCOR_VK
+#ifdef FALCOR_FLIP_Y
             vpTransform[1][1] *= -1.0f;
             vpTransform[3][1] *= -1.0f;
 #endif
@@ -98,7 +98,7 @@ namespace Falcor
         void renderText(RenderContext* pRenderContext, const std::string& text, const Fbo::SharedPtr& pDstFbo, float2 pos)
         {
             // Make sure we enough space for the next char
-            assert(text.size() < kMaxCharCount);
+            FALCOR_ASSERT(text.size() < kMaxCharCount);
             setCbData(pDstFbo);
             Vertex* verts = (Vertex*)gTextData.pVb->map(Buffer::MapType::WriteDiscard);
 
@@ -147,14 +147,14 @@ namespace Falcor
     {
         if (gTextData.init) return;
 
-        static const std::string kShaderFile("Utils/UI/TextRenderer.slang");
+        static const std::string kShaderFile("Utils/UI/TextRenderer.3d.slang");
 
         // Create a vertex buffer
         const uint32_t vbSize = (uint32_t)(sizeof(Vertex)*kMaxCharCount*arraysize(kVertexPos));
         gTextData.pVb = Buffer::create(vbSize, Buffer::BindFlags::Vertex, Buffer::CpuAccess::Write, nullptr);
 
         // Create the RenderState
-        gTextData.pPass = RasterPass::create(kShaderFile, "vs", "ps");
+        gTextData.pPass = RasterPass::create(kShaderFile, "vsMain", "psMain");
         auto& pState = gTextData.pPass->getState();
         pState->setVao(createVAO(gTextData.pVb));
 

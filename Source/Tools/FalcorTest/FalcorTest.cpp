@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -34,6 +34,10 @@
 #include <string>
 #include <vector>
 
+#if FALCOR_D3D12_AVAILABLE
+FALCOR_EXPORT_D3D12_AGILITY_SDK
+#endif
+
 static std::vector<std::string> librariesWithTests =
 {
 };
@@ -54,7 +58,7 @@ void FalcorTest::onLoad(RenderContext* pRenderContext)
 
 void FalcorTest::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
 {
-    sReturnCode = runTests(std::cout, pRenderContext, mOptions.filter);
+    sReturnCode = runTests(std::cout, pRenderContext, mOptions.filter, mOptions.repeat);
     gpFramework->shutdown();
 }
 
@@ -65,6 +69,8 @@ int main(int argc, char** argv)
     parser.helpParams.programName = "FalcorTest";
     args::HelpFlag helpFlag(parser, "help", "Display this help menu.", {'h', "help"});
     args::ValueFlag<std::string> filterFlag(parser, "filter", "Regular expression for filtering tests to run.", {'f', "filter"});
+    args::ValueFlag<uint32_t> repeatFlag(parser, "N", "Number of times to repeat the test.", {'r', "repeat"});
+    args::Flag enableDebugLayer(parser, "", "Enable debug layer (enabled by default in Debug build).", {"enable-debug-layer"});
     args::CompletionFlag completionFlag(parser, {"complete"});
 
     try
@@ -94,16 +100,26 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Disable logging to console, we don't want to clutter the test runner output with log messages.
+    Logger::setOutputs(Logger::OutputFlags::File | Logger::OutputFlags::DebugWindow);
+
     FalcorTest::Options options;
 
     if (filterFlag) options.filter = args::get(filterFlag);
+    if (repeatFlag) options.repeat = args::get(repeatFlag);
 
     FalcorTest::UniquePtr pRenderer = std::make_unique<FalcorTest>(options);
     SampleConfig config;
     config.windowDesc.title = "FalcorTest";
+#ifdef FALCOR_D3D12_AVAILABLE
     config.windowDesc.mode = Window::WindowMode::Minimized;
+#else
+    // Vulkan does not allow creating a swapchain on a minimized window.
+    config.windowDesc.mode = Window::WindowMode::Normal;
+#endif
     config.windowDesc.resizableWindow = true;
     config.windowDesc.width = config.windowDesc.height = 2;
+    if (enableDebugLayer) config.deviceDesc.enableDebugLayer = true;
     Sample::run(config, pRenderer, argc, argv);
     return sReturnCode;
 }

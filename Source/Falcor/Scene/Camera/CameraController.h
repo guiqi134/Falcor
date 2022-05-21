@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,7 +36,7 @@ namespace Falcor
 
     /** Camera controller interface. Camera controllers should inherit from this object.
     */
-    class dlldecl CameraController
+    class FALCOR_API CameraController
     {
     public:
         using SharedPtr = std::shared_ptr<CameraController>;
@@ -49,6 +49,10 @@ namespace Falcor
         /** Handle keyboard events
         */
         virtual bool onKeyEvent(const KeyboardEvent& keyboardEvent) { return false; }
+
+        /** Handle gamepad state.
+        */
+        virtual bool onGamepadState(const GamepadState& gamepadState) { return false; }
 
         /** Update the camera position and orientation.
             \return Whether the camera was updated/changed
@@ -71,7 +75,7 @@ namespace Falcor
         * Left mouse click + movement will orbit around the model.
         * Mouse wheel zooms in/out.
     */
-    class dlldecl OrbiterCameraController : public CameraController
+    class FALCOR_API OrbiterCameraController : public CameraController
     {
     public:
         using SharedPtr = std::shared_ptr<OrbiterCameraController>;
@@ -120,7 +124,7 @@ namespace Falcor
         - Ctrl for slower movement.
     */
     template<bool b6DoF>
-    class dlldecl FirstPersonCameraControllerCommon : public CameraController
+    class FALCOR_API FirstPersonCameraControllerCommon : public CameraController
     {
     public:
         FirstPersonCameraControllerCommon(const Camera::SharedPtr& pCamera);
@@ -138,6 +142,10 @@ namespace Falcor
         */
         bool onKeyEvent(const KeyboardEvent& keyboardEvent) override;
 
+        /* Handle gamepad state.
+        */
+        bool onGamepadState(const GamepadState& gamepadState) override;
+
         /** Update the camera position and orientation.
             \return Whether the camera was updated/changed
         */
@@ -150,6 +158,12 @@ namespace Falcor
 
         float2 mLastMousePos;
         float2 mMouseDelta;
+
+        bool mGamepadPresent = false;
+        float2 mGamepadLeftStick;
+        float2 mGamepadRightStick;
+        float mGamepadLeftTrigger;
+        float mGamepadRightTrigger;
 
         CpuTimer mTimer;
 

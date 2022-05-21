@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,7 +31,7 @@ namespace Falcor
 {
     /** Abstract the API sampler state object
     */
-    class dlldecl Sampler : public std::enable_shared_from_this<Sampler>
+    class FALCOR_API Sampler
     {
     public:
         using SharedPtr = std::shared_ptr<Sampler>;
@@ -73,7 +73,7 @@ namespace Falcor
 
         /** Descriptor used to create a new Sampler object
         */
-        class dlldecl Desc
+        class FALCOR_API Desc
         {
         public:
             friend class Sampler;
@@ -114,6 +114,14 @@ namespace Falcor
             /** Set the border color. Only applies when the addressing mode is ClampToBorder
             */
             Desc& setBorderColor(const float4& borderColor);
+
+            /** Returns true if sampler descs are identical.
+            */
+            bool operator==(const Desc& other) const;
+
+            /** Returns true if sampler descs are not identical.
+            */
+            bool operator!=(const Desc& other) const { return !(*this == other); }
 
         protected:
             Filter mMagFilter = Filter::Linear;
@@ -202,6 +210,11 @@ namespace Falcor
         /** Get an object that represents a default sampler
         */
         static Sampler::SharedPtr getDefault();
+
+        /** Get an D3D12 CPU Descriptor handle.
+            \return A valid CPU descriptor heap handle when using the D3D12 API, otherwise nullptr.
+        */
+        D3D12DescriptorCpuHandle getD3D12CpuHeapHandle() const;
 
     private:
         Sampler(const Desc& desc);

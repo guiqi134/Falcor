@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,7 +36,7 @@ namespace Falcor
     class ParameterBlock;
     struct ResourceViewInfo;
 
-    class dlldecl Resource : public std::enable_shared_from_this<Resource>
+    class FALCOR_API Resource : public std::enable_shared_from_this<Resource>
     {
     public:
         using ApiHandle = ResourceHandle;
@@ -79,9 +79,7 @@ namespace Falcor
             Predication,
             PixelShader,
             NonPixelShader,
-#ifdef FALCOR_D3D12
             AccelerationStructure,
-#endif
         };
 
         using SharedPtr = std::shared_ptr<Resource>;
@@ -114,6 +112,8 @@ namespace Falcor
         /** Get the API handle
         */
         const ApiHandle& getApiHandle() const { return mApiHandle; }
+
+        const D3D12ResourceHandle& getD3D12Handle() const;
 
         /** Get a shared resource API handle.
 
@@ -159,10 +159,10 @@ namespace Falcor
 
         /** Conversions to derived classes
         */
-        std::shared_ptr<Texture> asTexture() { return this ? std::dynamic_pointer_cast<Texture>(shared_from_this()) : nullptr; }
-        std::shared_ptr<Buffer> asBuffer() { return this ? std::dynamic_pointer_cast<Buffer>(shared_from_this()) : nullptr; }
+        std::shared_ptr<Texture> asTexture();
+        std::shared_ptr<Buffer> asBuffer();
 
-#if _ENABLE_CUDA
+#if FALCOR_ENABLE_CUDA
         /** Get the CUDA device address for this resource.
             \return CUDA device address.
             Throws an exception if the resource is not shared.
@@ -196,6 +196,9 @@ namespace Falcor
         size_t mSize = 0;
         GpuAddress mGpuVaOffset = 0;
         std::string mName;
+#if defined(FALCOR_GFX) && FALCOR_D3D12_AVAILABLE
+        mutable D3D12ResourceHandle mpD3D12Handle;
+#endif
         mutable SharedResourceApiHandle mSharedApiHandle = 0;
 
         mutable std::unordered_map<ResourceViewInfo, ShaderResourceView::SharedPtr, ViewInfoHashFunc> mSrvs;
@@ -204,6 +207,6 @@ namespace Falcor
         mutable std::unordered_map<ResourceViewInfo, UnorderedAccessView::SharedPtr, ViewInfoHashFunc> mUavs;
     };
 
-    const std::string dlldecl to_string(Resource::Type);
-    const std::string dlldecl to_string(Resource::State);
+    const std::string FALCOR_API to_string(Resource::Type);
+    const std::string FALCOR_API to_string(Resource::State);
 }

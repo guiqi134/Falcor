@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "stdafx.h"
 #include "Core/API/Shader.h"
-#include "Slang/slang.h"
+#include <slang/slang.h>
 
 namespace Falcor
 {
@@ -36,57 +36,48 @@ namespace Falcor
         ID3DBlobPtr pBlob;
     };
 
-    std::string getTargetString(ShaderType type, const std::string& shaderModel)
-    {
-        switch (type)
-        {
-        case ShaderType::Vertex:
-            return "vs_" + shaderModel;
-        case ShaderType::Pixel:
-            return "ps_" + shaderModel;
-        case ShaderType::Hull:
-            return "hs_" + shaderModel;
-        case ShaderType::Domain:
-            return "ds_" + shaderModel;
-        case ShaderType::Geometry:
-            return "gs_" + shaderModel;
-        case ShaderType::Compute:
-            return "cs_" + shaderModel;
-        default:
-            should_not_get_here();
-            return "";
-        }
-    }
-
     Shader::Shader(ShaderType type) : mType(type)
     {
-        mpPrivateData = new ShaderData;
+        mpPrivateData = std::make_unique<ShaderData>();
     }
 
     Shader::~Shader()
     {
-        ShaderData* pData = (ShaderData*)mpPrivateData;
-        safe_delete(pData);
     }
 
-    bool Shader::init(const Blob& shaderBlob, const std::string& entryPointName, CompilerFlags flags, std::string& log)
+    bool Shader::init(ComPtr<slang::IComponentType> slangEntryPoint, const std::string& entryPointName, CompilerFlags flags, std::string& log)
     {
-        // Compile the shader
-        ShaderData* pData = (ShaderData*)mpPrivateData;
-        pData->pBlob = shaderBlob.get();
+        // Compile the shader kernel.
+        ComPtr<slang::IBlob> pSlangDiagnostics;
+        ComPtr<slang::IBlob> pShaderBlob;
 
-        if (pData->pBlob == nullptr)
+        bool succeeded = SLANG_SUCCEEDED(slangEntryPoint->getEntryPointCode(
+            /* entryPointIndex: */ 0,
+            /* targetIndex: */ 0,
+            pShaderBlob.writeRef(),
+            pSlangDiagnostics.writeRef()));
+        if (pSlangDiagnostics && pSlangDiagnostics->getBufferSize() > 0)
         {
-            return false;
+            log += static_cast<char const*>(pSlangDiagnostics->getBufferPointer());
         }
-
-        mApiHandle = { pData->pBlob->GetBufferPointer(), pData->pBlob->GetBufferSize() };
-        return true;
+        if (succeeded)
+        {
+            mpPrivateData->pBlob = pShaderBlob.get();
+        }
+        return succeeded;
     }
 
     ID3DBlobPtr Shader::getD3DBlob() const
     {
-        const ShaderData* pData = (ShaderData*)mpPrivateData;
-        return pData->pBlob;
+        return mpPrivateData->pBlob;
+    }
+
+    Shader::BlobData Shader::getBlobData() const
+    {
+        BlobData result;
+        auto blob = getD3DBlob();
+        result.data = blob->GetBufferPointer();
+        result.size = blob->GetBufferSize();
+        return result;
     }
 }

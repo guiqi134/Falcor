@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -56,7 +56,7 @@ namespace Falcor
     {
         if (!gtk_init_check(0, nullptr))
         {
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
         }
 
         GtkButtonsType buttonType = GTK_BUTTONS_NONE;
@@ -76,7 +76,7 @@ namespace Falcor
             buttonType = GTK_BUTTONS_YES_NO;
             break;
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             break;
         }
 
@@ -132,7 +132,7 @@ namespace Falcor
         case gint(MsgResponseId::Ignore):
             return MsgBoxButton::Ignore;
         default:
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
             return MsgBoxButton::Cancel;
         }
     }
@@ -154,7 +154,7 @@ namespace Falcor
 
         int32_t forkVal = fork();
 
-        assert(forkVal != -1);
+        FALCOR_ASSERT(forkVal != -1);
         if(forkVal == 0)
         {
             if (execv(linuxAppName.c_str(), (char* const*)argv.data()))
@@ -175,81 +175,42 @@ namespace Falcor
     void terminateProcess(size_t processID)
     {
         (void)processID;
-        should_not_get_here();
+        FALCOR_UNREACHABLE();
     }
 
-    bool doesFileExist(const std::string& filename)
+    void monitorFileUpdates(const std::filesystem::path& path, const std::function<void()>& callback)
     {
-        int32_t handle = open(filename.c_str(), O_RDONLY);
-        struct stat fileStat;
-        bool exists = fstat(handle, &fileStat) == 0;
-        close(handle);
-        return exists;
+        (void)path;
+        (void)callback;
+        FALCOR_UNREACHABLE();
     }
 
-    bool isDirectoryExists(const std::string& filename)
+    void closeSharedFile(const std::filesystem::path& path)
     {
-        const char* pathname = filename.c_str();
-        struct stat sb;
-        return (stat(pathname, &sb) == 0) && S_ISDIR(sb.st_mode);
+        (void)path;
+        FALCOR_UNREACHABLE();
     }
 
-    void monitorFileUpdates(const std::string& filePath, const std::function<void()>& callback)
+    const std::filesystem::path& getExecutablePath()
     {
-        (void)filePath; (void)callback;
-        should_not_get_here();
-    }
-
-    void closeSharedFile(const std::string& filePath)
-    {
-        (void)filePath;
-        should_not_get_here();
-    }
-
-    std::string getTempFilename()
-    {
-        std::string filePath = std::filesystem::temp_directory_path();
-        filePath += "/fileXXXXXX";
-
-        // The if is here to avoid the warn_unused_result attribute on mkstemp
-        if(mkstemp(&filePath.front())) {}
-        return filePath;
-    }
-
-    const std::string& getExecutableDirectory()
-    {
-        char result[PATH_MAX] = { 0 };
-        ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-        const char* path;
-        if (count != -1)
+        static std::filesystem::path path;
+        if (path.empty())
         {
-            path = dirname(result);
+            char pathStr[PATH_MAX] = { 0 };
+            if (readlink("/proc/self/exe", pathStr, PATH_MAX) == -1)
+            {
+                throw RuntimeError("Failed to get the executable path.");
+            }
+            path = pathStr;
         }
-        static std::string strpath(path);
-        return strpath;
+        return path;
     }
 
-    const std::string getWorkingDirectory()
+    const std::filesystem::path& getAppDataDirectory()
     {
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) != nullptr)
-        {
-            return std::string(cwd);
-        }
-
-        return std::string();
-    }
-
-    const std::string getAppDataDirectory()
-    {
-        assert(0);
-        return std::string();
-    }
-
-    const std::string& getExecutableName()
-    {
-        static std::string filename = std::filesystem::path(program_invocation_name).filename();
-        return filename;
+        FALCOR_ASSERT(0);
+        static std::filesystem::path path;
+        return path;
     }
 
     bool getEnvironmentVariable(const std::string& varName, std::string& value)
@@ -265,11 +226,11 @@ namespace Falcor
     }
 
     template<bool bOpen>
-    bool fileDialogCommon(const FileDialogFilterVec& filters, std::string& filename)
+    bool fileDialogCommon(const FileDialogFilterVec& filters, std::filesystem::path& path)
     {
         if (!gtk_init_check(0, nullptr))
         {
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
         }
 
         GtkWidget* pParent = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -292,8 +253,8 @@ namespace Falcor
             result = gtk_dialog_run(GTK_DIALOG(pDialog));
             if (result == GTK_RESPONSE_ACCEPT)
             {
-                char* gtkFilename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(pDialog));
-                filename = std::string(gtkFilename);
+                gchar* gtkFilename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(pDialog));
+                path = static_cast<const char*>(gtkFilename);
                 g_free(gtkFilename);
                 success = true;
             }
@@ -334,15 +295,16 @@ namespace Falcor
         return success;
     }
 
-    bool openFileDialog(const FileDialogFilterVec& filters, std::string& filename)
+    bool openFileDialog(const FileDialogFilterVec& filters, std::filesystem::path& path)
     {
-        return fileDialogCommon<true>(filters, filename);
+        return fileDialogCommon<true>(filters, path);
     }
 
-    bool saveFileDialog(const FileDialogFilterVec& filters, std::string& filename)
+    bool saveFileDialog(const FileDialogFilterVec& filters, std::filesystem::path& path)
     {
-        return fileDialogCommon<false>(filters, filename);
+        return fileDialogCommon<false>(filters, path);
     }
+
     void setActiveWindowIcon(const std::string& iconFile)
     {
         // #TODO Not yet implemented
@@ -393,25 +355,6 @@ namespace Falcor
         std::cerr << s;
     }
 
-    void enumerateFiles(std::string searchString, std::vector<std::string>& filenames)
-    {
-        DIR* pDir = opendir(searchString.c_str());
-        if (pDir != nullptr)
-        {
-            struct dirent* pDirEntry = readdir(pDir);
-            while (pDirEntry != nullptr)
-            {
-                // Only add files, no subdirectories, symlinks, or other objects
-                if (pDirEntry->d_type == DT_REG)
-                {
-                    filenames.push_back(pDirEntry->d_name);
-                }
-
-                pDirEntry = readdir(pDir);
-            }
-        }
-    }
-
     std::thread::native_handle_type getCurrentThread()
     {
         return pthread_self();
@@ -449,7 +392,7 @@ namespace Falcor
         int32_t result = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuMask);
         if (result != 0)
         {
-            logError("setThreadAffinity() - pthread_setaffinity_np() failed with error code " + threadErrorToString(result));
+            logError("setThreadAffinity() - pthread_setaffinity_np() failed with error code {}", threadErrorToString(result));
         }
     }
 
@@ -473,21 +416,21 @@ namespace Falcor
         // #TODO: Is there a "Background" priority in Linux? Is there a way to emulate it?
         else
         {
-            should_not_get_here();
+            FALCOR_UNREACHABLE();
         }
 
         if (result != 0)
         {
-            logError("setThreadPriority() - pthread_setschedprio() failed with error code " + threadErrorToString(result));
+            logError("setThreadPriority() - pthread_setschedprio() failed with error code {}", threadErrorToString(result));
         }
     }
 
-    time_t getFileModifiedTime(const std::string& filename)
+    time_t getFileModifiedTime(const std::filesystem::path& path)
     {
         struct stat s;
-        if (stat(filename.c_str(), &s) != 0)
+        if (stat(path.c_str(), &s) != 0)
         {
-            logError("Can't get file time for '" + filename + "'");
+            logError("Can't get file time for '{}'.", path);
             return 0;
         }
 
@@ -514,20 +457,20 @@ namespace Falcor
         return (uint32_t)__builtin_popcount(a);
     }
 
-    DllHandle loadDll(const std::string& libPath)
+    SharedLibraryHandle loadSharedLibrary(const std::filesystem::path& path)
     {
         return dlopen(libPath.c_str(), RTLD_LAZY);
     }
 
-    void releaseDll(DllHandle dll)
+    void releaseSharedLibrary(SharedLibraryHandle library)
     {
-        dlclose(dll);
+        dlclose(library);
     }
 
     /** Get a function pointer from a library
     */
-    void* getDllProcAddress(DllHandle dll, const std::string& funcName)
+    void* getProcAddress(SharedLibraryHandle library, const std::string& funcName)
     {
-        return dlsym(dll, funcName.c_str());
+        return dlsym(library, funcName.c_str());
     }
 }

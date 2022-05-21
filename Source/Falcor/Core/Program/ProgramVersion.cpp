@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 
 namespace Falcor
 {
+
     //
     // EntryPointGroupKernels
     //
@@ -62,23 +63,20 @@ namespace Falcor
             Type type,
             const Shaders& shaders,
             std::string const& exportName,
-            RootSignature::SharedPtr const& localRootSignature,
             uint32_t maxPayloadSize,
             uint32_t maxAttributeSize)
     {
-        return SharedPtr(new RtEntryPointGroupKernels(type, shaders, exportName, localRootSignature, maxPayloadSize, maxAttributeSize));
+        return SharedPtr(new RtEntryPointGroupKernels(type, shaders, exportName, maxPayloadSize, maxAttributeSize));
     }
 
     RtEntryPointGroupKernels::RtEntryPointGroupKernels(
         Type type,
         const Shaders& shaders,
         std::string const& exportName,
-        RootSignature::SharedPtr const& localRootSignature,
         uint32_t maxPayloadSize,
         uint32_t maxAttributeSize)
         : EntryPointGroupKernels(type, shaders)
         , mExportName(exportName)
-        , mLocalRootSignature(localRootSignature)
         , mMaxPayloadSize(maxPayloadSize)
         , mMaxAttributesSize(maxAttributeSize)
     {}
@@ -97,17 +95,78 @@ namespace Falcor
         , mpVersion(pVersion)
         , mUniqueEntryPointGroups(uniqueEntryPointGroups)
     {
-        mpRootSignature = RootSignature::create(pReflector.get());
+#ifdef FALCOR_D3D12
+        mpRootSignature = D3D12RootSignature::create(pReflector.get());
+#endif
     }
 
     ProgramKernels::SharedPtr ProgramKernels::create(
         const ProgramVersion* pVersion,
+        slang::IComponentType* pSpecializedSlangGlobalScope,
+        const std::vector<slang::IComponentType*>& pTypeConformanceSpecializedEntryPoints,
         const ProgramReflection::SharedPtr& pReflector,
         const ProgramKernels::UniqueEntryPointGroups& uniqueEntryPointGroups,
         std::string& log,
         const std::string& name)
     {
         SharedPtr pProgram = SharedPtr(new ProgramKernels(pVersion, pReflector, uniqueEntryPointGroups, name));
+#ifdef FALCOR_GFX
+        gfx::IShaderProgram::Desc programDesc = {};
+        programDesc.linkingStyle = gfx::IShaderProgram::LinkingStyle::SeparateEntryPointCompilation;
+        programDesc.slangGlobalScope = pSpecializedSlangGlobalScope;
+
+        // Check if we are creating program kernels for ray tracing pipeline.
+        bool isRayTracingProgram = false;
+        if (pTypeConformanceSpecializedEntryPoints.size())
+        {
+            auto stage = pTypeConformanceSpecializedEntryPoints[0]->getLayout()->getEntryPointByIndex(0)->getStage();
+            switch (stage)
+            {
+            case SLANG_STAGE_ANY_HIT:
+            case SLANG_STAGE_RAY_GENERATION:
+            case SLANG_STAGE_CLOSEST_HIT:
+            case SLANG_STAGE_CALLABLE:
+            case SLANG_STAGE_INTERSECTION:
+            case SLANG_STAGE_MISS:
+                isRayTracingProgram = true;
+                break;
+            default:
+                break;
+            }
+        }
+        // Deduplicate entry points by name for ray tracing program.
+        std::vector<slang::IComponentType*> deduplicatedEntryPoints;
+        if (isRayTracingProgram)
+        {
+            std::set<std::string> entryPointNames;
+            for (auto entryPoint : pTypeConformanceSpecializedEntryPoints)
+            {
+                auto compiledEntryPointName = std::string(entryPoint->getLayout()->getEntryPointByIndex(0)->getNameOverride());
+                if (entryPointNames.find(compiledEntryPointName) == entryPointNames.end())
+                {
+                    entryPointNames.insert(compiledEntryPointName);
+                    deduplicatedEntryPoints.push_back(entryPoint);
+                }
+            }
+            programDesc.entryPointCount = (uint32_t)deduplicatedEntryPoints.size();
+            programDesc.slangEntryPoints = (slang::IComponentType**)deduplicatedEntryPoints.data();
+        }
+        else
+        {
+            programDesc.entryPointCount = (uint32_t)pTypeConformanceSpecializedEntryPoints.size();
+            programDesc.slangEntryPoints = (slang::IComponentType**)pTypeConformanceSpecializedEntryPoints.data();
+        }
+
+        Slang::ComPtr<ISlangBlob> diagnostics;
+        if (SLANG_FAILED(gpDevice->getApiHandle()->createProgram(programDesc, pProgram->mApiHandle.writeRef(), diagnostics.writeRef())))
+        {
+            pProgram = nullptr;
+        }
+        if (diagnostics)
+        {
+            log = (const char*)diagnostics->getBufferPointer();
+        }
+#endif
         return pProgram;
     }
 
@@ -131,7 +190,7 @@ namespace Falcor
         : mpProgram(pProgram->shared_from_this())
         , mpSlangGlobalScope(pSlangGlobalScope)
     {
-        assert(pProgram);
+        FALCOR_ASSERT(pProgram);
     }
 
     void ProgramVersion::init(
@@ -140,8 +199,8 @@ namespace Falcor
         const std::string&                                  name,
         std::vector<ComPtr<slang::IComponentType>> const&   pSlangEntryPoints)
     {
-        assert(pReflector);
-        mDefines = defineList,
+        FALCOR_ASSERT(pReflector);
+        mDefines = defineList;
         mpReflector = pReflector;
         mName = name;
         mpSlangEntryPoints = pSlangEntryPoints;
@@ -164,7 +223,10 @@ namespace Falcor
         std::string specializationKey;
 
         ParameterBlock::SpecializationArgs specializationArgs;
-        pVars->collectSpecializationArgs(specializationArgs);
+        if (pVars)
+        {
+            pVars->collectSpecializationArgs(specializationArgs);
+        }
 
         bool first = true;
         for( auto specializationArg : specializationArgs )
@@ -203,7 +265,7 @@ namespace Falcor
                 // Failure
 
                 std::string error = "Failed to link program:\n" + getName() + "\n\n" + log;
-                logError(error, Logger::MsgBox::RetryAbort);
+                reportErrorAndAllowRetry(error);
 
                 // Continue loop to keep trying...
             }

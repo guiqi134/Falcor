@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,8 +28,10 @@
 #include "SkyBox.h"
 #include "glm/gtx/transform.hpp"
 
+const RenderPass::Info SkyBox::kInfo { "SkyBox", "Render an environment map. The map can be provided by the user or taken from a scene." };
+
 // Don't remove this. it's required for hot-reload to function properly
-extern "C" __declspec(dllexport) const char* getProjDir()
+extern "C" FALCOR_API_EXPORT const char* getProjDir()
 {
     return PROJECT_DIR;
 }
@@ -41,12 +43,11 @@ static void regSkyBox(pybind11::module& m)
     pass.def_property("filter", &SkyBox::getFilter, &SkyBox::setFilter);
 }
 
-extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
+extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 {
-    lib.registerClass("SkyBox", "Render an environment map", SkyBox::create);
+    lib.registerPass(SkyBox::kInfo, SkyBox::create);
     ScriptBindings::registerBinding(regSkyBox);
 }
-const char* SkyBox::kDesc = "Render an environment-map. The map can be provided by the user or taken from a scene";
 
 namespace
 {
@@ -66,11 +67,11 @@ namespace
 }
 
 SkyBox::SkyBox()
+    : RenderPass(kInfo)
 {
     mpCubeScene = Scene::create("cube.obj");
-    if (mpCubeScene == nullptr) throw std::runtime_error("SkyBox::SkyBox - Failed to load cube model");
 
-    mpProgram = GraphicsProgram::createFromFile("RenderPasses/SkyBox/SkyBox.slang", "vs", "ps");
+    mpProgram = GraphicsProgram::createFromFile("RenderPasses/SkyBox/SkyBox.3d.slang", "vsMain", "psMain");
     mpProgram->addDefines(mpCubeScene->getSceneDefines());
     mpVars = GraphicsVars::create(mpProgram->getReflector());
     mpFbo = Fbo::create();
@@ -100,17 +101,17 @@ SkyBox::SharedPtr SkyBox::create(RenderContext* pRenderContext, const Dictionary
     SharedPtr pSkyBox = SharedPtr(new SkyBox());
     for (const auto& [key, value] : dict)
     {
-        if (key == kTexName) pSkyBox->mTexName = value.operator std::string();
+        if (key == kTexName) pSkyBox->mTexPath = value.operator std::filesystem::path();
         else if (key == kLoadAsSrgb) pSkyBox->mLoadSrgb = value;
         else if (key == kFilter) pSkyBox->setFilter(value);
-        else logWarning("Unknown field '" + key + "' in a SkyBox dictionary");
+        else logWarning("Unknown field '{}' in a SkyBox dictionary.", key);
     }
 
     std::shared_ptr<Texture> pTexture;
-    if (pSkyBox->mTexName.size() != 0)
+    if (!pSkyBox->mTexPath.empty())
     {
-        pTexture = Texture::createFromFile(pSkyBox->mTexName, false, pSkyBox->mLoadSrgb);
-        if (pTexture == nullptr) throw std::runtime_error("SkyBox::create - Error creating texture from file");
+        pTexture = Texture::createFromFile(pSkyBox->mTexPath, false, pSkyBox->mLoadSrgb);
+        if (pTexture == nullptr) throw RuntimeError("SkyBox: Failed to load skybox texture '{}'", pSkyBox->mTexPath);
         pSkyBox->setTexture(pTexture);
     }
     return pSkyBox;
@@ -119,7 +120,7 @@ SkyBox::SharedPtr SkyBox::create(RenderContext* pRenderContext, const Dictionary
 Dictionary SkyBox::getScriptingDictionary()
 {
     Dictionary dict;
-    dict[kTexName] = mTexName;
+    dict[kTexName] = mTexPath;
     dict[kLoadAsSrgb] = mLoadSrgb;
     dict[kFilter] = mFilter;
     return dict;
@@ -179,11 +180,11 @@ void SkyBox::renderUI(Gui::Widgets& widget)
 
 void SkyBox::loadImage()
 {
-    std::string filename;
+    std::filesystem::path path;
     FileDialogFilterVec filters = { {"bmp"}, {"jpg"}, {"dds"}, {"png"}, {"tiff"}, {"tif"}, {"tga"} };
-    if (openFileDialog(filters, filename))
+    if (openFileDialog(filters, path))
     {
-        mpTexture = Texture::createFromFile(filename, false, mLoadSrgb);
+        mpTexture = Texture::createFromFile(path, false, mLoadSrgb);
         setTexture(mpTexture);
     }
 }
@@ -193,7 +194,7 @@ void SkyBox::setTexture(const Texture::SharedPtr& pTexture)
     mpTexture = pTexture;
     if (mpTexture)
     {
-        assert(mpTexture->getType() == Texture::Type::TextureCube || mpTexture->getType() == Texture::Type::Texture2D);
+        FALCOR_ASSERT(mpTexture->getType() == Texture::Type::TextureCube || mpTexture->getType() == Texture::Type::Texture2D);
         mpProgram->addDefine("_USE_SPHERICAL_MAP", mpTexture->getType() == Texture::Type::Texture2D ? "1" : "0");
     }
     mpVars["gTexture"] = mpTexture;

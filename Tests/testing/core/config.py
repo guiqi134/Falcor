@@ -8,7 +8,7 @@ import os
 DEFAULT_ENVIRONMENT="environment/default.json"
 
 # Default image comparison tolerance.
-DEFAULT_TOLERANCE = 1e-12
+DEFAULT_TOLERANCE = 0.0
 
 # Default image test timeout.
 DEFAULT_TIMEOUT = 600
@@ -31,10 +31,10 @@ if os.name == 'nt':
         'DebugD3D12': {
             'build_dir': 'Bin/x64/Debug'
         },
-        'ReleaseVK': {
+        'ReleaseGFX': {
             'build_dir': 'Bin/x64/Release'
         },
-        'DebugVK': {
+        'DebugGFX': {
             'build_dir': 'Bin/x64/Debug'
         }
     }

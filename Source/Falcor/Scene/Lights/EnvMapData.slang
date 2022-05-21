@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,8 +36,9 @@ struct EnvMapData
 {
     float3x4    transform;              ///< Local to world transform.
     float3x4    invTransform;           ///< World to local transform.
-    float       intensity = 1.f;        ///< Radiance scale
+
     float3      tint = {1.f, 1.f, 1.f}; ///< Color tint
+    float       intensity = 1.f;        ///< Radiance scale
 };
 
 END_NAMESPACE_FALCOR

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -36,13 +36,14 @@ namespace Mogwai
     {
         void shortcuts()
         {
-            std::string s;
-            s += " 'F1'   - Show the help message\n";
-            s += " 'F9'   - Show/Hide the time\n";
-            s += " 'F10'  - Show/Hide the FPS\n";
-            s += " 'F11'  - Toggle Main Menu Auto-Hide\n";
-            s += "\n" + gpFramework->getKeyboardShortcutsStr();
-            msgBox(s);
+            constexpr char help[] =
+                "F1 - Show the help message\n"
+                "F9 - Show/hide the time\n"
+                "F6 - Show/hide the graph UI\n"
+                "F10 - Show/hide the FPS\n"
+                "F11 - Enable/disable main menu auto-hiding\n"
+                "\n";
+            msgBox(help + gpFramework->getKeyboardShortcutsStr());
         }
 
         void about()
@@ -94,8 +95,8 @@ namespace Mogwai
             };
 
             uint2 currentRes = gpFramework->getWindow()->getClientAreaSize();
-            static const Gui::DropdownList dropdownList = initDropDown(resolutions, arraysize(resolutions));
-            uint32_t currentVal = initDropDownVal(resolutions, arraysize(resolutions), currentRes);
+            static const Gui::DropdownList dropdownList = initDropDown(resolutions, (uint32_t)arraysize(resolutions));
+            uint32_t currentVal = initDropDownVal(resolutions, (uint32_t)arraysize(resolutions), currentRes);
             w.text("Window Size");
             w.tooltip("The Window Size refers to the renderable area size (Swap-Chain dimensions)");
 
@@ -135,13 +136,13 @@ namespace Mogwai
         }
     }
 
-    void MogwaiSettings::windowSettings(Gui* pGui)
+    void MogwaiSettings::renderWindowSettings(Gui* pGui)
     {
         Gui::Window w(pGui, "Window", mShowWinSize, { 0, 0 }, { 350, 300 }, Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::CloseButton);
         winSizeUI(w);
     }
 
-    void MogwaiSettings::timeSettings(Gui* pGui)
+    void MogwaiSettings::renderTimeSettings(Gui* pGui)
     {
         Gui::Window w(pGui, "Time", mShowTime, { 0, 0 }, { 350, 25 }, Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::CloseButton);
 
@@ -152,7 +153,7 @@ namespace Mogwai
         double exitTime = clock.getExitTime();
         uint64_t exitFrame = clock.getExitFrame();
 
-        if (exitTime || exitTime)
+        if (exitTime || exitFrame)
         {
             std::stringstream s;
             s << "Exiting in ";
@@ -162,7 +163,7 @@ namespace Mogwai
         }
     }
 
-    void MogwaiSettings::graphs(Gui* pGui)
+    void MogwaiSettings::renderGraphs(Gui* pGui)
     {
         if (!mShowGraphUI || mpRenderer->mGraphs.empty()) return;
 
@@ -190,14 +191,46 @@ namespace Mogwai
 
         // Active graph output
         mpRenderer->graphOutputsGui(w); // MOGWAI shouldn't be here
+        w.separator();
+
+        // Framework UI
+        if (auto g = w.group("Framework Stats"))
+        {
+            g.text("Program compilation:\n");
+
+            const auto& s = Program::getGlobalCompilationStats();
+            std::ostringstream oss;
+            oss << "Program version count: " << s.programVersionCount << std::endl
+                << "Program kernels count: " << s.programKernelsCount << std::endl
+                << "Program version time (total): " << s.programVersionTotalTime << " s" << std::endl
+                << "Program kernels time (total): " << s.programKernelsTotalTime << " s" << std::endl
+                << "Program version time (max): " << s.programVersionMaxTime << " s" << std::endl
+                << "Program kernels time (max): " << s.programKernelsMaxTime << " s" << std::endl;
+            g.text(oss.str());
+
+            if (g.button("Reset")) Program::resetGlobalCompilationStats();
+        }
+
+        // Scene UI
+        if (mpRenderer->mpScene)
+        {
+            if (auto group = w.group("Scene Settings"))
+            {
+                mpRenderer->mpScene->renderUI(group);
+            }
+        }
+        else
+        {
+            w.text("No scene loaded");
+        }
+        w.separator();
 
         // Graph UI
-        w.separator();
-        Gui::Group graphGroup(pGui, mpRenderer->mGraphs[mpRenderer->mActiveGraph].pGraph->getName() + "##Graph");
-        mpRenderer->mGraphs[mpRenderer->mActiveGraph].pGraph->renderUI(graphGroup);
+        auto pActiveGraph = mpRenderer->mGraphs[mpRenderer->mActiveGraph].pGraph;
+        pActiveGraph->renderUI(w);
     }
 
-    void MogwaiSettings::mainMenu(Gui* pGui)
+    void MogwaiSettings::renderMainMenu(Gui* pGui)
     {
         if (mAutoHideMenu && mMousePosition.y >= 20) return;
 
@@ -210,7 +243,7 @@ namespace Mogwai
             if (file.item("Load Scene", "Ctrl+Shift+O")) mpRenderer->loadSceneDialog();
             // if (file.item("Reset Scene")) mpRenderer->setScene(nullptr);
             file.separator();
-            if (file.item("Reload Render-Passes", "F5")) RenderPassLibrary::instance().reloadLibraries(gpFramework->getRenderContext());
+            if (file.item("Reload RenderGraph and Shaders", "F5")) RenderPassLibrary::instance().reloadLibraries(gpFramework->getRenderContext());
             file.separator();
 
             {
@@ -218,7 +251,7 @@ namespace Mogwai
                 auto recentScripts = file.menu("Recent Scripts");
                 for (auto path : appData.getRecentScripts())
                 {
-                    if (recentScripts.item(path))
+                    if (recentScripts.item(path.string()))
                     {
                         mpRenderer->loadScriptDeferred(path);
                         appData.addRecentScript(path);
@@ -231,7 +264,7 @@ namespace Mogwai
                 auto recentScenes = file.menu("Recent Scenes");
                 for (auto path : appData.getRecentScenes())
                 {
-                    if (recentScenes.item(path))
+                    if (recentScenes.item(path.string()))
                     {
                         mpRenderer->loadScene(path);
                         appData.addRecentScene(path);
@@ -270,11 +303,11 @@ namespace Mogwai
     void MogwaiSettings::renderUI(Gui* pGui__)
     {
         Gui* pGui = (Gui*)pGui__;
-        mainMenu(pGui);
-        graphs(pGui);
+        renderMainMenu(pGui);
+        renderGraphs(pGui);
         if (mShowFps) showFps(pGui);
-        if (mShowTime) timeSettings(pGui);
-        if (mShowWinSize) windowSettings(pGui);
+        if (mShowTime) renderTimeSettings(pGui);
+        if (mShowWinSize) renderWindowSettings(pGui);
         Console::instance().render(pGui__, mShowConsole);
     }
 
@@ -284,35 +317,30 @@ namespace Mogwai
         return false;
     }
 
-    bool noMods(InputModifiers m)
-    {
-        return !(m.isAltDown || m.isCtrlDown || m.isShiftDown);
-    }
-
     bool MogwaiSettings::keyboardEvent(const KeyboardEvent& e)
     {
         if (e.type == KeyboardEvent::Type::KeyPressed)
         {
-            if (e.mods.isAltDown) return false;
+            if (e.hasModifier(Input::Modifier::Alt)) return false;
 
             // Regular keystrokes
-            if (noMods(e.mods))
+            if (e.mods == Input::ModifierFlags::None)
             {
                 switch (e.key)
                 {
-                case KeyboardEvent::Key::F1:
+                case Input::Key::F1:
                     shortcuts();
                     break;
-                case KeyboardEvent::Key::F10:
+                case Input::Key::F10:
                     mShowFps = !mShowFps;
                     break;
-                case KeyboardEvent::Key::F11:
+                case Input::Key::F11:
                     mAutoHideMenu = !mAutoHideMenu;
                     break;
-                case KeyboardEvent::Key::F6:
+                case Input::Key::F6:
                     mShowGraphUI = !mShowGraphUI;
                     break;
-                case KeyboardEvent::Key::F9:
+                case Input::Key::F9:
                     mShowTime = !mShowTime;
                     break;
                 default:
@@ -320,11 +348,11 @@ namespace Mogwai
                 }
                 return true;
             }
-            else if (e.mods.isCtrlDown)
+            else if (e.hasModifier(Input::Modifier::Ctrl))
             {
-                if (e.key == KeyboardEvent::Key::O)
+                if (e.key == Input::Key::O)
                 {
-                    e.mods.isShiftDown ? mpRenderer->loadSceneDialog() : mpRenderer->loadScriptDialog();
+                    e.hasModifier(Input::Modifier::Shift) ? mpRenderer->loadSceneDialog() : mpRenderer->loadScriptDialog();
                     return true;
                 }
                 else return false;

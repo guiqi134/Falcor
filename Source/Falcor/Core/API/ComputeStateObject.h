@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,29 +27,40 @@
  **************************************************************************/
 #pragma once
 #include "Core/Program/ProgramVersion.h"
-#include "Core/API/RootSignature.h"
+
+#ifdef FALCOR_D3D12_AVAILABLE
+#include "Core/API/Shared/D3D12RootSignature.h"
+#endif
 
 namespace Falcor
 {
-    class dlldecl ComputeStateObject
+    class FALCOR_API ComputeStateObject
     {
     public:
         using SharedPtr = std::shared_ptr<ComputeStateObject>;
         using SharedConstPtr = std::shared_ptr<const ComputeStateObject>;
         using ApiHandle = ComputeStateHandle;
 
-        class dlldecl Desc
+        class FALCOR_API Desc
         {
         public:
-            Desc& setRootSignature(RootSignature::SharedPtr pSignature) { mpRootSignature = pSignature; return *this; }
             Desc& setProgramKernels(const ProgramKernels::SharedConstPtr& pProgram) { mpProgram = pProgram; return *this; }
+#if FALCOR_D3D12_AVAILABLE
+            /** Set a D3D12 root signature to use instead of the one that comes with the program kernel.
+                This function is supported on D3D12 only.
+                \param[in] pRootSignature An overriding D3D12RootSignature object to use in the compute state.
+            */
+            Desc& setD3D12RootSignatureOverride(const D3D12RootSignature::SharedConstPtr& pRootSignature) { mpD3D12RootSignatureOverride = pRootSignature; return *this; }
+#endif
             const ProgramKernels::SharedConstPtr getProgramKernels() const { return mpProgram; }
             ProgramVersion::SharedConstPtr getProgramVersion() const { return mpProgram->getProgramVersion(); }
             bool operator==(const Desc& other) const;
         private:
             friend class ComputeStateObject;
             ProgramKernels::SharedConstPtr mpProgram;
-            RootSignature::SharedPtr mpRootSignature;
+#if FALCOR_D3D12_AVAILABLE
+            D3D12RootSignature::SharedConstPtr mpD3D12RootSignatureOverride;
+#endif
         };
 
         ~ComputeStateObject();
@@ -61,6 +72,9 @@ namespace Falcor
         static SharedPtr create(const Desc& desc);
 
         const ApiHandle& getApiHandle() { return mApiHandle; }
+
+        const D3D12ComputeStateHandle& getD3D12Handle();
+
         const Desc& getDesc() const { return mDesc; }
 
     private:
@@ -69,5 +83,9 @@ namespace Falcor
 
         Desc mDesc;
         ApiHandle mApiHandle;
+
+#if defined(FALCOR_GFX) && FALCOR_D3D12_AVAILABLE
+        D3D12ComputeStateHandle mpD3D12Handle;
+#endif
     };
 }
