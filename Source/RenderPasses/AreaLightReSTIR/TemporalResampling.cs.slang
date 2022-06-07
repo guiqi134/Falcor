@@ -5,8 +5,8 @@ import Utils.Color.ColorHelpers;
 import Scene.RaytracingInline;
 import Scene.Scene;
 import Scene.Shading;
-import Experimental.Scene.Material.StandardMaterial;
-import Experimental.Scene.Material.MaterialHelpers;
+import Scene.Material.MaterialFactory;
+import Rendering.Materials.StandardMaterial;
 import Utils.Debug.PixelDebug;
 
 import ReSTIR;
@@ -44,7 +44,7 @@ static const int maxHistoryLength = 20; // ???
 static const float positionThreshold = 0.1f;
 static const float normalThreshold = 0.65f;
 
-float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLightView, ShadingData sd, inout uint lightIndex)
+float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLightView, const ShadingData sd, inout uint lightIndex, const IBSDF bsdf, SampleGenerator sg)
 {
     lightIndex = getReservoirLightIndex(sample);
     float3 samplePos = sample.posW;
@@ -60,17 +60,12 @@ float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLi
 #if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
     BlockerSearchOutputs bso = { projCoords, shadingPosLightView };
     visibility = shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
-#elif _TARGET_PDF == 2
-    RayDesc ray;
-    ray.Origin = posWOrigin;
-    ray.Direction = toLight / distance;
-    ray.TMin = 0.001f;
-    ray.TMax = distance - 0.001f;
-
+#elif _TARGET_PDF == 2 && RTX_GPU
+    Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
     visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
 #endif
 
-    return Le * gData.standardMaterial.eval(sd, dir) * visibility;
+    return Le * bsdf.eval(sd, dir, sg) * visibility;
 }
 
 [numthreads(16, 16, 1)]
@@ -83,10 +78,13 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
     printSetPixel(threadIndex);
 
-    SampleGenerator sg = SampleGenerator.create(threadIndex, gFrameIndex + 2 * 13);
-    Reservoir temporalResult = emptyReservoir();
     ShadingData sd;
-    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd);
+    let lod = ExplicitLodTextureSampler(0.f);
+    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
+
+    SampleGenerator sg = SampleGenerator(threadIndex, gFrameIndex + 2 * 13);
+    Reservoir temporalResult = emptyReservoir();
 
     if (valid)
     {
@@ -110,8 +108,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         state.projCoords = curSample.projCoords;
         state.shadingPosLightView = curSample.shadingPosLightView;
-
-        print(curSample.lightData);
 
         // Calculate previous frame pixel position using motion vector 
         float2 motion = gShadingDataLoader.motionVector[threadIndex];
@@ -141,7 +137,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 continue;
             }
 
-            if (!gShadingDataLoader.loadShadingDataPrevFrame(idx, gViewportDims, gScene.camera, neighborSd))
+            if (!gShadingDataLoader.loadShadingDataPrevFrame(idx, gViewportDims, gScene.camera, neighborSd, lod))
             {
                 continue;
             }
@@ -169,9 +165,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         Reservoir prevSample = loadReservoir(gParams, gReservoirs, prevPos, gHistoryBufferIndex);
 
         // Check current and previous shadow map depth difference
-        print(curSample.posW);
-        print(prevSample.posW);
-
         float centerMISWeight = 1.f;
 
         if (foundNeighbor)
@@ -185,7 +178,9 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             if (gUsePairwiseMIS)
             {
                 uint dummy = -1;
-                float pHat_centerSampleAtNeighbor = luminance(computeTargetPdf(curSample, prevSample.projCoords, prevSample.shadingPosLightView, neighborSd, dummy));
+                let neighborBsdf = gScene.materials.getBSDF(neighborSd, lod);
+                float pHat_centerSampleAtNeighbor = luminance(computeTargetPdf(curSample, prevSample.projCoords, prevSample.shadingPosLightView, neighborSd, dummy,
+                    neighborBsdf, sg));
                 float pHat_centerSampleAtCenter = curSample.targetPdf;
                 centerMISWeight = pHat_centerSampleAtCenter == 0.f ? 0.f : float(pHat_centerSampleAtCenter) / (pHat_centerSampleAtCenter + pHat_centerSampleAtNeighbor * prevSample.M);
             }
@@ -193,7 +188,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             if (isValidReservoir(prevSample))
             {
                 // compute target pdf
-                targetPdfCurrent = luminance(computeTargetPdf(prevSample, curSample.projCoords, curSample.shadingPosLightView, sd, originalPrevLightID));
+                targetPdfCurrent = luminance(computeTargetPdf(prevSample, curSample.projCoords, curSample.shadingPosLightView, sd, originalPrevLightID, bsdf, sg));
                 if (gUsePairwiseMIS)
                 {
                     neighborMISWeight = prevSample.targetPdf * prevSample.M / (targetPdfCurrent + prevSample.targetPdf * prevSample.M);
@@ -232,12 +227,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
             // Visibility test: trace shadow ray / shadow map
             float targetPdfNeighbor = 0.0f;
-#if _SHADOW_TYPE == 0
-            RayDesc ray;
-            ray.Origin = neighborPosW;
-            ray.Direction = toLight / distance;
-            ray.TMin = 0.001f;
-            ray.TMax = distance - 0.001f;
+#if _SHADOW_TYPE == 0 && RTX_GPU
+            Ray ray = Ray(neighborPosW, toLight / distance, 0.001f, distance - 0.001f);
             
             if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
             {
@@ -246,7 +237,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 #elif _SHADOW_TYPE == 1
             BlockerSearchOutputs bso = { prevSample.projCoords, prevSample.shadingPosLightView };
             float visibility = prevSample.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
-            print("visibility = ", visibility);
             targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir) * visibility);
 #endif
             if (targetPdfNeighbor > 0.0f)
@@ -254,14 +244,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 count += prevSample.M;
             }
 
-            print(selectedPreviousSample);
-            print(p_y);
-            print(targetPdfNeighbor);
-            p_y = selectedPreviousSample ? targetPdfNeighbor : p_y; // seems no need (targetPdfNeighbor = p_y)
             p_sum += targetPdfNeighbor * prevSample.M;
-
-            print(p_y / p_sum);
-            print(1.f / count);
 
             finalizeResampling(state, p_y, p_sum);
         }

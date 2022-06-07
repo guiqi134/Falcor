@@ -7,10 +7,11 @@ import Scene.RaytracingInline;
 import Scene.HitInfo;
 import Scene.Scene;
 import Scene.Shading;
-import Experimental.Scene.Material.StandardMaterial;
-import Experimental.Scene.Material.MaterialHelpers;
-import Experimental.Scene.Lights.LightHelpers;
-import Experimental.Scene.Lights.EmissiveLightSampler;
+import Scene.Material.MaterialFactory;
+import Rendering.Materials.StandardMaterial;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
+import Rendering.Lights.EmissivePowerSampler;
 import Utils.Debug.PixelDebug;
 
 __exported import PCSS;
@@ -66,20 +67,17 @@ static struct Data
 [numthreads(16, 16, 1)]
 void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID, uint indexInGroup : SV_GroupIndex)
 {
-    //if (any(threadIndex >= gViewportDims))
-    //{
-    //    return;
-    //}
-
     printSetPixel(threadIndex);
 
     float3 res = 0.0;
 
-    SampleGenerator sg = SampleGenerator.create(threadIndex, gFrameIndex);
-    SampleGenerator sgFixed = SampleGenerator.create(threadIndex, 0);
+    SampleGenerator sg = SampleGenerator(threadIndex, gFrameIndex);
+    SampleGenerator sgFixed = SampleGenerator(threadIndex, 0);
 
     ShadingData sd;
-    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd);
+    let lod = ExplicitLodTextureSampler(.0f);
+    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
 
     uint2 shadowMapSize;
     gShadowMap.GetDimensions(shadowMapSize.x, shadowMapSize.y);
@@ -101,14 +99,12 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             float3 L = normalize(gLightParams.lightPos - posWOrigin);
             float NdotL = dot(sd.N, L);
             bias = _DEPTH_BIAS * saturate(1.0 - NdotL) + _DEPTH_BIAS;
-            print(bias);
         }
 
 #if !_NO_BLOCKER_SEARCH
         // Origin blocker search
         if (!gUseNewBlockerSearch || gShadowType != (uint)ShadowType::NewPCSS)
         {
-            print(111);
             float angle = sampleNext1D(sg) * M_2PI;
             float2 rotation = float2(cos(angle), sin(angle)); // This can turn into a LUT
             blockerSearch(bso, bias, sd.posW, rotation, gPointSampler, gShadowMap, gBlockerSearchSamples, gLightParams);
@@ -116,7 +112,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         // Ours blocker search
         else
         {
-            print(222);
             float4 lightSpacePosH = mul(float4(sd.posW, 1.0f), gLightParams.lightSpaceMat); // clipping space
             float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
             lightSpacePos.y *= -1; // DirectX flips the Y axis in viewport scale matrix
@@ -139,8 +134,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 int2 prevPos = int2(round(reprojectedSamplePosition));
                 float2 prevBlockerDepth = gPrevBlockerDepths[prevPos];
 
-                print(prevBlockerDepth);
-
                 // Map samplePos to shadow map.
                 // Light front facing direction is -z, so depth is negative
                 float3 randoms = sampleNext3D(sgFixed);
@@ -152,12 +145,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 float projectionPlane = gLightParams.lightNearPlane + sampleNext1D(sg) * (zReceiver - gLightParams.lightNearPlane);
                 float3 queryPosView = shadingPosLightView + lightDirView * (1.f - projectionPlane / zReceiver);
                 float2 samplePosProj = 0.5 * float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy / queryPosView.z + 0.5;
-
-                print(shadingPosLightView);
-                print(lightDirView);
-                print(queryPosView);
-                print(float2(-gLightProjData.x, gLightProjData.y) * queryPosView.xy);
-
 
                 //float2 selectedSample = blockSearchDiskSamples[i] * 0.5f;
                 float2 selectedSample = sampleNext1D(sg) - 0.5f;
@@ -176,7 +163,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     blockerDepth = (blockerDepthSum + linearDepth) / sampleCount;
                 }
 
-                print(blockerDepth);
                 gCurrBlockerDepths[threadIndex] = float2(blockerDepth, sampleCount);
             }
             else
@@ -202,8 +188,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
                     float shadowMapDepth = gShadowMap.SampleLevel(gPointSampler, samplePosProj.xy, 0).r;
                     float3 samplePosView = mul(float4(samplePosW, 1.0f), gLightParams.lightView).xyz;
-                    print(samplePosProj);
-                    print(shadowMapDepth);
                     if (shadowMapDepth < projCoords.z)
                     {
                         float linearDepth = abs(LinearizeDepth(shadowMapDepth, gLightParams.lightNearPlane, gLightParams.lightFarPlane));
@@ -218,8 +202,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             bso.shadingPosLightView = float4(shadingPosLightView, (blockerDepth > 0 ? true : false));
         }
 #endif
-        print(bso.projCoords);
-        //print(bso.shadingPosLightView);
 
 #if !_BRUTE_FORCE
         // Reservoir Shading
@@ -239,23 +221,20 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 float finalVisbility = 1.0f;
                 if (gShadowType == (uint)ShadowType::ShadowRay)
                 {
-                    RayDesc ray;
-                    ray.Origin = posWOrigin;
-                    ray.Direction = toLight / distance;
-                    ray.TMin = 0.001f;
-                    ray.TMax = distance - 0.001f;
-
+#if RTX_GPU
+                    Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
                     if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
                     {
-                        res += Le * gData.standardMaterial.eval(sd, ray.Direction) * getReservoirInvPdf(r); // f * r.W
+                        res += Le * bsdf.eval(sd, ray.dir, sg) * getReservoirInvPdf(r); // f * r.W
                         finalVisbility = 1.0f;
-                    } 
+                    }
+#endif
                 }
                 else if (gShadowType == (uint)ShadowType::NewPCSSReSTIR)
                 {
                     float3 lightDirView = mul(samplePosW - posWOrigin, float3x3(gLightParams.lightView));
                     finalVisbility = bso.shadingPosLightView.w ? shadowMapNewPCSS(lightDirView, bso, gSamplerCmp, gShadowMap, gLightParams, gLightProjData) : 1.0f;
-                    res += Le * gData.standardMaterial.eval(sd, toLight / distance) * finalVisbility * getReservoirInvPdf(r);
+                    res += Le * bsdf.eval(sd, toLight / distance, sg) * finalVisbility * getReservoirInvPdf(r);
                 }
 
 //#if _STORE_FINAL_VISIBILITY
@@ -291,7 +270,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 TriangleLightSample tls;
                 if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
                 {
-                    float3 radiance = gData.standardMaterial.eval(sd, tls.dir) * tls.Le / tls.pdf;
+                    float3 radiance = bsdf.eval(sd, tls.dir, sg) * tls.Le / tls.pdf;
                     unshadowedContrib += radiance;
                 }
             }
@@ -373,18 +352,15 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                     filterSize /= gLightParams.lightFrustumSize;
 
                     filterSize = min(filterSize, kMaxFilterWidth);
-                    print(filterSize);
 
                     // Get moments from SAT
                     float2 coordsUL = projCoords.xy - 0.5f * filterSize;
                     float4 filterBound = coordsUL.xyxy + float4(0.0f, 0.0f, filterSize.xy);
                     float4 moments = sampleSAT(filterBound, shadowMapSize, depthNoBias, gSAT, gLinearSampler);
-                    print(moments);
 
                     // If shading point depth is very close to shadow map value, degenerate to PCF
                     float shadowMapDepth = gShadowMap.SampleLevel(gLinearSampler, projCoords.xy, 0).x;
                     float difference = projCoords.z - shadowMapDepth;
-                    print(difference);
                     bool checkFilterSize = all(filterSize <= _FILTER_SIZE_THRESHOLD);
                     if (difference <= _DEPTH_DIFFERENCE && checkFilterSize)
                     {
@@ -416,8 +392,6 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                             visibility = LBR(visibility);
                         }
                     }
-
-                    //print(visibility);
                 }
                 res = unshadowedContrib * visibility;
                 break;
@@ -442,24 +416,21 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             //        res += gData.standardMaterial.eval(sd, lightSample.dir) * lightSample.Li;
             //    }
             //}
-
+#if RTX_GPU
             for (uint i = 0; i < _SHADOW_RAYS; i++)
             {
                 TriangleLightSample tls;
                 if (gEmissiveLightSampler.sampleLight(posWOrigin, sd.N, true, sg, tls) && dot(sd.N, tls.dir) >= kMinCosTheta)
                 {
-                    RayDesc ray;
-                    ray.Origin = posWOrigin;
-                    ray.Direction = tls.dir;
-                    ray.TMin = 0.001f;
-                    ray.TMax = tls.distance - 0.001f;
+                    Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
                     if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
                     {
-                        res += tls.Le * gData.standardMaterial.eval(sd, tls.dir) / tls.pdf;
+                        res += tls.Le * bsdf.eval(sd, tls.dir, sg) / tls.pdf;
                     }
                 }
             }
             res /= _SHADOW_RAYS;
+#endif
         }
 #endif
     }
@@ -472,7 +443,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
     // Check for NaN and Inf
     if (any(isnan(res) || isinf(res))) res = 0.f;
 
-    res += sd.emissive;
+    res += bsdf.getProperties(sd).emission;
 
     gShadingOutput[threadIndex] = float4(res, 1.0);
 }

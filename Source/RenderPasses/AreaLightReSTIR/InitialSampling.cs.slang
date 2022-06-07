@@ -5,10 +5,10 @@ import Utils.Color.ColorHelpers;
 import Scene.RaytracingInline;
 import Scene.Scene;
 import Scene.Shading;
-import Experimental.Scene.Material.StandardMaterial;
-import Experimental.Scene.Material.MaterialHelpers;
-import Experimental.Scene.Lights.LightHelpers;
-import Experimental.Scene.Lights.EmissiveLightSampler;
+import Scene.Material.MaterialFactory;
+import Rendering.Materials.StandardMaterial;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
 import Utils.Debug.PixelDebug;
 
 import ShadingDataLoader;
@@ -56,14 +56,16 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
     printSetPixel(threadIndex);
 
-    SampleGenerator sg = SampleGenerator.create(threadIndex, gFrameIndex + 1 * 13);
-    SampleGenerator sgFixed = SampleGenerator.create(threadIndex, 0);
+    SampleGenerator sg = SampleGenerator(threadIndex, gFrameIndex + 1 * 13);
+    SampleGenerator sgFixed = SampleGenerator(threadIndex, 0);
 
     Reservoir r = emptyReservoir();
 
     // Prepare shading data from vBuffer
     ShadingData sd;
-    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd);
+    let lod = ExplicitLodTextureSampler(0.f);
+    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
 
     if (valid)
     {
@@ -95,7 +97,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             {
                 float lightSelectionPdf = 1.0f / lightCount;
                 float invPdf = 1.0f / (lightSample.pdf * lightSelectionPdf);
-                float targetPdf = luminance(lightSample.Li * lightSample.pdf * gData.standardMaterial.eval(sd, lightSample.dir));
+                float targetPdf = luminance(lightSample.Li * lightSample.pdf * bsdf.eval(sd, lightSample.dir, sg));
 
                 // Add visibility to target pdf using PCSS -> more overhead
                 float3 toLight = lightSample.posW - posWOrigin; // unnormalized
@@ -105,13 +107,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 // _TARGET_PDF == 0 -> unshadowed 
 #if _TARGET_PDF == 1 && _SHADOW_TYPE == 1 // New PCSS
                 visibility = bso.shadingPosLightView.w ? shadowMapNewPCSS(lightSample.posW, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
-#elif _TARGET_PDF == 2 // Shadow Ray
-                RayDesc ray;
-                ray.Origin = posWOrigin;
-                ray.Direction = toLight / distance;
-                ray.TMin = 0.001f;
-                ray.TMax = distance - 0.001f;
-
+#elif _TARGET_PDF == 2 && RTX_GPU // Shadow Ray
+                Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
                 visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
 #endif
                 targetPdf *= visibility;
@@ -144,13 +141,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
             // Trace shadow ray or New PCSS for selected light sample
             float visibility = 1.0f;
-#if _SHADOW_TYPE == 0
-            RayDesc ray;
-            ray.Origin = posWOrigin;
-            ray.Direction = toLight / distance;
-            ray.TMin = 0.001f;
-            ray.TMax = distance - 0.001f;
-
+#if _SHADOW_TYPE == 0 && RTX_GPU
+            Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
             visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
 #elif _SHADOW_TYPE == 1
             visibility = bso.shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;

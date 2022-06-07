@@ -94,7 +94,7 @@ float4 sampleSAT(float4 filterBound, float2 texSize, float depth, Texture2D texS
     // We need shift current filter bound one texel to the upper-left, then we can get the right texture coordinate
     //float4 realCoords = filterBound - texelSize.xyxy;
     float4 realCoords = filterBound;
-    print(realCoords);
+    print("", realCoords);
     realCoords = saturate(realCoords);
     //print(realCoords);
     filterBound = saturate(filterBound);
@@ -138,9 +138,9 @@ float evsmShadowContribSAT(float4 moments, float depth)
     float posV = ChebyshevUpperBound(moments.xy, expDepth.x);
     float negV = ChebyshevUpperBound(moments.zw, expDepth.y);
 
-    print(expDepth);
-    print(posV);
-    print(negV);
+    //print(expDepth);
+    //print(posV);
+    //print(negV);
 
     return min(posV, negV);
 }

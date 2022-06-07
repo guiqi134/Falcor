@@ -160,6 +160,9 @@ extension float : IPrintable
         _print(msg, T.getPrintableValueType(), N, u);
     }
 
+    // Print without message
+    void print(vector<T, N> v) { return print("", v); }
+
     /** Shader assert.
         \param[in] condition If false, the current pixel is recorded in the log.
     */
@@ -177,6 +180,7 @@ extension float : IPrintable
             }
         }
     }
+
 
 #else
 

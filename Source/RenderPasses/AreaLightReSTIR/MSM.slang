@@ -39,10 +39,6 @@ float computeHamburger4MSM(float4 moments, float fragDepth, float momentBias)
     float3 z;
     z[0] = fragDepth;
 
-    print(moments);
-    print(b);
-    print(z);
-
     // Compute a Cholesky factorization of the Hankel matrix B storing only non-
     // trivial entries or related products
     float L32D22 = mad(-b[0], b[1], b[2]);
@@ -76,17 +72,12 @@ float computeHamburger4MSM(float4 moments, float fragDepth, float momentBias)
     z[1] = -p * 0.5f - D;
     z[2] = -p * 0.5f + D;
 
-    print(D2);
-    print(z); 
-
     // Compute the shadow intensity by summing the appropriate weights
     float4 switchVal = (z[2] < z[0]) ? float4(z[1], z[0], 1.0f, 1.0f) : // Line 6: zf > z3 
         ((z[1] < z[0]) ? float4(z[0], z[1], 0.0f, 1.0f) : // Line 5: zf > z2 
             float4(0.0f, 0.0f, 0.0f, 0.0f)); // Line 4: zf <= z2 
     float quotient = (switchVal[0] * z[2] - b[0] * (switchVal[0] + z[2]) + b[1]) / ((z[2] - switchVal[1]) * (z[0] - z[1]));
     float shadowIntensity = switchVal[2] + switchVal[3] * quotient;
-
-    print(shadowIntensity);
 
     return 1.0f - saturate(shadowIntensity);
 }

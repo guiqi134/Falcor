@@ -616,7 +616,7 @@ namespace Mogwai
             // Update scene and camera.
             if (mpScene)
             {
-                PROFILE("update scene");
+                FALCOR_PROFILE("update scene");
                 mpScene->update(pRenderContext, gpFramework->getGlobalClock().getTime());
             }
 

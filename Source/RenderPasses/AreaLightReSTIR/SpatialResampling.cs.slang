@@ -5,8 +5,8 @@ import Utils.Color.ColorHelpers;
 import Scene.RaytracingInline;
 import Scene.Scene;
 import Scene.Shading;
-import Experimental.Scene.Material.StandardMaterial;
-import Experimental.Scene.Material.MaterialHelpers;
+import Scene.Material.MaterialFactory;
+import Rendering.Materials.StandardMaterial;
 import Utils.Debug.PixelDebug;
 
 import PCSS;
@@ -49,7 +49,7 @@ static const float positionThreshold = 1.0f;
 static const float normalThreshold = 0.5f;
 static const uint neighborOffsetMask = 8191;
 
-float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLightView, ShadingData sd, inout uint lightIndex)
+float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLightView, ShadingData sd, inout uint lightIndex, const IBSDF bsdf, SampleGenerator sg)
 {
     lightIndex = getReservoirLightIndex(sample);
     float3 samplePos = sample.posW;
@@ -65,17 +65,12 @@ float3 computeTargetPdf(Reservoir sample, float4 projCoords, float4 shadingPosLi
 #if _TARGET_PDF == 1 && _SHADOW_TYPE == 1
     BlockerSearchOutputs bso = { projCoords, shadingPosLightView };
     visibility = shadingPosLightView.w ? shadowMapNewPCSS(samplePos, bso, gSamplerCmp, gShadowMap, gLightParams) : 1.0f;
-#elif _TARGET_PDF == 2
-    RayDesc ray;
-    ray.Origin = posWOrigin;
-    ray.Direction = toLight / distance;
-    ray.TMin = 0.001f;
-    ray.TMax = distance - 0.001f;
-
+#elif _TARGET_PDF == 2 && RTX_GPU
+    Ray ray = Ray(posWOrigin, toLight / distance, 0.001f, distance - 0.001f);
     visibility = traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
 #endif
     
-    return Le * gData.standardMaterial.eval(sd, dir) * visibility;
+    return Le * bsdf.eval(sd, dir, sg) * visibility;
 }
 
 float pairwiseMisWeight(float q0, float q1, float N0, float N1)
@@ -93,10 +88,13 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
     printSetPixel(threadIndex);
 
-    SampleGenerator sg = SampleGenerator.create(threadIndex, gFrameIndex + 3 * 13);
-    Reservoir spatialResult = emptyReservoir();
     ShadingData sd;
-    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd);
+    let lod = ExplicitLodTextureSampler(0.0f);
+    bool valid = gShadingDataLoader.loadShadingData(threadIndex, gViewportDims, gScene.camera, sd, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
+
+    SampleGenerator sg = SampleGenerator(threadIndex, gFrameIndex + 3 * 13);
+    Reservoir spatialResult = emptyReservoir();
     
     if (valid)
     {
@@ -152,7 +150,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             }
 
             ShadingData neighborSd;
-            if (!gShadingDataLoader.loadShadingData(idx, gViewportDims, gScene.camera, neighborSd))
+            if (!gShadingDataLoader.loadShadingData(idx, gViewportDims, gScene.camera, neighborSd, lod))
             {
                 continue;
             }
@@ -168,7 +166,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             }
 
             // Ensure neighbor has similar material info
-            if (!areMaterialsSimilar(sd, neighborSd))
+            if (!areMaterialsSimilar(sd, neighborSd, lod))
             {
                 continue;
             }
@@ -183,10 +181,12 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             // Combine neighbor reservoirs to center
 
             validNeighbors++;
+            let neighborBsdf = gScene.materials.getBSDF(neighborSd, lod);
             if (gUsePairwiseMIS)
             {
                 uint dummy = -1;
-                float pHat_centerSampleAtNeighbor = luminance(computeTargetPdf(centerSample, neighborSample.projCoords, neighborSample.shadingPosLightView, neighborSd, dummy));
+                float pHat_centerSampleAtNeighbor = luminance(computeTargetPdf(centerSample, neighborSample.projCoords, neighborSample.shadingPosLightView, neighborSd, dummy,
+                    neighborBsdf, sg));
                 float pHat_centerSampleAtCenter = centerSample.targetPdf;
                 centerMISWeight += 1.f - pairwiseMisWeight(pHat_centerSampleAtNeighbor, pHat_centerSampleAtCenter, neighborSample.M * numSpatialSamples, centerSample.M);
             }
@@ -195,7 +195,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             {
                 // compute target pdf
                 uint lightIndex = -1;
-                float targetPdfCurrent = luminance(computeTargetPdf(neighborSample, centerSample.projCoords, centerSample.shadingPosLightView, sd, lightIndex));
+                float targetPdfCurrent = luminance(computeTargetPdf(neighborSample, centerSample.projCoords, centerSample.shadingPosLightView, sd, lightIndex, bsdf, sg));
 
                 float neighborMISWeight = 1.f;
 
@@ -203,7 +203,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 {
                     neighborMISWeight = pairwiseMisWeight(neighborSample.targetPdf, targetPdfCurrent, neighborSample.M * numSpatialSamples, centerSample.M);
                 }
-                print(neighborMISWeight);
+
                 if (combineReservoirs(state, neighborSample, sampleNext1D(sg), targetPdfCurrent, neighborMISWeight, gUsePairwiseMIS))
                 {
                     selected = i;
@@ -218,7 +218,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
         if (gUsePairwiseMIS)
         {
-            print(centerMISWeight);
+            //print(centerMISWeight);
             if (isValidReservoir(centerSample))
                 combineReservoirs(state, centerSample, sampleNext1D(sg), centerSample.targetPdf, centerMISWeight, gUsePairwiseMIS);
             else
@@ -242,7 +242,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
                 int2 idx = threadIndex + int2(float2(gNeighborOffsetBuffer[sampleIdx].xy) * samplingRadius);
             
                 ShadingData neighborSd;
-                gShadingDataLoader.loadShadingData(idx, gViewportDims, gScene.camera, neighborSd);
+                gShadingDataLoader.loadShadingData(idx, gViewportDims, gScene.camera, neighborSd, lod);
                 float3 neighborPosW = neighborSd.computeNewRayOrigin();
 
                 // Target sample is fixed here
@@ -259,13 +259,8 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
 
                 // Visibility test: trace shadow ray / shadow map
                 float targetPdfNeighbor = 0.0f;
-#if _SHADOW_TYPE == 0
-                RayDesc ray;
-                ray.Origin = neighborPosW;
-                ray.Direction = toLight / distance;
-                ray.TMin = 0.001f;
-                ray.TMax = distance - 0.001f;
-                
+#if _SHADOW_TYPE == 0 && RTX_GPU
+                Ray ray = Ray(neighborPosW, toLight / distance, 0.001f, distance - 0.001f);              
                 if (traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff))
                 {
                     targetPdfNeighbor = luminance(Le * gData.standardMaterial.eval(neighborSd, dir));
@@ -284,9 +279,9 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
         }
         else
         {
-            print(centerMISWeight / validNeighbors);
-            print(1.f / state.M);
-            print(state.weightSum / (gUsePairwiseMIS ? validNeighbors : state.M));
+            print("", centerMISWeight / validNeighbors);
+            print("", 1.f / state.M);
+            print("", state.weightSum / (gUsePairwiseMIS ? validNeighbors : state.M));
 
             finalizeResampling(state, 1.f, gUsePairwiseMIS ? validNeighbors : state.M);
         }

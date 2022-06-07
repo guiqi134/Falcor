@@ -37,17 +37,24 @@ bool isReprjPositionValid(float3 a, float3 b, float positionThreshold = 0.1)
     return true;
 }
 
-bool areMaterialsSimilar(ShadingData a, ShadingData b)
+bool areMaterialsSimilar(ShadingData a, ShadingData b, const ITextureSampler lod)
 {
     const float roughnessThreshold = 0.5;
-    const float reflectivityThreshold = 0.5;
-    const float albedoThreshold = 0.5;
-    if (!compareRelativeDifference(a.linearRoughness, b.linearRoughness, roughnessThreshold))
-        return false;
-    if (!compareRelativeDifference(luminance(a.specular), luminance(b.specular), reflectivityThreshold))
-        return false;
+    const float specReflectanceThreshold = 0.5;
+    const float diffReflectanceThreshold = 0.5;
 
-    if (!compareRelativeDifference(luminance(a.diffuse), luminance(b.diffuse), albedoThreshold))
+    let bsdfProperties1 = gScene.materials.getBSDF(a, lod).getProperties(a);
+    let bsdfProperties2 = gScene.materials.getBSDF(b, lod).getProperties(b);
+
+    if (!compareRelativeDifference(bsdfProperties1.roughness, bsdfProperties2.roughness, roughnessThreshold))
+        return false;
+    if (!compareRelativeDifference(luminance(bsdfProperties1.specularReflectance),
+        luminance(bsdfProperties2.specularReflectance),
+        specReflectanceThreshold))
+        return false;
+    if (!compareRelativeDifference(luminance(bsdfProperties1.diffuseReflectionAlbedo),
+        luminance(bsdfProperties2.diffuseReflectionAlbedo),
+        diffReflectanceThreshold))
         return false;
     return true;
 }

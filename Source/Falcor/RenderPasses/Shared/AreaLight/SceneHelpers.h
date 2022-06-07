@@ -1,6 +1,6 @@
 #pragma once
 #include "Falcor.h"
-#include "FalcorExperimental.h"
+//#include "FalcorExperimental.h"
 
 namespace Falcor
 {
@@ -151,13 +151,11 @@ namespace Falcor
             // Get emissive light's mesh instance ID 
             const auto& pLightCollection = pScene->getLightCollection(pRenderContext);
             const auto& meshLights = pLightCollection->getMeshLights();
-            uint meshInstanceID = meshLights[0].meshInstanceID;
-
-            //logInfo("meshInstanceID = " + std::to_string(meshInstanceID));
+            uint instanceID = meshLights[0].instanceID;
 
             // Get all necessary data from Scene 
-            const auto& pMeshInstance = pScene->getMeshInstance(meshInstanceID);
-            const auto& meshBound = pScene->getMeshBounds(meshInstanceID); 
+            const auto& pMeshInstance = pScene->getGeometryInstance(instanceID);
+            const auto& meshBound = pScene->getMeshBounds(instanceID);
             const auto pAnimationController = pScene->getAnimationController();
             const auto& globalMatrices = pAnimationController->getGlobalMatrices();
 
@@ -193,7 +191,7 @@ namespace Falcor
 
             if (name == SceneName::OnePlaneScene)
             {
-                const auto& pBlockerMeshInstance = pScene->getMeshInstance(2);
+                const auto& pBlockerMeshInstance = pScene->getGeometryInstance(2);
                 const auto& blockerMeshBound = pScene->getMeshBounds(2);
                 float3 blockerCenter = meshBound.center();
                 const auto& blockerTransform = globalMatrices[pBlockerMeshInstance.globalMatrixID];
@@ -202,14 +200,6 @@ namespace Falcor
                 mLightNearPlane = mLightPos.y - blockerCenterW.y - 0.1f;
                 //mLightNearPlane = 0.1f;
             }
-
-            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[0]));
-            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[1]));
-            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[2]));
-            //logInfo("mObjectToWorld = " + to_string(mObjectToWorld[3]));
-
-            //logInfo("mLightSize = " + to_string(mLightSize));
-            //logInfo("lightCenter = " + to_string(lightCenter));
         }
         
     };

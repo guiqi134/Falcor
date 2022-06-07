@@ -6,8 +6,8 @@ import Utils.Debug.PixelDebug;
 import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
 import Scene.Scene;
-import Experimental.Scene.Lights.LightHelpers;
-import Experimental.Scene.Lights.EmissiveLightSampler;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
 
 __exported import PoissonDisk;
 
@@ -84,10 +84,6 @@ float shadowMapPCSS(BlockerSearchOutputs bso, float2 poissonOffset, SamplerCompa
     float2 filterRadiusUV = float2(penumbraSize * lightParams.lightNearPlane / zView);
     filterRadiusUV /= lightParams.lightFrustumSize;
 
-    print(lightParams.lightFrustumSize);
-    print("penumbraSize = ", penumbraSize);
-    print("filterRadiusUV = ", filterRadiusUV);
-
     // 3. PCF filtering
     float sum = 0.0f;
     for (int i = 0; i < _PCF_SAMPLES; i++)
@@ -145,8 +141,6 @@ void blockerSearch(inout BlockerSearchOutputs bso, float bias, float3 posW, floa
     // Blocker Search
     float2 searchSize = float2(_LIGHT_WORLD_SIZE * (zReceiver - lightParams.lightNearPlane) / zReceiver);
     searchSize /= lightParams.lightFrustumSize; // Measure the searchSize according to the frustum size and clamp search size into [0, 1]
-
-    print(searchSize);
 
     float blockerSum = 0;
     uint numBlockers = 0;
@@ -236,7 +230,6 @@ float adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, Te
     smTexCoord /= smTexCoord.w;
     smTexCoord.y *= -1; // DirectX flips the Y axis in viewport scale matrix
     smTexCoord = float4(0.5 * smTexCoord.xy, smTexCoord.z, 0.0f) + float4(0.5, 0.5, 0.0, 0.0);
-    print(smTexCoord);
 
     // Locate corresponding light space shadow map grid center
     uint2 index = floor(float2(smTexCoord.xy * shadowMapSize));
@@ -277,13 +270,8 @@ float adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, Te
     float4 lsPotentialoccluder = mul(float4(ls_hit_p, 1.0), lightParams.lightProj);
     lsPotentialoccluder = lsPotentialoccluder / lsPotentialoccluder.w;
 
-    print(lsPotentialoccluder);
-    print(SMDepth);
-
     // So we need to project this actual Depth
     float actualDepth = min(lsPotentialoccluder.z, smTexCoord.z);
-
-    print(adaptiveDepthBias);
     
     return abs(adaptiveDepthBias);
 }

@@ -47,7 +47,9 @@ struct PSOut
 PSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID)
 {
     printSetPixel(vsOut.posH.xy);
-    if (alphaTest(vsOut, triangleIndex)) discard;
+
+    let lod = ImplicitLodTextureSampler();
+    if (alphaTest(vsOut, triangleIndex, lod)) discard;
 
     PSOut psOut;
     float depth = saturate(vsOut.posH.z); // posH is screen space coordinate (already perform homogeneous divide)

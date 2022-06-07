@@ -1,8 +1,9 @@
 import Scene.Scene;
 import Scene.Shading;
 import Scene.HitInfo;
+import Scene.Material.ShadingUtils;
 import Utils.Math.MathHelpers;
-import Experimental.Scene.Material.MaterialHelpers;
+import Scene.Material.MaterialFactory;
 
 struct ShadingDataLoader
 {
@@ -28,7 +29,7 @@ struct ShadingDataLoader
         \param[out] hit HitInfo struct returned with geometry fetched from vbuffer if available. Only valid if true is returned.
         \return True if the pixel has valid data (not a background pixel). Note sd.V is always valid.
     */
-    bool loadShadingData(uint2 pixel, uint2 frameDim, const Camera camera, Texture2D<PackedHitInfo> VBufferTex, out ShadingData sd)
+    bool loadShadingData(uint2 pixel, uint2 frameDim, const Camera camera, Texture2D<PackedHitInfo> VBufferTex, out ShadingData sd, const ITextureSampler lod)
     {
         sd = {};
 
@@ -40,11 +41,10 @@ struct ShadingDataLoader
         if (hit.isValid() && hit.getType() == HitType::Triangle)
         {
             const TriangleHit triangleHit = hit.getTriangleHit();
-            // Evaluate Falcor's material parameters at the hit point.
-            // TODO: Implement texLOD to enable texture filtering in prepareShadingData().
             const VertexData v = gScene.getVertexData(triangleHit);
             const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-            sd = prepareShadingData(v, materialID, gScene.materials[materialID], gScene.materialResources[materialID], -rayDir, 0.f);
+
+            sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
             // Adjust shading normals if GBuffer pass has flag enabled.
             adjustShadingNormal(sd, v);
@@ -55,13 +55,13 @@ struct ShadingDataLoader
         return valid;
     }
 
-    bool loadShadingData(uint2 pixel, uint2 frameDim, const Camera camera, out ShadingData sd)
+    bool loadShadingData(uint2 pixel, uint2 frameDim, const Camera camera, out ShadingData sd, const ITextureSampler lod)
     {
-        return loadShadingData(pixel, frameDim, camera, VBuffer, sd);
+        return loadShadingData(pixel, frameDim, camera, VBuffer, sd, lod);
     }
 
-    bool loadShadingDataPrevFrame(uint2 pixel, uint2 frameDim, const Camera camera, out ShadingData sd)
+    bool loadShadingDataPrevFrame(uint2 pixel, uint2 frameDim, const Camera camera, out ShadingData sd, const ITextureSampler lod)
     {
-        return loadShadingData(pixel, frameDim, camera, VBufferPrev, sd);
+        return loadShadingData(pixel, frameDim, camera, VBufferPrev, sd, lod);
     }
 };

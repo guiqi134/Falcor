@@ -31,10 +31,21 @@
 #include "PoissonSamples.h"
 #include <RenderGraph\RenderPassHelpers.h>
 
+const RenderPass::Info AreaLightReSTIR::kInfo{ "AreaLightReSTIR", "AreaLight ReSTIR Pass" };
+
+// Don't remove this. it's required for hot-reload to function properly
+extern "C" __declspec(dllexport) const char* getProjDir()
+{
+    return PROJECT_DIR;
+}
+
+extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
+{
+    lib.registerPass(AreaLightReSTIR::kInfo, AreaLightReSTIR::create);
+}
+
 namespace
 {
-    const char kDesc[] = "ReSTIR Pass";
-
     const ChannelList kInputChannels =
     {
         { "vbuffer",    "",     "Visibility buffer in packed format",   false, HitInfo::kDefaultFormat }, // ResourceFormat::RG32Uint
@@ -56,31 +67,11 @@ namespace
     const bool kLightAnimation = false;
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" __declspec(dllexport) const char* getProjDir()
-{
-    return PROJECT_DIR;
-}
-
-extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerClass("AreaLightReSTIR", kDesc, AreaLightReSTIR::create);
-}
 
 AreaLightReSTIR::SharedPtr AreaLightReSTIR::create(RenderContext* pRenderContext, const Dictionary& dict)
 {
-    SharedPtr pPass = SharedPtr(new AreaLightReSTIR);
-    for (const auto& [key, value] : dict)
-    {
-        if (key == kEnableTemporalResampling) pPass->mEnableTemporalResampling = value;
-        else if (key == kEnableSpatialResampling) pPass->mEnableSpatialResampling = value;
-        else if (key == kStoreFinalVisibility) pPass->mStoreFinalVisibility = value;
-        else logWarning("Unknown field '" + key + "' in SVGFPass dictionary");
-    }
-    return pPass;
+    return SharedPtr(new AreaLightReSTIR(dict));
 }
-
-std::string AreaLightReSTIR::getDesc() { return kDesc; }
 
 Dictionary AreaLightReSTIR::getScriptingDictionary()
 {
@@ -148,27 +139,45 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         pCamera->setTarget(mInitialCameraTarget);*/
     }
 
-    mpEmissiveSampler->update(pRenderContext);
-
-
-    auto pCamera = mpScene->getCamera();
-    if (pCamera->isAnimated())
+    if (mpScene->useEmissiveLights())
     {
-        uint currentFrame = (uint)gpFramework->getGlobalClock().getFrame();
-        auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(0.1f), float3(0.0f, 1.0f, 0.0f));
+        if (!mpEmissiveSampler)
+        {
+            const auto& pLights = mpScene->getLightCollection(pRenderContext);
+            FALCOR_ASSERT(pLights && pLights->getActiveLightCount() > 0);
+            FALCOR_ASSERT(!mpEmissiveSampler);
 
-        float3 cameraPos = pCamera->getPosition();
-        float3 cameraForward = pCamera->getTarget() - cameraPos;
-        float4 newCameraPos = rotation * float4(cameraPos, 1.0f);
-        float4 newCameraForward = rotation * float4(cameraForward, 1.0f);
-        float4x4 transform = float4x4(
-            float4(1.0f, 0.0f, 0.0f, 0.0f),
-            float4(pCamera->getUpVector(), 0.0f),
-            -newCameraForward,
-            newCameraPos
-        );
-        pCamera->updateFromAnimation(transform);
+            mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+        }
     }
+
+    if (mpEmissiveSampler)
+    {
+        mpEmissiveSampler->update(pRenderContext);
+        mpInitialSamplingPass->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+        mpTemporalResamplingPass->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+        mpSpatialResamplingPass->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+        mpShadingPass->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+    }
+
+    //auto pCamera = mpScene->getCamera();
+    //if (pCamera->isAnimated())
+    //{
+    //    uint currentFrame = (uint)gpFramework->getGlobalClock().getFrame();
+    //    auto rotation = glm::rotate(glm::mat4(1.0f), glm::radians(0.1f), float3(0.0f, 1.0f, 0.0f));
+
+    //    float3 cameraPos = pCamera->getPosition();
+    //    float3 cameraForward = pCamera->getTarget() - cameraPos;
+    //    float4 newCameraPos = rotation * float4(cameraPos, 1.0f);
+    //    float4 newCameraForward = rotation * float4(cameraForward, 1.0f);
+    //    float4x4 transform = float4x4(
+    //        float4(1.0f, 0.0f, 0.0f, 0.0f),
+    //        float4(pCamera->getUpVector(), 0.0f),
+    //        -newCameraForward,
+    //        newCameraPos
+    //    );
+    //    pCamera->updateFromAnimation(transform);
+    //}
 
 
     if (mpVBufferPrev == nullptr)
@@ -219,7 +228,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     // Shadow pass
     if (mShadowType != ShadowType::ShadowRay)
     {
-        PROFILE("Shadow Map");
+        FALCOR_PROFILE("Shadow Map");
         const auto& pDepthTex = renderData[kDepthName]->asTexture();
 
         //RasterizerState::Desc rasterizeDesc;
@@ -279,7 +288,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     // SAT passes
     if (mShadowType == ShadowType::VSM || mShadowType == ShadowType::EVSM || mShadowType == ShadowType::MSM)
     {
-        PROFILE("SAT Generation");
+        FALCOR_PROFILE("SAT Generation");
 
         const auto& pSAT = renderData["SAT"]->asTexture();
 
@@ -362,7 +371,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
     if (mShadowType == ShadowType::ShadowRay || mShadowType == ShadowType::NewPCSSReSTIR)
     {
         {
-            PROFILE("Initial Sampling");
+            FALCOR_PROFILE("Initial Sampling");
             auto cb = mpInitialSamplingPass["CB"]; // it is a ParameterBlockSharedPtr, we can use [] to get shader var
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
             cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
@@ -376,14 +385,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             mpInitialSamplingPass["gReservoirs"] = mpReservoirBuffer;
             ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
             lightParams.setShaderData(cb["gLightParams"]);
-            mpScene->setRaytracingShaderData(pRenderContext, mpInitialSamplingPass->getRootVar()); // for binding resources of inline ray tracing 
+            //mpScene->setRaytracingShaderData(pRenderContext, mpInitialSamplingPass->getRootVar()); // for binding resources of inline ray tracing 
             mpPixelDebug->prepareProgram(mpInitialSamplingPass->getProgram(), mpInitialSamplingPass->getRootVar());
             mpInitialSamplingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
         }
 
         if (mEnableTemporalResampling)
         {
-            PROFILE("Temporal Resampling");
+            FALCOR_PROFILE("Temporal Resampling");
             auto cb = mpTemporalResamplingPass["CB"];
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
             cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
@@ -400,14 +409,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             mpTemporalResamplingPass["gShadowMap"] = shadowMapTex;
             ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
             lightParams.setShaderData(cb["gLightParams"]);
-            mpScene->setRaytracingShaderData(pRenderContext, mpTemporalResamplingPass->getRootVar());
+            //mpScene->setRaytracingShaderData(pRenderContext, mpTemporalResamplingPass->getRootVar());
             mpPixelDebug->prepareProgram(mpTemporalResamplingPass->getProgram(), mpTemporalResamplingPass->getRootVar());
             mpTemporalResamplingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
         }
 
         if (mEnableSpatialResampling)
         {
-            PROFILE("Spatial Resampling");
+            FALCOR_PROFILE("Spatial Resampling");
             auto cb = mpSpatialResamplingPass["CB"];
             cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
             cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
@@ -424,14 +433,14 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
             mpSpatialResamplingPass["gShadowMap"] = shadowMapTex;
             ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
             lightParams.setShaderData(cb["gLightParams"]);
-            mpScene->setRaytracingShaderData(pRenderContext, mpSpatialResamplingPass->getRootVar());
+            //mpScene->setRaytracingShaderData(pRenderContext, mpSpatialResamplingPass->getRootVar());
             mpPixelDebug->prepareProgram(mpSpatialResamplingPass->getProgram(), mpSpatialResamplingPass->getRootVar());
             mpSpatialResamplingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
         }
     }
 
     {
-        PROFILE("Shading");
+        FALCOR_PROFILE("Shading");
         auto cb = mpShadingPass["CB"];
         cb["gViewportDims"] = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
         cb["gFrameIndex"] = mFixFrame ? 1 : (uint)gpFramework->getGlobalClock().getFrame();
@@ -460,7 +469,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         mpEmissiveSampler->setShaderData(cb["gEmissiveLightSampler"]);
         ShadingDataLoader::setShaderData(renderData, mpVBufferPrev, cb["gShadingDataLoader"]);
         lightParams.setShaderData(cb["gLightParams"]);
-        mpScene->setRaytracingShaderData(pRenderContext, mpShadingPass->getRootVar());
+        //mpScene->setRaytracingShaderData(pRenderContext, mpShadingPass->getRootVar());
         mpPixelDebug->prepareProgram(mpShadingPass->getProgram(), mpShadingPass->getRootVar());
         mpShadingPass->execute(pRenderContext, gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
 
@@ -590,7 +599,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
 
     mpNeighborOffsetBuffer = createNeighborOffsetTexture(8192);
 
-    mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+    //mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
 
     // Adjust scene dependent parameters
     if (mLightParams.name == SceneName::Bicycle)
@@ -612,7 +621,7 @@ void AreaLightReSTIR::setScene(RenderContext* pRenderContext, const Scene::Share
 
 bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
 {
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key1)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::ShadowRay;
@@ -626,42 +635,42 @@ bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
     //    return true;
     //}
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key3)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key3)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::NewPCSS;
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key4)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key4)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::PCSS;
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key5)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key5)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::VSM;
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key6)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key6)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::EVSM;
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key7)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key7)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::MSM;
         return true;
     }
 
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == KeyboardEvent::Key::Key8)
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key8)
     {
         mNeedUpdate = true;
         mShadowType = ShadowType::NewIdea;
@@ -671,8 +680,10 @@ bool AreaLightReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
     return false;
 }
 
-AreaLightReSTIR::AreaLightReSTIR()
+AreaLightReSTIR::AreaLightReSTIR(const Dictionary& dict) : RenderPass(kInfo)
 {
+    parseDictionary(dict);
+
     mpPixelDebug = PixelDebug::create();
     mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
 
@@ -709,6 +720,17 @@ AreaLightReSTIR::AreaLightReSTIR()
         ResourceFormat::RG32Float, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
 }
 
+void AreaLightReSTIR::parseDictionary(const Dictionary& dict)
+{
+    for (const auto& [key, value] : dict)
+    {
+        if (key == kEnableTemporalResampling) mEnableTemporalResampling = value;
+        else if (key == kEnableSpatialResampling) mEnableSpatialResampling = value;
+        else if (key == kStoreFinalVisibility) mStoreFinalVisibility = value;
+        else logWarning("Unknown field '" + key + "' in ReSTIR Pass dictionary");
+    }
+}
+
 void AreaLightReSTIR::AddDefines(ComputePass::SharedPtr pass, Shader::DefineList& defines)
 {
     pass->getProgram()->addDefines(defines);
@@ -727,6 +749,8 @@ void AreaLightReSTIR::CreatePass(ComputePass::SharedPtr& pass, const char* path,
     Program::Desc desc;
     desc.addShaderLibrary(path).csEntry("main").setShaderModel("6_5");
     pass = ComputePass::create(desc, defines, false);
+
+    pass->getProgram()->setTypeConformances(mpScene->getTypeConformances());
 }
 
 void AreaLightReSTIR::CreatePasses()
@@ -753,6 +777,8 @@ void AreaLightReSTIR::CreatePasses()
         mShadowMapPass.pProgram->addDefines(mpScene->getSceneDefines());
         mShadowMapPass.pProgram->addDefines(defines);
         mShadowMapPass.pVars = GraphicsVars::create(mShadowMapPass.pProgram->getReflector());
+
+        mShadowMapPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
     }
 
     // Create SAT passes
@@ -810,6 +836,7 @@ void AreaLightReSTIR::UpdateDefines()
     PCSSDefines.add("_TARGET_PDF", std::to_string(mActiveTargetPdf));
     PCSSDefines.add("_DEPTH_BIAS", std::to_string(mLightParams.mDepthBias));
     PCSSDefines.add("_SHADOW_TYPE", std::to_string((uint)mShadowType));
+    PCSSDefines.add("RTX_GPU", std::to_string(false));
 
     Shader::DefineList sharedDefines;
     sharedDefines.add("_LBR_THRESHOLD", std::to_string(mLBRThreshold));
@@ -917,7 +944,6 @@ void AreaLightReSTIR::UpdateDefines()
         defines.add("_FILTER_SIZE_THRESHOLD", to_string(mFilterSizeThreshold));
         defines.add("_CONSTANT_BIAS", std::to_string(mConstantEpsilon));
         defines.add(PCSSDefines);
-        if (mpEmissiveSampler) defines.add(mpEmissiveSampler->getDefines());
         AddDefines(mpShadingPass, defines);
     }
 }

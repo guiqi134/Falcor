@@ -51,9 +51,6 @@ void CSScan(uint2 DTid, uint2 Gid, uint2 GTid)
     Result[texCoordsPlueOne] = partialSums[2 * groupThreadIdx + 1];
     GroupMemoryBarrierWithGroupSync();
 
-    print(Result[texCoords]);
-    print(Result[texCoordsPlueOne]);
-
     // Write each block's last value (the sum of each block) to temp output
     if (groupThreadIdx == groupthreads - 1)
     {
