@@ -38,8 +38,8 @@ cbuffer PerFrameCB
     Camera gCamera;
 }
 
-SamplerState gNoiseSampler;
-SamplerState gTextureSampler;
+SamplerState gNoiseSampler; // point + wrap sampler 
+SamplerState gTextureSampler; // linear + clamp sampler
 
 Texture2D gDepthTex;
 Texture2D gNormalTex;
@@ -83,12 +83,15 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
     float occlusion = 0.0f;
     for (uint i = 0; i < gData.kernelSize; i++)
     {
+        // First we need to transfer the sampler position from current pixel's local tangent
+        // space all the way along to the screen space 
+
         // Orient sample
-        float3 kernelPos = mul(gData.sampleKernel[i].xyz, tbn);
+        float3 kernelPos = mul(gData.sampleKernel[i].xyz, tbn); 
 
         // Calculate sample world space pos
         float3 samplePosW = posW + (kernelPos * gData.radius);
-        float sampleDepth = length(samplePosW - gCamera.data.posW);
+        float sampleDist = length(samplePosW - gCamera.data.posW);
 
         // Get screen space pos of sample
         float4 samplePosProj = mul(float4(samplePosW, 1.0f), gCamera.data.viewProjMat);
@@ -100,10 +103,15 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
         samplePosProj.y = -samplePosProj.y;
 #endif
         float2 sampleUV = saturate(float2(samplePosProj.x, -samplePosProj.y) * 0.5f + 0.5f);
-        float sceneDepth = length(getPosition(sampleUV).xyz - gCamera.data.posW);
 
-        float rangeCheck = step(abs(sampleDepth - sceneDepth), gData.radius);
-        occlusion += step(sceneDepth, sampleDepth) * rangeCheck;
+        // Depth value for sample's projected position in screen
+        float sampleDepth = length(getPosition(sampleUV).xyz - gCamera.data.posW);
+
+        // We introduce a range check that makes sure a pixel contributes to the occlusion factor 
+        // if its depth values is within the sample's radius.
+        // float rangeCheck = step(abs(sampleDist - sampleDepth), gData.radius); // radius >= difference -> 1
+        float rangeCheck = abs(originDist - sampleDepth) < gData.radius ? 1.0 : 0.0;
+        occlusion += step(sampleDepth, sampleDist) * rangeCheck; // sampleDist >= sceneDepth -> occluded
     }
 
     float factor = 1 - (occlusion / float(gData.kernelSize));

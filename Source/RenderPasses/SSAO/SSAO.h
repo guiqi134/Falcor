@@ -54,6 +54,7 @@ public:
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override { mpScene = pScene; }
     virtual void renderUI(Gui::Widgets& widget) override;
+    virtual bool onMouseEvent(const MouseEvent& mouseEvent) { return mpPixelDebug->onMouseEvent(mouseEvent); }
 
     void setSampleRadius(float radius);
     void setKernelSize(uint32_t kernelSize);
@@ -67,6 +68,8 @@ private:
     Texture::SharedPtr generateAOMap(RenderContext* pRenderContext, const Camera* pCamera, const Texture::SharedPtr& pDepthTexture, const Texture::SharedPtr& pNormalTexture);
     void setNoiseTexture(uint32_t width, uint32_t height);
     void setKernel();
+
+    PixelDebug::SharedPtr mpPixelDebug;
 
     SSAOData mData;
     bool mDirty = false;

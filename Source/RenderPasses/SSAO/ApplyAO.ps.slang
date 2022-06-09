@@ -25,6 +25,8 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+import Utils.Debug.PixelDebug;
+
 SamplerState gSampler;
 
 Texture2D gColor;
@@ -38,5 +40,7 @@ float4 applyAmbientOcclusion(float4 color, Texture2D aoTex, SamplerState s, floa
 
 float4 main(float2 texC : TEXCOORD) : SV_TARGET0
 {
+    uint2 pixelPos = uint2(1920, 1080) * texC;
+    printSetPixel(pixelPos);
     return applyAmbientOcclusion(gColor.SampleLevel(gSampler, texC, 0), gAOMap, gSampler, texC);
 }

@@ -98,6 +98,8 @@ SSAO::SSAO()
     desc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     mComposeData.pApplySSAOPass["gSampler"] = Sampler::create(desc);
     mComposeData.pFbo = Fbo::create();
+
+    mpPixelDebug = PixelDebug::create();
 }
 
 SSAO::SharedPtr SSAO::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -163,6 +165,8 @@ void SSAO::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     if (!mpScene) return;
 
+    mpPixelDebug->beginFrame(pRenderContext, renderData.getDefaultTextureDims());
+
     // Run the AO pass
     auto pDepth = renderData[kDepth]->asTexture();
     auto pNormals = renderData[kNormals]->asTexture();
@@ -183,7 +187,10 @@ void SSAO::execute(RenderContext* pRenderContext, const RenderData& renderData)
     mComposeData.pApplySSAOPass["gColor"] = pColorIn;
     mComposeData.pApplySSAOPass["gAOMap"] = pAoMap;
     mComposeData.pFbo->attachColorTarget(pColorOut, 0);
+    mpPixelDebug->prepareProgram(mComposeData.pApplySSAOPass->getProgram(), mComposeData.pApplySSAOPass->getRootVar());
     mComposeData.pApplySSAOPass->execute(pRenderContext, mComposeData.pFbo);
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 Texture::SharedPtr SSAO::generateAOMap(RenderContext* pRenderContext, const Camera* pCamera, const Texture::SharedPtr& pDepthTexture, const Texture::SharedPtr& pNormalTexture)
@@ -231,6 +238,8 @@ void SSAO::renderUI(Gui::Widgets& widget)
             mpBlurGraph->getPass("GaussianBlur")->renderUI(blurGroup);
         }
     }
+
+    mpPixelDebug->renderUI(widget);
 }
 
 void SSAO::setSampleRadius(float radius)
