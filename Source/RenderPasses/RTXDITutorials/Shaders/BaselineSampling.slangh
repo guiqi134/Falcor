@@ -1,0 +1,168 @@
+/***************************************************************************
+ # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+#pragma once
+
+/* This header is not strictly needed for RTXDI integration.
+  
+   We use this for our RTXDI baselines (Monte Carlo integration and Talbot-stlye RIS),
+   to enable different types of light sampling, to compare some simpler more naive
+   sampling schemes might start with, even before thinking about going to RTXDI.
+  
+   This should be #included after "RtxdiBridge.hlsli" 
+
+   This shader defines routines for the following kinds of light sampling:
+*/
+
+// "Uniform" sampling (i.e., very naive):
+// For triangles, pick one of our emissive triangles uniformly randomly, then sample
+// that triange uniformly (i.e., pdf proportional to area).  For environment maps,
+// we uniformly sample the incoming sphere of directions.
+#define SAMPLE_UNIFORM              0
+
+// PDF textures:
+// Samples both triangles and the environment proportional to their power.  It uses
+// a PDF texture (RTXDI's sampling scheme).  See Ray Tracing Gems 1, Chapter 16.4.2.3
+// This PDF mipmap texture is built in the RTXDI_Build*Texture.cs.slang shaders, plus
+// calls to generateMips() in the C++ code in computePDFTextures().
+// 
+// This is (much) slower than the Alias Table method (RTG 2, Ch 21) proposed by the
+// original ReSTIR paper, but easily and cheaply adapts for dynamic lighting, and when
+// combined with precomputed tiles (see below) does not add significant runtime cost.
+#define SAMPLE_PDF_TEXTURE          1
+
+// Precomputed tiles:
+// Random sampling tends to add a lot of incoherent memory accesses.  Especially when
+// sampling large environment maps or lists of millions of lights, the cache hierarchy
+// simply cannot keep up.  However, if you "prerandomize" lookups for adjacent pixels
+// into cache coherent blocks (we call "tiles"), then you can reduce this cost significantly
+// if the number of tiles needed is small.  We found only a small number of tiles are
+// necessary. (See HPG 2021, "Rearchitecting Spatiotemporal Resampling for Production.")
+#define SAMPLE_PRECOMPUTED_TILES    2
+
+
+// A helper function; returns random float2 in [0..1) x [0..1)
+float2 GetRandomUV(inout RAB_RandomSamplerState rng)
+{
+    return float2(RAB_GetNextRandom(rng), RAB_GetNextRandom(rng));
+}
+
+// Return a triangle light index and 1/pdf of sampling that light (for SAMPLE_UNIFORM)
+uint SampleTrianglesUniformly(inout RAB_RandomSamplerState rng, RTXDI_ResamplingRuntimeParameters params, out float invSourcePdf)
+{
+    // PDF is 1 / number-of-lights
+    invSourcePdf = float(params.numLocalLights);
+
+    // Randomly pick one of the triangle lights
+    float rnd = RAB_GetNextRandom(rng);
+    return min(uint(floor(rnd * params.numLocalLights)), params.numLocalLights - 1) + params.firstLocalLight;
+}
+
+// Return a triangle light index and 1/pdf of sampling that light (for SAMPLE_PDF_TEXTURE)
+uint SampleTrianglesViaPDFTexture(inout RAB_RandomSamplerState rng, out float invSourcePdf)
+{
+    // Call RTXDI function to sample the lights and get the PDF
+    uint2 texelPosition, textureSize;
+    float pdf;
+    gLocalLightPdfTexture.GetDimensions(textureSize.x, textureSize.y);
+    RTXDI_SamplePdfMipmap(rng, gLocalLightPdfTexture, textureSize, texelPosition, pdf);
+    invSourcePdf = 1.0f / pdf;
+
+    // Map the texel selected to a light ID and return it
+    return RTXDI_ZCurveToLinearIndex(texelPosition);
+}
+
+// Return a triangle light index and 1/pdf of sampling that light (for SAMPLE_PRECOMPUTED_TILES)
+// This function needs a bit more data, so it can compute which tile we're currently in.
+uint SampleTrianglesViaTiles(inout RAB_RandomSamplerState rng, inout RAB_RandomSamplerState coherentRng,
+    RTXDI_ResamplingRuntimeParameters params, out float invSourcePdf)
+{
+    // Randomly select which light tile to use; find where it is in the buffer
+    float tileRnd = RAB_GetNextRandom(coherentRng);
+    uint tileIndex = uint(tileRnd * params.tileCount);
+    uint risBufferBase = tileIndex * params.tileSize;
+
+    // Randomly pick one light in the tile; look it up.
+    float rnd = RAB_GetNextRandom(rng);
+    uint risSample = min(uint(floor(rnd * params.tileSize)), params.tileSize - 1);
+    uint2 presampledLight = gRisBuffer[risBufferBase + risSample];
+
+    // Unpack the light index and its pdf from the tile structure.
+    invSourcePdf = asfloat(presampledLight.y);
+    return presampledLight.x & RTXDI_LIGHT_INDEX_MASK;
+}
+
+
+// Return a UV on the environment map and 1/pdf of that sample (for SAMPLE_UNIFORM)
+float2 SampleEnvironmentUniformly(inout RAB_RandomSamplerState rng, out float invSourcePdf)
+{
+    // PDF is 1 / 4pi
+    invSourcePdf = 4 * M_PI;
+
+    // Uniform random direction on the sphere (using Falcor built-it sampling routine)
+    float3 dir = sample_sphere(GetRandomUV(rng));
+
+    // Map that random world-space direction back to our lat-long UV for the probe texture
+    return world_to_latlong_map(dir);
+}
+
+// Return a UV on the environment map and 1/pdf of that sample (for SAMPLE_PDF_TEXTURE)
+float2 SampleEnvironmentViaPDFTexture(inout RAB_RandomSamplerState rng, out float invSourcePdf)
+{
+    // Call RTXDI function to sample the probe and get the PDF
+    float pdf;
+    uint2 textureSize, texelPosition;
+    gEnvMapPdfTexture.GetDimensions(textureSize.x, textureSize.y);
+    RTXDI_SamplePdfMipmap(rng, gEnvMapPdfTexture, textureSize, texelPosition, pdf);
+
+    // PDF returned above is [0..1).  Convert to solid angle (factor of 4pi) and account for
+    // varying probe texture size.
+    invSourcePdf = (pdf > 0) ? (4 * M_PI / (pdf * textureSize.x * textureSize.y)) : 0.0f;
+
+    // To not get discretization artifacts (esp for low res environment maps), add a random
+    // sub-texel offset to the selected UV, then return a probe uv in [0...1)
+    return (texelPosition + GetRandomUV(rng)) / float2(textureSize);
+}
+
+// Return a UV on the environment map and 1/pdf of that sample (for SAMPLE_PRECOMPUTED_TILES)
+// This function needs a bit more data, so it can compute which tile we're currently in.
+float2 SampleEnvironmentViaTiles(inout RAB_RandomSamplerState rng, inout RAB_RandomSamplerState coherentRng,
+    RTXDI_ResamplingRuntimeParameters params, out float invSourcePdf)
+{
+    // Randomly select which light tile to use; find where it is in the buffer
+    uint tileIndex = uint(RAB_GetNextRandom(coherentRng) * params.environmentTileCount);
+    uint risBufferBase = tileIndex * params.environmentTileSize + params.environmentRisBufferOffset;
+
+    // Randomly pick one light in the tile; look it up.
+    uint risSample = min(uint(floor(RAB_GetNextRandom(rng) * params.environmentTileSize)), params.environmentTileSize - 1);
+    uint2 presampledLight = gRisBuffer[risBufferBase + risSample];
+
+    // Unpack the light index and its pdf from the tile structure.  Tile PDF is [0..1),
+    // so also convert to solid angle.
+    invSourcePdf = 4 * M_PI * asfloat(presampledLight.y);
+    return float2(presampledLight.x & 0xffff, presampledLight.x >> 16) / float(0xffff);
+}

@@ -1,0 +1,137 @@
+/***************************************************************************
+ # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+
+#pragma once
+
+/** The key interface between Falcor and RTXDI shaders.  For integration into your engine,
+    you need to rewrite this bridge to handle data from your application and pass them
+    them to RTXDI via the required RAB_*() interface functions (see the RTXDI documentation).
+ 
+    This file just #includes (or "imports" in Slang terminology) code from core Falcor
+    shader headers and utilities and defines the data the RTXDI bridge needs to consume
+    from our C++ code.
+ 
+    The actual RAB_*() functions are defined in the separate headers:
+       RAB_RandomSampler.hlsli, RAB_Surface.hlsli, RAB_LightInfo.hlsli, and RAB_LightSample.hlsli
+*/
+
+// Allow the C++ to control compilation: DXR 1.0 v.s. 1.1   (Default DXR 1.1)
+//   -> TODO: Currently not tested with DXR 1.0 shaders, but it should "generally work"
+#ifndef USE_DXR_1_0
+#define USE_DXR_1_0  0
+#endif
+
+// A bunch of Falcor-specific includes needed for RTXDI bridge functionality.
+import Scene.Raytracing;
+import Scene.ShadingData;
+import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
+import Utils.Math.PackedFormats;
+import Utils.Attributes;
+import Rendering.Materials.Microfacet;
+import Rendering.Materials.Fresnel;
+#include "Utils/Math/MathConstants.slangh"
+
+// RTXDI parameters from the SDK
+#include "rtxdi/RtxdiParameters.h"
+
+// Data used to interact and control the RTXDI bridge API (defined below)
+cbuffer BridgeCB
+{  
+    float  gEpsilon;                  ///< Our ray-epsilon.
+    uint   gFrameIndex;               ///< For RNG initialization, to make sure we use different random numbers each frame
+    uint2  gFrameSize;                ///< Size of our G-buffer
+    uint2  gEnvMapRes;                ///< Resolution of our environment map.  (Probably not strictly required; can call GetDimensions())
+    bool   gUseLowerShininess;        ///< Use lower (i.e., new) Falcor shininess?  (Remove; just a toggle to match research prototype)
+    bool   gUseRTXDIInitialSampling;  ///< Should be 'true' except in our simplest example, where we rewrote RTXDI_SampleLightsForSurface() for understanding PDFs
+    bool   gStoreCompactedLightInfo;  ///< Has a cost, but greatly improves coherence of lookups in scenes with many lights
+    uint   gCurrentGBufferOffset;     ///< What the start offset into the G-buffer for the current frame's pixels?
+    uint   gPriorGBufferOffset;       ///< What the start offset into the G-buffer for the prior frame's pixels?
+
+    // Our RTXDI per-frame parameters
+    RTXDI_ResamplingRuntimeParameters gRtxdiParams;
+
+    // For scaling light contributions; specific to our Falcor model & prototype (carried over from research prototype)
+    float  gRelativeTrianglePower;       ///< Scales all triangle emission up/down by scalar (important if prims & env map have different units)
+    float  gRelativeEnvironmentPower;    ///< Scales all environment emission up/down by scalar (important if prims & env map have different units)
+    bool   gUseEmissiveTextures;         ///< Lookup final emissive intensities per-pixel? (rather than averaging over each emissive)
+}
+
+// Packed buffers containing data about scene lights (mostly used by RAB_LightInfo.hlsli).  It repacks
+// data in Falcor's gScene to ensure at most one cache miss to load each light during resampling
+Buffer<float4> gLightGeometry;
+
+// Buffers for RTXDI (i.e., SDK requires these be application provided)
+RWBuffer<uint2>                           gRisBuffer;               ///< Presampled light tiles get inserted into and read from here
+RWBuffer<float4>                          gPackedPresampledLights;  ///< Technical optional, used for RAB_StoreCompactLightInfo()  
+RWStructuredBuffer<RTXDI_PackedReservoir> gLightReservoirs;         ///< Intermediate reservoir data
+
+// Our buffer storing packed primary hit data (used by RAB_Surface.hlsli)
+Buffer<float4>  gGBuf;
+
+// Our light PDF textures (for using RTXDI's mip-chain pdf sampling)
+Texture2D gLocalLightPdfTexture;    ///< "Local" lights, i.e., prims (tris, rects, cylinders, points, etc.)
+Texture2D gEnvMapPdfTexture;        ///< Our pdf texture for the environment map
+
+//Texture2D<float> gLocalLightPdfTexture;    ///< "Local" lights, i.e., prims (tris, rects, cylinders, points, etc.)
+//Texture2D<float> gEnvMapPdfTexture;        ///< Our pdf texture for the environment map
+
+// Our list of "randomized" neighbor offsets for finding spatial neighbors for reuse
+Buffer<float2> gNeighborBuffer;
+
+// Our motion vector texture from the G-buffer pass
+Texture2D<float4> gMotionVectorTexture;
+
+
+// Define buffers for RTXDI to access data from.
+#define RTXDI_RIS_BUFFER gRisBuffer
+#define RTXDI_LIGHT_RESERVOIR_BUFFER gLightReservoirs
+#define RTXDI_NEIGHBOR_OFFSETS_BUFFER gNeighborBuffer
+
+
+// Include the API wrapper for the shadow rays used in the wrapper (in particular
+//   RAB_LightSample.hlsli uses `conservativeShadowRay()`
+#if USE_DXR_1_0
+//    -> Using DXR 1.0; can only be used in HLSL ray tracing shaders.
+#include "StandardShadowRay.slangh"
+#else
+//    -> Using DXR 1.1, since all our tutorial shaders are computer shaders
+#include "InlineShadowRay.slangh"
+#endif
+
+// Some (relatively) separate shader includes that define RTXDI bridge functions relative to
+//   the four different RAB bridge structures needed (RAB_RandomSamplerState, RAB_Surface, 
+//   RAB_LightInfo, and RAB_LightSample).
+#include "RAB_RandomSampler.slangh"
+#include "RAB_Surface.slangh"
+#include "RAB_LightInfo.slangh"
+#include "RAB_LightSample.slangh"
+
+// Go ahead and include the RTXDI SDK's HLSL functions
+#include "rtxdi/ResamplingFunctions.hlsli"
+

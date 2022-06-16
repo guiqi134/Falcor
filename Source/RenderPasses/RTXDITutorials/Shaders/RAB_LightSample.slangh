@@ -1,0 +1,320 @@
+/***************************************************************************
+ # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+
+// Our opaque RTXDI light sample structure.  This structure is instantiated when we have both
+//    a randomly-selected light and a surface point we want to evaluate it at (either *completely*
+//    for shading, or partially, to evaluate a target function during resampling)
+//
+// Obviously, this can be implemented without Slang's object-oriented, C++-style classes
+struct RAB_LightSample
+{
+    float  mScalarFlux;        ///< Scalar flux from our light; for tris this is over area of the triangle, for env maps, direct env map texels
+    float  mInvSampleArea;     ///< 1 / area of the sample -- needed for converting area measure <-> solid angle measure
+    uint   mPackedLightVector; ///< Direction from sample to the light.  Normalized and packed into an oct map
+    float  mDistToLight;       ///< Distance between surface hit and light sample
+    float  mNdotL;             ///< NdotL at the surface hit
+    float  mNdotH;
+    float  mLdotH;
+    float  mJacobian;          ///< <sample area> * <cosine at the light> / <distance sqr> (for tris), or 1 (env maps)
+
+    // Accessors.  Right now, these are trivial, but may become more complex if the
+    //   data above gets compressed / de-duped.
+    float getScalarFlux()         { return mScalarFlux;    }
+    float getInverseSampleArea()  { return mInvSampleArea; }
+    float getJacobianAtoW()       { return mJacobian;      }
+    float NdotL()                 { return mNdotL;         }
+    float NdotH()                 { return mNdotH;         }
+    float LdotH()                 { return mLdotH;         }
+
+    // Returns a float4 containing a normalized vector from surface to light sample (.xyz) and a distance to the light (.w)
+    float4 getDirectionAndDistance()
+    {
+        // We could store the direction as 3x float32, but a oct map direction is fine...
+        return float4(decodeNormal2x16(mPackedLightVector), mDistToLight);
+    }
+};
+
+
+RAB_LightSample RAB_EmptyLightSample()
+{
+    RAB_LightSample samp = {};
+    return samp;
+}
+
+bool RAB_IsAnalyticLightSample(RAB_LightSample lightSample)
+{
+    // This tutorial doesn't have analytic lights (e.g., spherical or capsule)
+    return false;
+}
+
+void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample lightSample,
+    out float3 o_lightDir,
+    out float o_lightDistance)
+{
+    float4 tmp = lightSample.getDirectionAndDistance();
+    o_lightDir = tmp.xyz;
+    o_lightDistance = tmp.w;
+}
+
+RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface surface, float2 uv)
+{
+    RAB_LightSample s = {};
+
+    // Get data about this specific light sample by querying our light
+    float3 norm; 
+    float3 pos = lightInfo.getPosAndNorm(uv, norm);
+
+    // Grab a precomputed scalar flux from this emitter for use in PDF computations
+    s.mScalarFlux = lightInfo.getScalarLightEmission(uv);
+
+    // Computed and store specific data we need for shading, depending on the light type.  We could do this
+    // in a case statement / series of if's, but with just 2 light times, let's do a bunch of conditional moves.
+    bool isTriangle = lightInfo.isTriangle();
+
+    float3 toLight = isTriangle ? (pos - RAB_GetSurfaceWorldPos(surface)) : pos;  // getPosAndNorm() returns a direction to the light for environment maps
+    s.mDistToLight = isTriangle ? length(toLight) : 1.0e30f;                      // Put in a large value for infinite lights
+    toLight = normalize(toLight);
+
+    s.mInvSampleArea = isTriangle ? (0.5f * length(norm)) : (4.0f * M_PI);        // Inverse per-sample area (or solid angle)
+
+    // Compute a Jacobian to transform from area measure to solid angle measure; env maps is already in solid angle measure.
+    float lightCosine = saturate(dot(normalize(norm), -toLight));
+    s.mJacobian = isTriangle ? lightCosine / (s.mInvSampleArea * s.mDistToLight * s.mDistToLight) : 1.0f;
+
+    // We do need to send a ray to the light, so we need the direction to the light.  Pack it into an oct mapping.
+    s.mPackedLightVector = encodeNormal2x16(toLight);
+
+    // Compute various important dot products for lighting
+    float3 normal = RAB_GetSurfaceNormal(surface);
+    float3 H = normalize(surface.getViewVector() + toLight);
+    s.mNdotL = saturate(dot(normal, toLight));  // NdotL
+    s.mNdotH = saturate(dot(normal, H));        // NdotH
+    s.mLdotH = saturate(dot(toLight, H));       // LdotH
+
+    return s;
+}
+
+// This calls a "conservative" visibility ray query, which does not intersect any alpha-masked geometry (i.e.,
+// if you *would* hit a leaf that is alpha masked, this always reports unoocluded even if you do hit the leaf geometry)
+bool RAB_GetConservativeVisibility(RAB_Surface surface, RAB_LightSample lightSample)
+{
+    float3 origin = RAB_GetSurfaceWorldPos(surface);
+    return conservativeShadowRay(origin, lightSample.getDirectionAndDistance());
+}
+
+
+// We're implementing this simplistically here, as we're not currently storing last frame's BVH or TLAS (which is
+//   required for a 100% bias-free version of ReSTIR/RTXDI).  We always use this frame's BVH, ignoring the last
+//   parameter.  This causes a slight darkening around boundaries of fast moving geometry, which I generally feel
+//   is impercetible.
+bool RAB_GetTemporalConservativeVisibility(RAB_Surface curSurface, RAB_Surface prevSurface, RAB_LightSample lightSample)
+{
+    float3 origin = RAB_GetSurfaceWorldPos(curSurface);
+    return conservativeShadowRay(origin, lightSample.getDirectionAndDistance());
+}
+
+/** Traces a ray with the given parameters, looking for a light. If a local light is found, returns true
+    and fills the output parameters with the light sample information.
+    \param[out] o_lightIndex If hit, must be a valid light index for RAB_LoadLightInfo, otherwise RTXDI_InvalidLightIndex.
+    \param[out] o_randXY The randXY that corresponds to the hit location and is the same used for RAB_SamplePolymorphicLight.
+*/
+bool RAB_TraceRayForLocalLight(float3 origin, float3 direction, float tMin, float tMax,
+    out uint o_lightIndex, out float2 o_randXY)
+{
+    o_lightIndex = RTXDI_InvalidLightIndex;
+    o_randXY = 0;
+
+    float hitT;
+    HitInfo hit;
+    SceneRayQuery<0> rayQuery;
+
+    Ray ray = Ray(origin, direction, tMin, tMax);
+    bool hitAnything = rayQuery.traceRay(ray, hit, hitT, RAY_FLAG_CULL_NON_OPAQUE, 0xff);
+    if (gRtxdiParams.numLocalLights && hitAnything)
+    {
+        if (hit.getType() == HitType::Triangle)
+        {
+            const TriangleHit triangleHit = hit.getTriangleHit();
+            uint triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+            if (triangleIndex != LightCollection::kInvalidIndex)
+            {
+                uint activeLightIndex = gScene.lightCollection.getActiveTriangleIndex(triangleIndex);
+                if (activeLightIndex != LightCollection::kInvalidIndex)
+                {
+                    // hitUVs are mapped directly to randXY in Falcor see EmissiveLight::calcSample.
+                    o_randXY = triangleHit.barycentrics;
+                    o_lightIndex = activeLightIndex;
+                }
+            }
+        }
+    }
+
+    return hitAnything;
+}
+
+
+// This evaluates our target function (aka p-hat in the papers' math).  Here, we choose p-hat to
+//    evaluate the entire rendering equation, minus the visibility term.  And, of course, since
+//    it's a pdf, it's a scalar value rather than a traditional RGB color computed when shading.
+float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Surface surface)
+{
+    // Compute the BRDF terms for the target function.
+    float D = surface.getNdf(lightSample.NdotH());
+    float G = surface.getMaskingTerm(lightSample.NdotL(), surface.NdotV());
+    float spec = surface.getSpecularReflectance();
+
+    // This is the "right" value to match the integral
+    //float F = spec < 1e-8f ? 0.0f : evalFresnelSchlick(spec, 1.0f, lightSample.LdotH());
+
+    // Gives much less noisy results.  We can change the target PDF however we want, so use this.
+    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec);
+
+    // Get the probability of sampling in the diffuse lobe (i.e., relative weight of diffuse vs
+    //    specular lobes) and then linearly interpolate between the lobes.
+    float brdfWeight = max(0.0f, lerp(
+        D * G * F / (4.0f * surface.NdotV()),       // Specular lobe
+        lightSample.NdotL() * M_1_PI,               // Diffuse lobe
+        surface.getProbToSampleDiffuseLobe()));     // Relative weight of specular & diffuse lobes
+
+    // Compute total p-hat value (incoming-light * geometry-term * brdf)
+    float weight = max(0.0f, lightSample.getScalarFlux() * lightSample.getJacobianAtoW() * brdfWeight);
+
+    // RTXDI skips part of the initial sampling pdf, which means all later target functions and shade
+    // evaluations need to be modified to account for this change.  When we use our custom initial
+    // candidate light sampling in the Talbot RIS pipeline, we do *not* skip this (so use 1.0 here).
+    weight *= (gUseRTXDIInitialSampling ? lightSample.getInverseSampleArea() : 1.0f);
+
+    return weight;
+}
+
+
+// Computes estimated distance between a given point in space and a random point inside a spherical
+// volume. Since the geometry of this solution is spherically symmetric, only the distance from the
+// volume center to the point and the volume radius matter here.  See RTXDI sample for more details.
+float getAverageDistanceToVolume(float distanceToCenter, float volumeRadius)
+{
+    const float nonlinearFactor = 1.1547;
+    const float numerator   = distanceToCenter + volumeRadius * volumeRadius * volumeRadius;
+    const float sqrtDenom = distanceToCenter + volumeRadius * nonlinearFactor;
+
+    return numerator / (sqrtDenom * sqrtDenom);
+}
+
+// Evalutes a PDF for inclusuion in ReGIR volumes.  TODO: Not tested & probably not perfromant!
+float RAB_GetLightTargetPdfForVolume(RAB_LightInfo light, float3 volumeCenter, float volumeRadius)
+{
+    // Environment & infinite lights do not affect volume / ReGIR sampling
+    if (light.isEnvironment()) return 0.0f;
+
+    // For triangle lights:
+    float distanceToPlane = dot(volumeCenter - light.mBase.xyz, light.getLightNormal());
+    if (distanceToPlane < -volumeRadius)
+        return 0;  // Cull - the entire volume is below the light's horizon
+
+    // Compute the distance between our voxel center and the center of the triangle
+    float3 barycenter = light.getBarycenter();
+    float dist = length(barycenter - volumeCenter);
+
+    // Find the (approximate) average distance from the triangle to points in the voxel
+    dist = getAverageDistanceToVolume(dist, volumeRadius);
+
+    // Use this to compute and approximate solid angle for this light in the voxel
+    float approxSolidAngle = min( 2 * M_PI, light.getLightArea() / (dist * dist) );
+
+    // The divide by Pi is a difference between units RTXDI's sample app and Falcor use for
+    // power.  Anyways, there's a factor of pi difference between light.getScalarLightEmission()
+    // and the value returned here (the area is already in the solid angle term above).
+    return max( 0.0f, approxSolidAngle * gRelativeTrianglePower * light.mFlux * M_1_PI );
+}
+
+
+
+/** Computes the probability of a particular direction being sampled from the environment map
+    relative to all the other possible directions, based on the environment map PDF texture.
+*/
+float RAB_EvaluateEnvironmentMapSamplingPdf(float3 L)
+{
+    float2 uv = gScene.envMap.worldToUv(L);
+
+    uint2 pdfTextureSize;
+    gEnvMapPdfTexture.GetDimensions(pdfTextureSize.x, pdfTextureSize.y);
+    uint2 texelPosition = uint2(pdfTextureSize * uv);
+    float texelValue = gEnvMapPdfTexture.Load(uint3(texelPosition, 0)).x;
+
+    int lastMipLevel = max(0, int(floor(log2(max(pdfTextureSize.x, pdfTextureSize.y)))) - 1);
+    float averageValue = 0.5f * (
+        gEnvMapPdfTexture.Load(uint3(0, 0, lastMipLevel)).x +
+        gEnvMapPdfTexture.Load(uint3(1, 0, lastMipLevel)).x);
+
+    // the selection probability is multiplied by numTexels in RTXDI during presampling
+    // so actually numTexels cancels out in this case
+    //
+    // uint numTexels = pdfTextureSize.x * pdfTextureSize.y;
+    // float totalSum = averageWeight * numTexels;
+    // return numTexels * texelValue / totalSum;
+    return texelValue / averageValue;
+}
+
+
+/** Computes the probability of a particular light being sampled from the local light pool
+    with importance sampling, based on the local light PDF texture.
+*/
+float RAB_EvaluateLocalLightSourcePdf(RTXDI_ResamplingRuntimeParameters params, uint lightIndex)
+{
+    uint2 pdfTextureSize;
+    gLocalLightPdfTexture.GetDimensions(pdfTextureSize.x, pdfTextureSize.y);
+
+    uint2 texelPosition = RTXDI_LinearIndexToZCurve(lightIndex);
+    float texelValue = gLocalLightPdfTexture.Load(uint3(texelPosition, 0)).r;
+
+    int lastMipLevel = max(0, int(floor(log2(max(pdfTextureSize.x, pdfTextureSize.y)))) - 1);
+    float averageValue = 0.5f * (
+        gLocalLightPdfTexture.Load(uint3(0, 0, lastMipLevel)).x +
+        gLocalLightPdfTexture.Load(uint3(1, 0, lastMipLevel)).x);
+
+    // all light pdf weight
+    float sum = averageValue * pdfTextureSize.x * pdfTextureSize.y;
+
+    return texelValue / sum;
+}
+
+
+/** Converts a world-space direction into a pair of numbers that, when passed into RAB_SamplePolymorphicLight
+    for the environment light, will make a sample at the same direction.
+*/
+float2 RAB_GetEnvironmentMapRandXYFromDir(float3 worldDir)
+{
+    return gScene.envMap.worldToUv(worldDir);
+}
+
+/** Returns the solid angle PDF of the light sample.
+*/
+float RAB_LightSampleSolidAnglePdf(RAB_LightSample lightSample)
+{
+    return 1.0f / lightSample.getJacobianAtoW();
+}

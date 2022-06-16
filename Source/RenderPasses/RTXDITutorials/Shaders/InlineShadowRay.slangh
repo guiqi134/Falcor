@@ -1,0 +1,78 @@
+/***************************************************************************
+ # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+
+#pragma once
+
+/* This largely relies on the Falcor DXR 1.1 traceRayInline() abstraction
+   found in core Falcor in "Core/Scene/RaytracingInline.slang"
+*/
+import Scene.RaytracingInline;
+import Scene.SceneRayQueryInterface;
+
+
+// Can control this from C++ by calling myShader.addDefine("USE_ALPHA_TEST", "0");
+#ifndef USE_ALPHA_TEST
+#define USE_ALPHA_TEST 1
+#endif
+
+// Apparently needed for the templating to work.
+static const bool kUseAlphaTest = USE_ALPHA_TEST;
+
+// Traces a DXR 1.1 (inline) shadow ray.  (Returns true = visible, false = occluded)
+// -> Useful ray flags:
+//      * RAY_FLAG_CULL_BACK_FACING_TRIANGLES (or _FRONT_)
+//      * RAY_FLAG_CULL_NON_OPAQUE (so alpha-tested tris don't cast shadows; a cheap but conservative option)
+//      * RAY_FLAG_FORCE_OPAQUE (so alpha-tested tris *always* cast shadows; a cheap but conservative option)
+bool traceShadowRay(const RayDesc ray, uint rayFlags = RAY_FLAG_NONE)
+{
+    const Ray r = Ray(ray.Origin, ray.Direction, ray.TMin, ray.TMax);
+    SceneRayQuery<kUseAlphaTest> sceneRayQuery;
+    return sceneRayQuery.traceVisibilityRay(r, rayFlags, 0xffu);
+}
+
+// Falcor includes a non-standard "Ray" structure.  Also allow tracing with that, to avoid duplicate copies
+bool traceShadowRay(const Ray ray, uint rayFlags = RAY_FLAG_NONE)
+{
+    SceneRayQuery<kUseAlphaTest> sceneRayQuery;
+    return sceneRayQuery.traceVisibilityRay(ray, rayFlags, 0xffu);
+}
+
+// Traces a DXR 1.1 (inline) shadow ray.  (Returns true = visible, false = occluded)
+bool traceShadowRay(float3 pos, float4 rayDirLen, uint rayFlags = RAY_FLAG_NONE)
+{
+    //RayDesc ray = { pos, gEpsilon, rayDirLen.xyz,  (rayDirLen.w - gEpsilon) };
+    Ray ray = Ray( pos, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    return traceShadowRay(ray, rayFlags);
+}
+
+bool conservativeShadowRay(float3 pos, float4 rayDirLen)
+{
+    //RayDesc ray = { pos, gEpsilon, rayDirLen.xyz,  (rayDirLen.w - gEpsilon) };
+    Ray ray = Ray( pos, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    return traceShadowRay(ray, RAY_FLAG_CULL_NON_OPAQUE);
+}

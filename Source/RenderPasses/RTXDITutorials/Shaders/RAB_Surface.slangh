@@ -1,0 +1,227 @@
+/***************************************************************************
+ # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+
+#pragma once
+
+// A couple simple functions for unpacking colors from our G-buffer
+float4 unpackRGBAfromUint(uint c)
+{
+    uint4 packed = uint4(c, (c >> 8u), (c >> 16u), (c >> 24u));
+    return float4(packed & 0xFFu) / 255.0f;
+}
+
+float3 unpackRGBfromUint(uint c)
+{
+    uint3 packed = uint3(c, (c >> 8u), (c >> 16u));
+    return float3(packed & 0xFFu) / 255.0f;
+}
+
+
+// Our opaque surface structure used by RTXDI
+//
+// Obviously, this can be implemented without Slang's object-oriented, C++-style classes
+struct RAB_Surface
+{
+    // Data here should not be accessed directly, ideally, though Slang doesn't have an idea of
+    //    public / priviate data.  However, the data here is fairly uncompressed, which may take
+    //    up a lot of GPU registers.  It may be valuable to compress these down to save the register
+    //    file.  However, for now, this is a fairly exhaustive set of data (which may be partially
+    //    redundant / irrelevant).
+
+    float3 mWorldPos;      ///<  World-space sample position
+    float  mViewDepth;     ///<  Viewing depth along the camera ray (aka "Z").  Values < 0 indicate invalid surfaces.
+    float3 mViewVector;    ///<  (Normalized) world-space vector from the sample to the camera
+    float  mDifPdf;        ///<  Probability of sampling from the diffuse lobe, given dif & spec mat'l params
+    float  mRoughness;     ///<  Material roughness
+    float  mNdotV;         ///<  Precomputed N dot V (easy to recompute, but probably fits in padding)
+    uint   mPackedDiffuse; ///<  Our packed diffuse color from our G-buffer
+    uint   mPackedSpec;    ///<  Our packed specular color from our G-buffer
+    float  mSpecReflect;   ///<  Our specular reflectance, eqivalent to luminance(getSpecularColor())
+    uint   mPackedNormal;  ///<  Our shading normal, packed via an oct32 mapping
+
+    // Accessors.  Right now, these are trivial, but may get more complex if data is compressed/de-duped
+    bool   isValid()          { return (mViewDepth >= 0.0f); }
+    bool   isInvalid()        { return (mViewDepth < 0.0f); }
+    float3 getViewVector()    { return mViewVector; }
+    float3 getPosition()      { return mWorldPos; }
+    float3 getNormal()        { return decodeNormal2x16(mPackedNormal); }
+    float  getViewDepth()     { return mViewDepth; }
+    float3 getDiffuseColor()  { return unpackRGBfromUint(mPackedDiffuse); }
+    float3 getSpecularColor() { return unpackRGBfromUint(mPackedSpec); }
+    float  NdotV()            { return mNdotV; }
+
+    // More interesting methods
+
+    float getNdf(float NdotH)           { return evalNdfGGX(mRoughness * mRoughness, NdotH); }
+    float getSpecularReflectance()      { return mSpecReflect; }
+    float getProbToSampleDiffuseLobe()  { return mDifPdf; }
+
+    float getMaskingTerm(float NdotL, float NdotV)
+    {
+        // Use one of Falcor's built-in masking terms
+        //return evalMaskingSmithGGXCorrelated(mRoughness, NdotL, NdotV);
+        return evalMaskingSmithGGXSeparable(mRoughness, NdotL, NdotV);
+    }
+
+    // Works only for isotropic BRDFs...
+    float3 tangentToWorld(float3 h)
+    {
+        float3 normal = getNormal();
+        float3 bitangent = perp_stark(normal);
+        float3 tangent = cross(bitangent, normal);
+
+        return bitangent * h.x + tangent * h.y + normal * h.z;
+    }
+
+    // Works only for isotropic BRDFs...
+    float3 worldToTangent(RAB_Surface surface, float3 w)
+    {
+        float3 normal = getNormal();
+        float3 bitangent = perp_stark(normal);
+        float3 tangent = cross(bitangent, normal);
+
+        return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
+    }
+};
+
+RAB_Surface RAB_EmptySurface()
+{
+    RAB_Surface surf = {};
+    return surf;
+}
+
+RAB_Surface RAB_GetGBufferSurface(int2 pixelPosition, bool previousFrame)
+{
+    RAB_Surface outSurface;
+
+    // Load our framework's G-buffer data
+    bool valid = all(pixelPosition < gFrameSize);   // Is pixelPosition in the image?
+    uint idx   = valid ? pixelPosition.x + (pixelPosition.y * gFrameSize.x) : 0x0u;
+    idx       += previousFrame ? gPriorGBufferOffset : gCurrentGBufferOffset;  // For current frame or prior frame?
+    float4 surfData = gGBuf[idx];
+
+    // Compute our ray direction based on our pixel position
+    float3 rayDir = normalize(gScene.camera.computeNonNormalizedRayDirPinhole(pixelPosition, gFrameSize));
+
+    // Grab our packed normal / material data
+    uint3  packedData = asuint(surfData.xyz);
+    outSurface.mViewDepth     = surfData.w;
+    outSurface.mPackedNormal  = packedData.x;
+    outSurface.mPackedDiffuse = packedData.y;
+    outSurface.mPackedSpec    = packedData.z;
+
+    // Extract our diffuse and specular material properties 
+    float4 diffuse   = unpackRGBAfromUint(outSurface.mPackedDiffuse);
+    float4 specRough = unpackRGBAfromUint(outSurface.mPackedSpec);
+
+    // Populate our opaque RTXDI surface structure from the packed G-buffer
+    outSurface.mWorldPos     = (previousFrame ? gScene.camera.data.prevPosW : gScene.camera.data.posW)
+        + outSurface.mViewDepth * rayDir;
+    outSurface.mViewVector   = -rayDir;
+    outSurface.mDifPdf       = diffuse.a;
+    outSurface.mSpecReflect  = luminance(specRough.rgb);
+    outSurface.mRoughness    = gUseLowerShininess ? specRough.a : specRough.a * specRough.a;
+    outSurface.mNdotV        = saturate(dot(decodeNormal2x16(outSurface.mPackedNormal), outSurface.mViewVector));
+
+    return outSurface;
+}
+
+bool RAB_IsSurfaceValid(RAB_Surface surface)
+{
+    return surface.isValid(); 
+}
+
+float3 RAB_GetSurfaceWorldPos(RAB_Surface surface)
+{
+    return surface.getPosition();
+}
+
+float3 RAB_GetSurfaceNormal(RAB_Surface surface)
+{
+    return surface.getNormal();
+}
+
+float RAB_GetSurfaceLinearDepth(RAB_Surface surface)
+{
+    return max(0.0f, surface.getViewDepth());
+}
+
+// This is the most trivial implementation.  Though it's true to our original Falcor research
+//    prototype, which never did anything more sophisticated when comparing materials.
+bool RAB_AreMaterialsSimilar(RAB_Surface a, RAB_Surface b)
+{
+    return true;
+}
+
+/** Performs importance sampling of the surface's BRDF and returns the sampled direction.
+*/
+bool RAB_GetSurfaceBrdfSample(RAB_Surface surface, inout RAB_RandomSamplerState rng, out float3 dir)
+{
+    float3 rand;
+    rand.x = RAB_GetNextRandom(rng);
+    rand.y = RAB_GetNextRandom(rng);
+    rand.z = RAB_GetNextRandom(rng);
+    if (rand.x < surface.getProbToSampleDiffuseLobe())
+    {
+        // consistent eval order
+        float pdf;
+        float3 h = sample_cosine_hemisphere_concentric(rand.yz, pdf);
+        dir = surface.tangentToWorld(h);
+    }
+    else
+    {
+        float pdf;
+        float ggxAlpha = surface.mRoughness * surface.mRoughness;   
+        float3 h = sampleGGX_NDF(ggxAlpha, rand.yz, pdf);
+        dir = reflect(-surface.getViewVector(), surface.tangentToWorld(h));
+    }
+
+    return dot(surface.getNormal(), dir) > 0.f;
+}
+
+/** Computes the PDF of a particular direction being sampled by RAB_GetSurfaceBrdfSample.
+*/
+float RAB_GetSurfaceBrdfPdf(RAB_Surface surface, float3 dir)
+{
+    float cosTheta = saturate(dot(surface.getNormal(), dir));
+    float diffusePdf = (cosTheta / M_PI);
+
+    float3 wsHalf = normalize(dir + surface.getViewVector());
+    float  HdotV = saturate(dot(wsHalf, surface.getViewVector()));
+
+    float ggxAlpha = surface.mRoughness * surface.mRoughness;   
+    float specularPdf = evalPdfGGX_NDF(ggxAlpha, dot(wsHalf,surface.getNormal())) / (4.f * HdotV);
+    float pdf = cosTheta > 0.f ? lerp(specularPdf, diffusePdf, surface.getProbToSampleDiffuseLobe()) : 0.f;
+    return pdf;
+}
+
+
+
+
+
+
