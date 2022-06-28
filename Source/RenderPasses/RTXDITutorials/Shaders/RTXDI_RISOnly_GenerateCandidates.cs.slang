@@ -31,9 +31,9 @@
 
 cbuffer InitialCB
 {
-    uint gLightSamplingMode;  ///< Which sampling scheme should we use to pick our initial candidates?
-    uint gNumTriSamples;      ///< How many samples should we take on emissive triangles?
-    uint gNumEnvSamples;      ///< How many samples should we take on the environment map?
+    uint gLightSamplingMode;  // Which sampling scheme should we use to pick our initial candidates?
+    uint gNumTriSamples;      // How many samples should we take on emissive triangles?
+    uint gNumEnvSamples;      // How many samples should we take on the environment map?
 }
 
 // This is a very simplistic, cut down version of the RTXDI function RTXDI_SampleLightsForSurface()
@@ -119,12 +119,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
-    uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
+    uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params); // under normal cases, we can assume pixelPosition = launchIdx
 
     // Initialize our random number generators.  The second is only needed if we sample lights
     //    from (once-per-frame) precomputed tiles, i.e., gLightSamplingMode == SAMPLE_PRECOMPUTED_TILES
     RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 1);
-    RAB_RandomSamplerState tileRng = RAB_InitRandomSampler(pixelPosition / RTXDI_TILE_SIZE_IN_PIXELS, 1);
+    RAB_RandomSamplerState tileRng = RAB_InitRandomSampler(pixelPosition / RTXDI_TILE_SIZE_IN_PIXELS, 1); // pixels in same tile will get same RNG
 
     // Grab the current pixel's surface from our G-bufer
     RAB_Surface surface = RAB_GetGBufferSurface(pixelPosition, false);
@@ -142,14 +142,15 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Merge these two reservoirs together.  By doing this reservoir merging, we don't have to account
     // for weighting triangle and environment map samples different based on how many of each we use.
     // Note, this can be done in-place, rather than using 3 different reservoirs, but this makes it clear what's happening
+    //  -> Also note, triReservoir and envReservoir already finalized, so their weight-sum is weight-average
     RTXDI_Reservoir reservoir = RTXDI_EmptyReservoir();
     RTXDI_CombineReservoirs(reservoir, triReservoir, 0.5f, triReservoir.targetPdf);  // 0.5f as combining with an empty reservoir always succeeds
     RTXDI_CombineReservoirs(reservoir, envReservoir, RAB_GetNextRandom(rng), envReservoir.targetPdf);
 
     // Do final normalization of our merged reservoir
-    RTXDI_FinalizeResampling(reservoir, 1.0, 1.0);
+    RTXDI_FinalizeResampling(reservoir, 1.0, 1.0); // Song: Why the third parameter is not 2?
     reservoir.M = 1;
 
     // Store this simple sample in our reservoir; pass it forward to the shader that will evaluate pixel colors
-    RTXDI_StoreReservoir(reservoir, params, launchIdx, 0);
+    RTXDI_StoreReservoir(reservoir, params, launchIdx, 0); 
 }

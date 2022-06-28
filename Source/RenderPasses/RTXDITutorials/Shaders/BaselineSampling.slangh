@@ -104,7 +104,7 @@ uint SampleTrianglesViaTiles(inout RAB_RandomSamplerState rng, inout RAB_RandomS
     // Randomly select which light tile to use; find where it is in the buffer
     float tileRnd = RAB_GetNextRandom(coherentRng);
     uint tileIndex = uint(tileRnd * params.tileCount);
-    uint risBufferBase = tileIndex * params.tileSize;
+    uint risBufferBase = tileIndex * params.tileSize; // start index in RIS presampled light buffer
 
     // Randomly pick one light in the tile; look it up.
     float rnd = RAB_GetNextRandom(rng);

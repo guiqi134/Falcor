@@ -46,6 +46,8 @@ RTXDITutorial4::SharedPtr RTXDITutorial4::create(RenderContext* pRenderContext, 
 
 void RTXDITutorial4::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -71,7 +73,7 @@ void RTXDITutorial4::execute(RenderContext* pRenderContext, const RenderData& re
 
     // For each pixel in our image, randomly select some number of candidate light samples, (optionally) send
     // shadow rays to the selected one, reuse this data spatially between some neighbors, and then accumulate
-    // lighting for one final selected light sample in each pixel.  This is ReSTIR with only spatial reuse.
+    // lighting for one final selected light sample in each pixel.  This is ReSTIR with only temporal reuse.
     runTemporalReuseOnly(pRenderContext, renderData);
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
@@ -81,6 +83,8 @@ void RTXDITutorial4::execute(RenderContext* pRenderContext, const RenderData& re
     // two G-buffer indicies (0 and 1), ping-pong back and forth between them each frame.
     mLightingParams.currentGBufferIndex = 1u - mLightingParams.currentGBufferIndex;
     mLightingParams.priorGBufferIndex = 1u - mLightingParams.priorGBufferIndex;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void RTXDITutorial4::runTemporalReuseOnly(RenderContext* pRenderContext, const RenderData& renderData)
@@ -134,6 +138,7 @@ void RTXDITutorial4::runTemporalReuseOnly(RenderContext* pRenderContext, const R
         temporalVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         temporalVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
         setupRTXDIBridgeVars(temporalVars, renderData);
+        mpPixelDebug->prepareProgram(mShader.temporalReuse->getProgram(), temporalVars);
         mShader.temporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
@@ -157,6 +162,9 @@ void RTXDITutorial4::runTemporalReuseOnly(RenderContext* pRenderContext, const R
 // Renders the GUI used to change options on the fly when running in Mogwai.
 void RTXDITutorial4::renderUI(Gui::Widgets& widget)
 {
+    // For pixel debug UI
+    RTXDITutorialBase::renderUI(widget);
+
     // Provide controls for the number of samples on each light type (largely consistent options between tutorials)
     Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", true);
     candidateOptions.text("Number of per-pixel light candidates on:");

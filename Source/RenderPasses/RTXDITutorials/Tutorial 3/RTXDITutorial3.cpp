@@ -56,6 +56,8 @@ RTXDITutorial3::RTXDITutorial3(const Dictionary& dict)
 
 void RTXDITutorial3::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -86,6 +88,8 @@ void RTXDITutorial3::execute(RenderContext* pRenderContext, const RenderData& re
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     mRtxdiFrameParams.frameIndex++;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void RTXDITutorial3::runSpatialReuseOnly(RenderContext* pRenderContext, const RenderData& renderData)
@@ -141,8 +145,9 @@ void RTXDITutorial3::runSpatialReuseOnly(RenderContext* pRenderContext, const Re
             spatialVars["ReuseCB"]["gBiasCorrectionMode"] = uint(mLightingParams.biasCorrectionMode);
             spatialVars["ReuseCB"]["gReuseRadius"] = float(mLightingParams.spatialRadius);
             spatialVars["ReuseCB"]["gDepthThreshold"] = float(mLightingParams.depthThreshold);
-            spatialVars["ReuseCB"]["gNormalThreshold"] = float(mLightingParams.normalThreshold);       
+            spatialVars["ReuseCB"]["gNormalThreshold"] = float(mLightingParams.normalThreshold);
             setupRTXDIBridgeVars(spatialVars, renderData);
+            mpPixelDebug->prepareProgram(mShader.spatialReuse->getProgram(), spatialVars);
             mShader.spatialReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
 
             // Ping pong our input and output buffers.
@@ -167,6 +172,9 @@ void RTXDITutorial3::runSpatialReuseOnly(RenderContext* pRenderContext, const Re
 // Renders the GUI used to change options on the fly when running in Mogwai.
 void RTXDITutorial3::renderUI(Gui::Widgets& widget)
 {
+    // For pixel debug UI
+    RTXDITutorialBase::renderUI(widget);
+
     // Provide controls for the number of samples on each light type (largely consistent options between tutorials)
     Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", true);
     candidateOptions.text("Number of per-pixel light candidates on:");

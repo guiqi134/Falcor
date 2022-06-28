@@ -58,6 +58,7 @@ float evalNdfGGX(float alpha, float cosTheta)
 */
 float evalPdfGGX_NDF(float alpha, float cosTheta)
 {
+    // Compare to PBRT 14.1.1, this is the pdf of sampling all the area not accounting for the distribution of visible area
     return evalNdfGGX(alpha, cosTheta) * cosTheta;
 }
 

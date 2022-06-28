@@ -33,7 +33,7 @@
 // Obviously, this can be implemented without Slang's object-oriented, C++-style classes
 struct RAB_LightInfo
 {
-    float3 mBase;
+    float3 mBase; // the base vertex point in world space for two edges 
     float  mFlux;
     uint3  mEdges;
     uint   mLocalIdx;
@@ -172,8 +172,9 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame)
 
     // Check if it's a local light (aka emissive triangle or other primtive) 
     uint localIdx = clamp(index, gRtxdiParams.firstLocalLight, gRtxdiParams.firstLocalLight + gRtxdiParams.numLocalLights - 1);
-    if (localIdx == index)
+    if (localIdx == index) 
     {
+        // if it's inside the local light range, then it's a local light
         localIdx -= gRtxdiParams.firstLocalLight;
         l.mLocalIdx = localIdx;
 
@@ -198,7 +199,7 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame)
         l.mFlux = edges.w;
     }
     // Nope...  Maybe it's an environment map?
-    else if (index == gRtxdiParams.environmentLightIndex)
+    else if (index == gRtxdiParams.environmentLightIndex) // The first light outside the local light range will be the environment light 
     {
         // Store our index; that's how we remember what light type we are
         l.mLocalIdx = gRtxdiParams.environmentLightIndex;
@@ -236,6 +237,7 @@ RAB_LightInfo RAB_LoadCompactLightInfo(uint linearIndex)
     return l;
 }
 
+// Since our samples don't have dynamtic lights, so we don't need to translate light between frames
 int RAB_TranslateLightIndex(uint lightIndex, bool currentToPrevious)
 {
     return lightIndex;

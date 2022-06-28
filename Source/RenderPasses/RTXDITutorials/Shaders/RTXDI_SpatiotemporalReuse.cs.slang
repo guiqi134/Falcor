@@ -51,12 +51,14 @@ cbuffer ReuseCB
     uint  gNumSamples;
     uint  gSamplesInDisocclusions;
     bool  gUseVisibilityShortcut;
-    bool  gEnablePermutationSampling;
+    bool gEnablePermutationSampling;
 }
 
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
+    printSetPixel(threadId);
+    
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -72,14 +74,20 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     RTXDI_Reservoir restirResult = RTXDI_EmptyReservoir();
 
     // Actually execute the resampling on valid visibile geometry
+    uint currentLightIndex = -1;
+    float2 currentSampleUV = float2(0.0f);
     if (RAB_IsSurfaceValid(surface))
     {
         // We want to combine our previously-computed light sample...
         RTXDI_Reservoir curSample = RTXDI_LoadReservoir(params, launchIdx, gCurFrameInputReservoirIndex);
+        currentLightIndex = RTXDI_GetReservoirLightIndex(curSample);
+        currentSampleUV = RTXDI_GetReservoirSampleUV(curSample);
+
+        // print("environmentRisBufferOffset = ", params.environmentRisBufferOffset);
 
         // ... with the results of our spatiotemporal resampling.  Set parameters here...
         RTXDI_SpatioTemporalResamplingParameters stparams;
-        stparams.screenSpaceMotion = gMotionVectorTexture[pixelPosition].xyz * float3(gFrameSize, 1.0f);
+        stparams.screenSpaceMotion = gMotionVectorTexture[pixelPosition].xyz * float3(gFrameSize, 1.0f); // motion vector is in [-1, 1]
         stparams.sourceBufferIndex = gPrevFrameInputReservoirIndex;
         stparams.maxHistoryLength = gMaxHistory;
         stparams.biasCorrectionMode = gBiasCorrectionMode;
@@ -105,6 +113,12 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         RTXDI_BoilingFilter(groupIndex, gBoilingFilterStrength, params, restirResult);
     }
 #endif
+
+    // Check if current pixel's sample has been replaced in reusing
+    bool hasSampleChanged = (currentLightIndex != RTXDI_GetReservoirLightIndex(restirResult)) || 
+        any(currentSampleUV != RTXDI_GetReservoirSampleUV(restirResult));
+    gHasSampleChangedInReusing[launchIdx] = hasSampleChanged ? float4(1.0f) : float4(0.0f);
+    
 
     // Store the reservoir after spatiotemporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(restirResult, params, launchIdx, gOutputReservoirIndex);

@@ -38,13 +38,18 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Combined\RTXDICombinedTutorial.h" />
+    <ClInclude Include="Common\RtxdiParameters.h" />
     <ClInclude Include="Common\RTXDITutorialBase.h" />
     <ClInclude Include="Common\RTXDITutorialConstants.h" />
+    <ClInclude Include="Common\RtxdiTypes.h" />
     <ClInclude Include="Tutorial 1\RTXDITutorial1.h" />
     <ClInclude Include="Tutorial 2\RTXDITutorial2.h" />
     <ClInclude Include="Tutorial 3\RTXDITutorial3.h" />
     <ClInclude Include="Tutorial 4\RTXDITutorial4.h" />
     <ClInclude Include="Tutorial 5\RTXDITutorial5.h" />
+    <ShaderSource Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\ResamplingFunctions.hlsli">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ShaderSource>
     <ShaderSource Include="Shaders\BaselineSampling.slangh" />
     <ClInclude Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\RTXDI.h" />
     <ShaderSource Include="Shaders\InlineShadowRay.slangh" />
@@ -52,7 +57,11 @@
     <ShaderSource Include="Shaders\RAB_LightSample.slangh" />
     <ShaderSource Include="Shaders\RAB_RandomSampler.slangh" />
     <ShaderSource Include="Shaders\RAB_Surface.slangh" />
+    <ShaderSource Include="Shaders\ResamplingFunctions.hlsli" />
+    <ShaderSource Include="Shaders\Reservoir.hlsli" />
     <ShaderSource Include="Shaders\RtxdiBridge.slangh" />
+    <ShaderSource Include="Shaders\RtxdiHelpers.hlsli" />
+    <ShaderSource Include="Shaders\RtxdiMath.hlsli" />
     <ShaderSource Include="Shaders\RTXDI_BuildEnvMapPDFTexture.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_BuildLightResourcesFromLightCollection.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_GenerateCandidates.cs.slang" />
@@ -60,7 +69,9 @@
     <ShaderSource Include="Shaders\RTXDI_PrepareSurfaceData.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_PresampleEnvironmentLights.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_PresampleLights.cs.slang" />
-    <ShaderSource Include="Shaders\RTXDI_RISOnly_GenerateCandidates.cs.slang" />
+    <ShaderSource Include="Shaders\RTXDI_RISOnly_GenerateCandidates.cs.slang">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ShaderSource>
     <ShaderSource Include="Shaders\RTXDI_RISOnly_Shade.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_Shade.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_SpatialReuse.cs.slang" />

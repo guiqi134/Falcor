@@ -34,9 +34,9 @@
 
 cbuffer SampleCB
 {
-    uint  gLocalSamples;           ///< How many candidate lights should RTXDI pick on emissive triangles / primitives
-    uint  gEnvironmentSamples;     ///< How many candidate lights should RTXDI pick on the environment map
-    uint  gOutputReservoirIndex;   ///< Which of our reservoirs should we use for output?
+    uint  gLocalSamples;           // How many candidate lights should RTXDI pick on emissive triangles / primitives
+    uint  gEnvironmentSamples;     // How many candidate lights should RTXDI pick on the environment map
+    uint  gOutputReservoirIndex;   // Which of our reservoirs should we use for output?
 }
 
 
@@ -67,9 +67,11 @@ void main(uint3 threadId : SV_DispatchThreadID)
         0.001f);
 
     // Generate initial candidates using the RTXDI API
+    // The pdf of reservoir's sample didn't include the pdf of sampling inside light's (triangle) area
+    // so we need to multiply it in final shading
     RAB_LightSample lightSample;
     RTXDI_Reservoir reservoir = RTXDI_SampleLightsForSurface(rng, tileRng, surface,
-        sampleParams, params, lightSample);
+        sampleParams, params, lightSample); 
 
     // Store data about our selected light in an intermediate reservoir for later reuse and shading.
     RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex);

@@ -73,6 +73,8 @@ RTXDITutorialBase::RTXDITutorialBase(const Dictionary& dict, const RenderPass::I
         else if (key == "compressLightTiles")  mLightingParams.storePerTileLightGeom = bool(value);
         else logWarning("Unknown field '" + key + "' in RTXDITutorialBase dictionary");
     }
+
+    mpPixelDebug = PixelDebug::create();
 }
 
 
@@ -97,6 +99,8 @@ RenderPassReflection RTXDITutorialBase::reflect(const CompileData& compileData)
     // This pass outputs a shaded color for display or for other passes to run postprocessing
     reflector.addOutput("color", "").format(ResourceFormat::RGBA16Float);
     reflector.addOutput("debug", "").format(ResourceFormat::RGBA16Float);
+    reflector.addOutput("hasSampleChangedInReusing", "").format(ResourceFormat::RGBA16Float);
+    reflector.addOutput("reservoirM", "").format(ResourceFormat::RGBA16Float);
 
     return reflector;
 }
@@ -358,6 +362,9 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     vars["gEnvMapPdfTexture"] = mResources.environmentPdfTexture;
     vars["gNeighborBuffer"] = mResources.neighborOffsetBuffer;
     vars["gMotionVectorTexture"] = renderData["mvec"]->asTexture();
+
+    // Some debug textures
+    vars["gHasSampleChangedInReusing"] = renderData["hasSampleChangedInReusing"]->asTexture();
 }
 
 bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const RenderData& data)
@@ -458,7 +465,7 @@ ComputePass::SharedPtr RTXDITutorialBase::createComputeShader(const std::string&
 
     // Falcor doesn't, by default, pass down scene geometry, materials, etc. for compute shaders.  But we'll need that
     // in all (or most) of our shaders in these tutorials, so just automatically send this data down.
-    pShader->getRootVar()["gScene"] = mPassData.scene->getParameterBlock();
+    pShader->getRootVar()["gScene"] = mPassData.scene->getParameterBlock(); // Song: do we really need this? 
     return pShader;
 }
 

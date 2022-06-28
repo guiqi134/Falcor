@@ -67,8 +67,5 @@
     <None Include="Data\ForwardRenderer.py">
       <Filter>Data</Filter>
     </None>
-    <None Include="Data\ExampleBiltGraph.py">
-      <Filter>Data</Filter>
-    </None>
   </ItemGroup>
 </Project>

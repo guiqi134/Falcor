@@ -82,7 +82,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         // Pack this data into the format used for our RTXDI bridge.  
         uint3  packedEdges = uint3((f32tof16(edge0) << 16u) | f32tof16(edge1));
-        gPackedLightGeom[(activeTriId << 1u) + 0u] = float4(triGeom.posW[0], 0.0f);
+        // This buffer's size is 2 * total light count, so each light triangle needs two slots 
+        // to store the packed geometry info 
+        gPackedLightGeom[(activeTriId << 1u) + 0u] = float4(triGeom.posW[0], 0.0f); 
         gPackedLightGeom[(activeTriId << 1u) + 1u] = float4(asfloat(packedEdges.xyz), triFlux.flux);
     }
 

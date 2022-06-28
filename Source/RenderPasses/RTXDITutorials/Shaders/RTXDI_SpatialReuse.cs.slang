@@ -41,10 +41,11 @@ cbuffer ReuseCB
     float gNormalThreshold;
 }
 
-
 [numthreads(16, 16, 1)]
 void main(uint2 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId);
+    
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -60,10 +61,12 @@ void main(uint2 threadId : SV_DispatchThreadID)
     RTXDI_Reservoir spatialResult = RTXDI_EmptyReservoir();
 
     // Actually execute the resampling on valid visibile geometry
+    uint currentLightIndex = -1;
     if (RAB_IsSurfaceValid(surface))
     {
         // We want to combine our previously-computed light sample...
         RTXDI_Reservoir centerSample = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex);
+        currentLightIndex = RTXDI_GetReservoirLightIndex(spatialResult);
 
         // ... with the results of our spatial resampling.  Set parameters here...
         RTXDI_SpatialResamplingParameters sparams;
@@ -80,8 +83,11 @@ void main(uint2 threadId : SV_DispatchThreadID)
         RAB_LightSample selectedSample = (RAB_LightSample)0;
         spatialResult = RTXDI_SpatialResampling(pixelPosition, surface, centerSample,
             rng, sparams, params, selectedSample);
-
     }
+
+    // Check if current pixel's sample has been replaced in reusing
+    if (currentLightIndex != RTXDI_GetReservoirLightIndex(spatialResult)) 
+        gHasSampleChangedInReusing[launchIdx] = float4(1.0f);
 
     // Store the reservoir after spatial resampling to our output reservoir buffer
     RTXDI_StoreReservoir(spatialResult, params, launchIdx, gOutputReservoirIndex);

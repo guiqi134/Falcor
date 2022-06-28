@@ -24,7 +24,7 @@ def graph_ImportanceResampling():
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 2.5,
+        'exposureCompensation' : 2.5, # default one is 0.0f
     }
     gAccumParams = {
         'enabled': False,

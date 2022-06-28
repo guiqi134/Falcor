@@ -34,7 +34,7 @@
 
 cbuffer SampleCB
 {
-    uint  gReservoirIndex;   ///< Which of our reservoirs should we use for output?
+    uint  gReservoirIndex;   // Which of our reservoirs should we use for output?
 }
 
 [numthreads(16, 16, 1)]
@@ -62,7 +62,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     {
         if (!RAB_GetConservativeVisibility(surface, lightSample))  // Trace a shadow ray
         {
-            RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);  
+            RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
     }

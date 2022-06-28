@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
+
 // Our opaque RTXDI light sample structure.  This structure is instantiated when we have both
 //    a randomly-selected light and a surface point we want to evaluate it at (either *completely*
 //    for shading, or partially, to evaluate a target function during resampling)
@@ -33,14 +34,14 @@
 // Obviously, this can be implemented without Slang's object-oriented, C++-style classes
 struct RAB_LightSample
 {
-    float  mScalarFlux;        ///< Scalar flux from our light; for tris this is over area of the triangle, for env maps, direct env map texels
-    float  mInvSampleArea;     ///< 1 / area of the sample -- needed for converting area measure <-> solid angle measure
-    uint   mPackedLightVector; ///< Direction from sample to the light.  Normalized and packed into an oct map
-    float  mDistToLight;       ///< Distance between surface hit and light sample
-    float  mNdotL;             ///< NdotL at the surface hit
+    float  mScalarFlux;        // Scalar flux from our light; for tris this is over area of the triangle, for env maps, direct env map texels
+    float  mInvSampleArea;     // 1 / area of the sample -- needed for converting area measure <-> solid angle measure
+    uint   mPackedLightVector; // Direction from sample to the light.  Normalized and packed into an oct map
+    float  mDistToLight;       // Distance between surface hit and light sample
+    float  mNdotL;             // NdotL at the surface hit
     float  mNdotH;
     float  mLdotH;
-    float  mJacobian;          ///< <sample area> * <cosine at the light> / <distance sqr> (for tris), or 1 (env maps)
+    float  mJacobian;          // <sample area> * <cosine at the light> / <distance sqr> (for tris), or 1 (env maps)
 
     // Accessors.  Right now, these are trivial, but may become more complex if the
     //   data above gets compressed / de-duped.
@@ -81,6 +82,7 @@ void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample lightSample,
     o_lightDistance = tmp.w;
 }
 
+// Generate a light sample and compute all the data it needs
 RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface surface, float2 uv)
 {
     RAB_LightSample s = {};
@@ -100,6 +102,8 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
     s.mDistToLight = isTriangle ? length(toLight) : 1.0e30f;                      // Put in a large value for infinite lights
     toLight = normalize(toLight);
 
+    // Why it is the area? Because norm is the cross product of triangle's two edges
+    // and the length of cross product is the area of parallelogram, thus we need also * 0.5f
     s.mInvSampleArea = isTriangle ? (0.5f * length(norm)) : (4.0f * M_PI);        // Inverse per-sample area (or solid angle)
 
     // Compute a Jacobian to transform from area measure to solid angle measure; env maps is already in solid angle measure.
@@ -192,10 +196,11 @@ float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Sur
     //float F = spec < 1e-8f ? 0.0f : evalFresnelSchlick(spec, 1.0f, lightSample.LdotH());
 
     // Gives much less noisy results.  We can change the target PDF however we want, so use this.
-    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec);
+    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec); // Song: Why? Test this!
 
     // Get the probability of sampling in the diffuse lobe (i.e., relative weight of diffuse vs
     //    specular lobes) and then linearly interpolate between the lobes.
+    // Song: why we didn't include the diffuse albedo here?
     float brdfWeight = max(0.0f, lerp(
         D * G * F / (4.0f * surface.NdotV()),       // Specular lobe
         lightSample.NdotL() * M_1_PI,               // Diffuse lobe

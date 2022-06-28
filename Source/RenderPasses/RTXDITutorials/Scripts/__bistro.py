@@ -1,6 +1,7 @@
 
 # Define important scene parameters
-scene = "Bistro/BistroExterior.pyscene"
+scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
+# scene = "Bistro/BistroExterior.pyscene"
 currentTime = 0.0
 paused = True
 animateCamera = False
@@ -59,7 +60,7 @@ try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene)
-m.scene.setEnvMap("Bistro/san_giuseppe_bridge_4k.hdr")
+m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
 if (paused):
     t.pause()
 t.time = currentTime

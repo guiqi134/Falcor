@@ -46,6 +46,8 @@ RTXDITutorial5::SharedPtr RTXDITutorial5::create(RenderContext* pRenderContext, 
 
 void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -81,6 +83,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // two G-buffer indicies (0 and 1), ping-pong back and forth between them each frame.
     mLightingParams.currentGBufferIndex = 1u - mLightingParams.currentGBufferIndex;
     mLightingParams.priorGBufferIndex = 1u - mLightingParams.priorGBufferIndex;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const RenderData& renderData)
@@ -137,6 +141,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         reuseVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         reuseVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
         setupRTXDIBridgeVars(reuseVars, renderData);
+        mpPixelDebug->prepareProgram(mShader.spatiotemporalReuse->getProgram(), reuseVars);
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
@@ -148,6 +153,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         setupRTXDIBridgeVars(shadeVars, renderData);
+        mpPixelDebug->prepareProgram(mShader.shade->getProgram(), shadeVars);
         mShader.shade->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
 
         // Our "last frame" is now the one we just rendered; remember where we stored out output reservoir.
@@ -160,6 +166,8 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
 // Renders the GUI used to change options on the fly when running in Mogwai.
 void RTXDITutorial5::renderUI(Gui::Widgets& widget)
 {
+    mpPixelDebug->renderUI(widget);
+
     // Provide controls for the number of samples on each light type (largely consistent options between tutorials)
     Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", true);
     candidateOptions.text("Number of per-pixel light candidates on:");
@@ -193,6 +201,6 @@ void RTXDITutorial5::renderUI(Gui::Widgets& widget)
     Gui::Group contextOptions(widget.gui(), "Precomputed light tile sizes", false);
     contextOptions.tooltip(kPrecomputedTileToolTip);
     if (contextOptions.var("Tile Count", mLightingParams.presampledTileCount, 1u, 1024u)) mpRtxdiContext = nullptr;
-    if (contextOptions.var("Tile Size", mLightingParams.presampledTileSize, 256u, 8192u, 128u)) mpRtxdiContext = nullptr;
+    if (contextOptions.var("Tile Size", mLightingParams.presampledTileSize, 8u, 8192u, 128u)) mpRtxdiContext = nullptr;
     contextOptions.release();
 }

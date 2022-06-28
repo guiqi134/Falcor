@@ -56,6 +56,8 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
+    printSetPixel(threadId);
+    
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -71,10 +73,12 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     RTXDI_Reservoir temporalResult = RTXDI_EmptyReservoir();
 
     // Actually execute the resampling on valid visibile geometry
+    uint currentLightIndex = -1;
     if (RAB_IsSurfaceValid(surface))
     {
         // We want to combine our previously-computed light sample...
         RTXDI_Reservoir curSample = RTXDI_LoadReservoir(params, launchIdx, gCurFrameInputReservoirIndex);
+        currentLightIndex = RTXDI_GetReservoirLightIndex(curSample);
 
         // ... with the results of our temporal resampling.  Set parameters here...
         RTXDI_TemporalResamplingParameters tparams;
@@ -84,8 +88,8 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         tparams.biasCorrectionMode = gBiasCorrectionMode;
         tparams.depthThreshold = gDepthThreshold;
         tparams.normalThreshold = gNormalThreshold;
-        tparams.enableVisibilityShortcut = gUseVisibilityShortcut;
-        tparams.enablePermutationSampling = gEnablePermutationSampling;
+        tparams.enableVisibilityShortcut = gUseVisibilityShortcut;      // false in this tutorial
+        tparams.enablePermutationSampling = gEnablePermutationSampling; // false in this tutorial
 
         // ... then actually spawn the temporal resampling.
         RAB_LightSample selectedSample = (RAB_LightSample)0;
@@ -101,6 +105,10 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         RTXDI_BoilingFilter(groupIndex, gBoilingFilterStrength, params, temporalResult);
     }
 #endif
+
+    // Check if current pixel's sample has been replaced in reusing
+    if (currentLightIndex != RTXDI_GetReservoirLightIndex(temporalResult)) 
+        gHasSampleChangedInReusing[launchIdx] = float4(1.0f);
 
     // Store the reservoir after temporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(temporalResult, params, launchIdx, gOutputReservoirIndex);

@@ -34,7 +34,7 @@
 */
 struct ShadowRayPayload
 {
-    float visFactor;  ///< Will be 1.0 for fully lit, 0.0 for fully shadowed
+    float visFactor;  // Will be 1.0 for fully lit, 0.0 for fully shadowed
 };
 
 /** The shadow ray is specific to the resampling project, and uses the ray epsilon in a different way.

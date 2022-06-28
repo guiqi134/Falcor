@@ -77,7 +77,9 @@ namespace Falcor
 
     inline std::vector<std::filesystem::path> getInitialShaderDirectories()
     {
+        // This is the path of /Source/RenderPass
         std::filesystem::path projectDir(_PROJECT_DIR_);
+        std::filesystem::path rtxdiDir = "C:/packman-repo/chk/rtxdi/1.3.0-falcor/rtxdi-sdk/include/rtxdi/";
 
         std::vector<std::filesystem::path> developmentDirectories =
         {
@@ -85,6 +87,7 @@ namespace Falcor
             projectDir,
             projectDir / "..",
             projectDir / ".." / "Tools" / "FalcorTest",
+            rtxdiDir,
             // Then we search in deployment folder (necessary to pickup NVAPI and other third-party shaders).
             getExecutableDirectory() / "Shaders",
         };

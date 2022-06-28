@@ -53,16 +53,16 @@ struct RAB_Surface
     //    file.  However, for now, this is a fairly exhaustive set of data (which may be partially
     //    redundant / irrelevant).
 
-    float3 mWorldPos;      ///<  World-space sample position
-    float  mViewDepth;     ///<  Viewing depth along the camera ray (aka "Z").  Values < 0 indicate invalid surfaces.
-    float3 mViewVector;    ///<  (Normalized) world-space vector from the sample to the camera
-    float  mDifPdf;        ///<  Probability of sampling from the diffuse lobe, given dif & spec mat'l params
-    float  mRoughness;     ///<  Material roughness
-    float  mNdotV;         ///<  Precomputed N dot V (easy to recompute, but probably fits in padding)
-    uint   mPackedDiffuse; ///<  Our packed diffuse color from our G-buffer
-    uint   mPackedSpec;    ///<  Our packed specular color from our G-buffer
-    float  mSpecReflect;   ///<  Our specular reflectance, eqivalent to luminance(getSpecularColor())
-    uint   mPackedNormal;  ///<  Our shading normal, packed via an oct32 mapping
+    float3 mWorldPos;      //  World-space sample position
+    float  mViewDepth;     //  Viewing depth along the camera ray (aka "Z").  Values < 0 indicate invalid surfaces.
+    float3 mViewVector;    //  (Normalized) world-space vector from the sample to the camera
+    float  mDifPdf;        //  Probability of sampling from the diffuse lobe, given dif & spec mat'l params
+    float  mRoughness;     //  Material roughness
+    float  mNdotV;         //  Precomputed N dot V (easy to recompute, but probably fits in padding)
+    uint   mPackedDiffuse; //  Our packed diffuse color from our G-buffer
+    uint   mPackedSpec;    //  Our packed specular color from our G-buffer
+    float  mSpecReflect;   //  Our specular reflectance, eqivalent to luminance(getSpecularColor())
+    uint   mPackedNormal;  //  Our shading normal, packed via an oct32 mapping
 
     // Accessors.  Right now, these are trivial, but may get more complex if data is compressed/de-duped
     bool   isValid()          { return (mViewDepth >= 0.0f); }
@@ -215,7 +215,7 @@ float RAB_GetSurfaceBrdfPdf(RAB_Surface surface, float3 dir)
     float  HdotV = saturate(dot(wsHalf, surface.getViewVector()));
 
     float ggxAlpha = surface.mRoughness * surface.mRoughness;   
-    float specularPdf = evalPdfGGX_NDF(ggxAlpha, dot(wsHalf,surface.getNormal())) / (4.f * HdotV);
+    float specularPdf = evalPdfGGX_NDF(ggxAlpha, dot(wsHalf, surface.getNormal())) / (4.f * HdotV); // D(wh) * cos(wh)
     float pdf = cosTheta > 0.f ? lerp(specularPdf, diffusePdf, surface.getProbToSampleDiffuseLobe()) : 0.f;
     return pdf;
 }

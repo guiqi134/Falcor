@@ -79,7 +79,7 @@ void RTXDITutorial2::runBasicRISLighting(RenderContext* pRenderContext, const Re
 
     // (Optional) Create a PDF texture for our primitive lights and environment map
     if (mLightingParams.initialLightPdfMode != kUniformSamplingMode)
-    computePDFTextures(pRenderContext, renderData);
+        computePDFTextures(pRenderContext, renderData);
 
     // (Optional) Create tiles of presampled lights once per frame to improve per-pixel memory coherence.
     // See:  Wyman & Panteleev, "Rearchitecting Spatiotemporal Resampling for Production," HPG 2021.

@@ -58,6 +58,12 @@
     <ClInclude Include="Combined\RTXDICombinedTutorial.h">
       <Filter>Combined</Filter>
     </ClInclude>
+    <ClInclude Include="Common\RtxdiParameters.h">
+      <Filter>Common Code</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\RtxdiTypes.h">
+      <Filter>Common Code</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">
@@ -169,6 +175,19 @@
     </ShaderSource>
     <ShaderSource Include="Shaders\RTXDI_TestCandidateVisibility.cs.slang">
       <Filter>Shaders\RTXDI\ForMultiplePipes</Filter>
+    </ShaderSource>
+    <ShaderSource Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\ResamplingFunctions.hlsli" />
+    <ShaderSource Include="Shaders\ResamplingFunctions.hlsli">
+      <Filter>Shaders\RTXDI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\Reservoir.hlsli">
+      <Filter>Shaders\RTXDI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RtxdiHelpers.hlsli">
+      <Filter>Shaders\RTXDI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RtxdiMath.hlsli">
+      <Filter>Shaders\RTXDI</Filter>
     </ShaderSource>
   </ItemGroup>
   <ItemGroup>

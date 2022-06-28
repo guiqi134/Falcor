@@ -34,15 +34,14 @@
 
 cbuffer ShadeCB
 {
-    uint  gInputReservoirIndex;       ///< Which reservoir contains the samples we should shade
-    bool  gDebugVis;                  ///< Debugging. TODO: Remove
+    uint  gInputReservoirIndex;       // Which reservoir contains the samples we should shade
+    bool  gDebugVis;                  // Debugging. TODO: Remove
 }
 
-Texture2D<float4> gInputEmission;     ///< Emissive color from the G-buffer
-RWTexture2D<float4> gOutputColor;     ///< Full output color (diffuse, specular, emissive, background)
+Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
+RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 
-
-void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission,
+void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, bool hasSampleChanged,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
@@ -53,6 +52,7 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 
     // Shoot a shadow ray to the selected light sample
     float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    // float isVisible = hasSampleChanged ? traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance()) : 1.0f;
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -97,6 +97,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
+    bool hasSampleChanged = gHasSampleChangedInReusing[launchIdx].r;
+
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0, specColor = 0;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
@@ -109,7 +111,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        Shade(reservoir, surface, lightSample, lightEmission, difColor, specColor);
+        Shade(reservoir, surface, lightSample, lightEmission, hasSampleChanged, difColor, specColor);
     }
 
     if (gDebugVis)
@@ -118,13 +120,13 @@ void main(uint3 threadId : SV_DispatchThreadID)
         gLocalLightPdfTexture.GetDimensions(displayTexSize.x, displayTexSize.y);
 
         float2 offset = float2(launchIdx) / float2(gFrameSize);
-        uint2  mipTex = uint2( offset * displayTexSize);
+        uint2  mipTex = uint2(offset * displayTexSize);
         float4 col = gLocalLightPdfTexture.Load(int3(mipTex.x, mipTex.y, 0));
         gOutputColor[launchIdx] = float4(col.r, col.g, col.b, 1.0f);
     }
     else
     {
-        // Add any directly-visible emssion & environment maps, then store our final color
+        // Add any directly-visible emission & environment maps, then store our final color
         float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
         gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
     }

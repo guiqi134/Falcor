@@ -37,13 +37,13 @@
 
 cbuffer CB
 {
-    uint gLightSamplingMode;  ///< Which sampling scheme should we use to pick our initial candidates?
-    uint gNumTriSamples;      ///< How many samples should we take on emissive triangles?
-    uint gNumEnvSamples;      ///< How many samples should we take on the environment map?
+    uint gLightSamplingMode;  // Which sampling scheme should we use to pick our initial candidates?
+    uint gNumTriSamples;      // How many samples should we take on emissive triangles?
+    uint gNumEnvSamples;      // How many samples should we take on the environment map?
 }
 
-Texture2D<float4> gInputEmission;   ///< Emissive color from the G-buffer
-RWTexture2D<float4> gOutputColor;   ///< Full output color (diffuse, specular, emissive, background)
+Texture2D<float4> gInputEmission;   // Emissive color from the G-buffer
+RWTexture2D<float4> gOutputColor;   // Full output color (diffuse, specular, emissive, background)
 
 
 // Shade a specific sample on a light at a given surface
@@ -63,6 +63,7 @@ float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmiss
     float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model, with NdotLs cancelled
 
     // Return our shading result, <shadow-ray> * L * <geometry-term> * BRDF
+    // Song: why it is area to solid angle? According to PBRT book, I think we are integrating over area right?
     return isVisible * max(float3(0.0f), lightEmission * lightSample.getJacobianAtoW() * (diffuseLobe + specularLobe));
 }
 
@@ -103,10 +104,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         // Get a candidate sample from some random UV on the selected emissive light
         float2 uv = GetRandomUV(rng);   // In [0..1) x [0..1)
-        RAB_LightInfo   selectedLight   = RAB_LoadLightInfo(rndLight, false);
-        RAB_LightSample candidateSample = RAB_SamplePolymorphicLight(selectedLight, surface, uv);
+        RAB_LightInfo   selectedLight   = RAB_LoadLightInfo(rndLight, false); // this is a triangle light not light sample
+        RAB_LightSample candidateSample = RAB_SamplePolymorphicLight(selectedLight, surface, uv); // then we select a sample from this triangle emissive
 
-        // We uniformly sampled our triangle UVs, so update our sampling PDF by 1/<triangle-area> to account for this
+        // We uniformly sampled our triangle UVs, so update our sampling PDF by 1/<triangle-area> to account for this.
+        // Compare to the returned pdf from Falcor's sampleLight() method, the pdf here is for area and Falcor's is 
+        // for solid angle, so we need to add the Jacobian term (<geometry-term>) in Shade() function.
         invPdf = invPdf * selectedLight.getLightArea();
 
         // Shade the sample
