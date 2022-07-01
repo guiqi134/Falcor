@@ -60,12 +60,10 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override { mpPixelDebug->renderUI(widget); }
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
-
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 protected:
     RTXDITutorialBase(const Dictionary& dict, const RenderPass::Info& desc);
-
-    PixelDebug::SharedPtr mpPixelDebug;
 
     /** Config setting : Maximum number of unique screen-sized reservoir bufers needed by any
         of our derived RTXDI tutorials.  This just controls memory allocation (not really perf)
@@ -197,6 +195,21 @@ protected:
         uint32_t priorGBufferIndex = 1u;            // Which of the two G-buffers is the prior one?
     } mLightingParams;
 
+    PixelDebug::SharedPtr mpPixelDebug;
+
+    // SSRT parameters 
+    enum class VisibilityMode { ShadowRay, SSRT };
+    VisibilityMode mVisibilityMode = VisibilityMode::ShadowRay;
+    Sampler::SharedPtr mpTrilinearSampler;
+    bool mFrozenFrame = false;
+
+    struct {
+        GraphicsProgram::SharedPtr pProgram;
+        GraphicsVars::SharedPtr pVars;
+        GraphicsState::SharedPtr pState;
+        Fbo::SharedPtr pFbo;
+    } mZBufferPass;
+
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     // Various internal pass utilities, setup/allocation routines, and common routines for
@@ -249,4 +262,8 @@ protected:
         purposes must be understood for a very crude RTXDI integration.
     */
     void loadCommonShaders(void);
+
+    // SSRT functions
+    void setupSSRTVars(ShaderVar& vars);
+    void runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData);
 };

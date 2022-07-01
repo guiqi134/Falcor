@@ -108,6 +108,9 @@
     <Filter Include="Combined">
       <UniqueIdentifier>{ec0f89f0-558f-459b-9986-8241ab34022c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\SSRT">
+      <UniqueIdentifier>{2b537cf1-645a-4844-96ed-8d7638b41256}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="Shaders\RTXDI_GenerateCandidates.cs.slang">
@@ -188,6 +191,12 @@
     </ShaderSource>
     <ShaderSource Include="Shaders\RtxdiMath.hlsli">
       <Filter>Shaders\RTXDI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\SSRT.slang">
+      <Filter>Shaders\SSRT</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\CameraSpaceZBuffer.3d.slang">
+      <Filter>Shaders\SSRT</Filter>
     </ShaderSource>
   </ItemGroup>
   <ItemGroup>

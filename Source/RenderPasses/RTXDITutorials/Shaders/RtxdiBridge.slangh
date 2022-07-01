@@ -108,9 +108,6 @@ Buffer<float2> gNeighborBuffer;
 // Our motion vector texture from the G-buffer pass
 Texture2D<float4> gMotionVectorTexture;
 
-// Deubg textures
-RWTexture2D<float4> gHasSampleChangedInReusing;
-
 // Define buffers for RTXDI to access data from.
 #define RTXDI_RIS_BUFFER gRisBuffer
 #define RTXDI_LIGHT_RESERVOIR_BUFFER gLightReservoirs
@@ -138,4 +135,7 @@ RWTexture2D<float4> gHasSampleChangedInReusing;
 // Go ahead and include the RTXDI SDK's HLSL functions
 // #include "rtxdi/ResamplingFunctions.hlsli"
 #include "ResamplingFunctions.hlsli"
+
+// Deubg textures
+RWTexture2D<float4> gHasSampleChangedInReusing;
 

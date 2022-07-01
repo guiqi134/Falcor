@@ -23,11 +23,13 @@ VSOut vsMain(VSIn vIn)
 
 
 /*
-D3DXMatrixPerspectiveFovRH (row major):
+D3DXMatrixPerspectiveFovRH (be care, it is row major!!!):
 xScale     0          0              0
 0        yScale       0              0
 0          0      zf/(zn-zf)        -1
 0          0      zn*zf/(zn-zf)      0
+
+Transform from NDC to camera space
 */
 float LinearizeDepth(float depth)
 {

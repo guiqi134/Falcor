@@ -61,7 +61,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
-    const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
+    const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams; // Song: why do a const copy here?
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
     // Initialize our random number generator.  

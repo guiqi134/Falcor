@@ -47,6 +47,8 @@ RTXDITutorial1::SharedPtr RTXDITutorial1::create(RenderContext* pRenderContext, 
 
 void RTXDITutorial1::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -66,13 +68,18 @@ void RTXDITutorial1::execute(RenderContext* pRenderContext, const RenderData& re
     // divergence when resampling for spatiotemporal reuse. 
     prepareSurfaceData(pRenderContext, renderData);
 
+    // Do z-buffer raster pass
+    runZBufferRaster(pRenderContext, renderData);
+
     // For each pixel in our image, randomly select some number of points on our lights, send shadow
     // rays to each one, and accumulate lighting using standard Monte Carlo integration (i.e., no fancy
     // RIS or RTXDI integration).
     runMonteCarloLighting(pRenderContext, renderData);
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
-    mRtxdiFrameParams.frameIndex++;
+    if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void RTXDITutorial1::runMonteCarloLighting(RenderContext* pRenderContext, const RenderData& renderData)
@@ -100,6 +107,8 @@ void RTXDITutorial1::runMonteCarloLighting(RenderContext* pRenderContext, const 
         mcVars["gOutputColor"] = renderData["color"]->asTexture();                 // Per-pixel output color goes here
         mcVars["gInputEmission"] = mResources.emissiveColors;                      // Input from prepareSurfaceData() -- contains directly seen emissives
         setupRTXDIBridgeVars(mcVars, renderData);                                  // Setup data structures needed by RTXDI shader routines
+        setupSSRTVars(mcVars);
+        mpPixelDebug->prepareProgram(mShader.monteCarloBaseline->getProgram(), mcVars);
         mShader.monteCarloBaseline->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 }
@@ -132,4 +141,7 @@ void RTXDITutorial1::renderUI(Gui::Widgets& widget)
         if (contextOptions.var("Tile Size", mLightingParams.presampledTileSize, 256u, 8192u, 128u)) mpRtxdiContext = nullptr;
         contextOptions.release();
     }
+
+    widget.checkbox("Frozen current frame", mFrozenFrame);
+    mpPixelDebug->renderUI(widget);
 }

@@ -75,6 +75,12 @@ RTXDITutorialBase::RTXDITutorialBase(const Dictionary& dict, const RenderPass::I
     }
 
     mpPixelDebug = PixelDebug::create();
+
+    Sampler::Desc samplerDesc;
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(0.0f));
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+    samplerDesc.setComparisonMode(Sampler::ComparisonMode::Disabled);
+    mpTrilinearSampler = Sampler::create(samplerDesc);
 }
 
 
@@ -156,6 +162,23 @@ void RTXDITutorialBase::setScene(RenderContext* pContext, const Scene::SharedPtr
         mPassData.updateEmissiveTriangleFlux = true;
         mPassData.updateEmissiveTriangleGeom = true;
     }
+}
+
+bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
+{
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
+    {
+        mVisibilityMode = VisibilityMode::ShadowRay;
+        return true;
+    }
+
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
+    {
+        mVisibilityMode = VisibilityMode::SSRT;
+        return true;
+    }
+
+    return false;
 }
 
 /** When RTXDI reuses spatial neighbors, it is _not_ a dense reuse (e.g., of all pixels in a 5x5 regions).
@@ -465,7 +488,7 @@ ComputePass::SharedPtr RTXDITutorialBase::createComputeShader(const std::string&
 
     // Falcor doesn't, by default, pass down scene geometry, materials, etc. for compute shaders.  But we'll need that
     // in all (or most) of our shaders in these tutorials, so just automatically send this data down.
-    pShader->getRootVar()["gScene"] = mPassData.scene->getParameterBlock(); // Song: do we really need this? 
+    pShader->getRootVar()["gScene"] = mPassData.scene->getParameterBlock(); 
     return pShader;
 }
 
@@ -511,6 +534,56 @@ void RTXDITutorialBase::loadShaders()
     mShader.initialCandidateVisibility = createComputeShader(kRTXDI_InitialVisibility);
     mShader.shade = createComputeShader(kRTXDI_Shade);
 
+    // Create ZBuffer raster pass
+    {
+        Program::Desc desc(kShaderDirectory + "CameraSpaceZBuffer.3d.slang"); // TODO: move to constant variable
+        desc.vsEntry("vsMain").psEntry("psMain");
+        desc.setShaderModel("6_5");
+
+        mZBufferPass.pProgram = GraphicsProgram::create(desc);
+        mZBufferPass.pProgram->addDefines(mPassData.scene->getSceneDefines());
+        mZBufferPass.pProgram->setTypeConformances(mPassData.scene->getTypeConformances());
+
+        mZBufferPass.pState = GraphicsState::create(); // Note: the default depth stencil state compare funtion is LESS
+        mZBufferPass.pState->setProgram(mZBufferPass.pProgram);
+
+        mZBufferPass.pVars = GraphicsVars::create(mZBufferPass.pProgram->getReflector());
+
+        // We need 4 channels to perform multi-layer depth
+        mZBufferPass.pFbo = Fbo::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA16Float, ResourceFormat::D32Float);
+    }
 }
 
+void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars)
+{
+    // Set all constant buffer parameters
+    vars["SSRT_CB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
+    vars["SSRT_CB"]["gCameraToClip"] = mPassData.scene->getCamera()->getProjMatrix();
+    vars["SSRT_CB"]["gVisibilityMode"] = uint(mVisibilityMode);
+    vars["SSRT_CB"]["gNearPlaneZ"] = -mPassData.scene->getCamera()->getNearPlane(); // Note: negative number
+    vars["SSRT_CB"]["gTrilinearSampler"] = mpTrilinearSampler;
 
+    // Set other texture/buffer objects
+    vars["gCameraSpaceZBuffer"] = mZBufferPass.pFbo->getColorTexture(0);
+}
+
+void RTXDITutorialBase::runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("zBuffer Raster");
+
+    //if (mVisibilityMode == VisibilityMode::ShadowRay) return;
+
+    // Attach FBO
+    pRenderContext->clearFbo(mZBufferPass.pFbo.get(), float4(0.0f), 1.0f, 0); // clear all components (RTV, DSV)
+    mZBufferPass.pState->setFbo(mZBufferPass.pFbo);
+
+    // Set shader variables
+    auto vars = mZBufferPass.pVars->getRootVar();
+    vars["ZBufferCB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
+    vars["ZBufferCB"]["gNearPlane"] = mPassData.scene->getCamera()->getNearPlane();
+    vars["ZBufferCB"]["gFarPlane"] = mPassData.scene->getCamera()->getFarPlane();
+    vars["gDebug"] = renderData["debug"]->asTexture(); // debug z-buffer, need to take absolute value
+
+    mpPixelDebug->prepareProgram(mZBufferPass.pProgram, vars);
+    mPassData.scene->rasterize(pRenderContext, mZBufferPass.pState.get(), mZBufferPass.pVars.get(), RasterizerState::CullMode::None);
+}

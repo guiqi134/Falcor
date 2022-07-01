@@ -35,6 +35,9 @@
 #include "RtxdiBridge.slangh"
 #include "BaselineSampling.slangh"
 
+import Utils.Geometry.GeometryHelpers;
+import SSRT;
+
 cbuffer CB
 {
     uint gLightSamplingMode;  // Which sampling scheme should we use to pick our initial candidates?
@@ -50,7 +53,24 @@ RWTexture2D<float4> gOutputColor;   // Full output color (diffuse, specular, emi
 float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission)
 {
     // Shoot a shadow ray to the selected light sample
-    float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    float3 rayOrigin = computeRayOrigin(RAB_GetSurfaceWorldPos(surface), RAB_GetSurfaceNormal(surface));
+    // float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
+    float4 rayDirLen = lightSample.getDirectionAndDistance();
+    float isVisible = 1.0f;
+
+    if (gVisibilityMode == 0)
+    {
+        isVisible = traceShadowRay(rayOrigin, rayDirLen);
+    }
+    else
+    {
+        float3 csRayOrigin = mul(float4(rayOrigin, 1.0f), gWorldToCamera).xyz;
+        float3 csRayDir = mul(float4(rayDirLen.xyz, 1.0f), gWorldToCamera).xyz;
+        float2 csZBufferSize;
+        gCameraSpaceZBuffer.GetDimensions(csZBufferSize.x, csZBufferSize.y);
+
+        isVisible = traceScreenSpaceShadowRay(csRayOrigin, csRayDir, csZBufferSize, rayDirLen.w);
+    }
 
     // Compute the BRDF terms for the target function.
     float  D = surface.getNdf(lightSample.NdotH());
@@ -71,6 +91,8 @@ float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmiss
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+
     // Find where we are on the screen 
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;

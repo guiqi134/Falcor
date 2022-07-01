@@ -52,6 +52,7 @@
     </ShaderSource>
     <ShaderSource Include="Shaders\BaselineSampling.slangh" />
     <ClInclude Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\RTXDI.h" />
+    <ShaderSource Include="Shaders\CameraSpaceZBuffer.3d.slang" />
     <ShaderSource Include="Shaders\InlineShadowRay.slangh" />
     <ShaderSource Include="Shaders\RAB_LightInfo.slangh" />
     <ShaderSource Include="Shaders\RAB_LightSample.slangh" />
@@ -78,6 +79,7 @@
     <ShaderSource Include="Shaders\RTXDI_SpatiotemporalReuse.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_TemporalReuse.cs.slang" />
     <ShaderSource Include="Shaders\RTXDI_TestCandidateVisibility.cs.slang" />
+    <ShaderSource Include="Shaders\SSRT.slang" />
     <ShaderSource Include="Shaders\StandardShadowRay.slangh" />
   </ItemGroup>
   <ItemGroup>
