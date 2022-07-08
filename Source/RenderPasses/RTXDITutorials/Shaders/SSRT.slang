@@ -5,11 +5,19 @@ cbuffer SSRT_CB
     float4x4 gWorldToCamera;
     float4x4 gCameraToClip;
     uint gVisibilityMode; // 0: Shadow Ray, 1: SSRT
+
+    float2 gCsRayOriginLenEpsilon;
     float gNearPlaneZ;
-    SamplerState gTrilinearSampler;
+    float gCsZThickness;
+    float gStride;
+    float gJitterFraction;
+    float gMaxSteps;
+    uint gLayers;
+    SamplerState gTrilinearSampler; // TODO: remove
 }
 
 Texture2D gCameraSpaceZBuffer;
+RWTexture2D gDebug;
 
 void swap(inout float a, inout float b)
 {
@@ -64,21 +72,13 @@ float4 toHomegeneousScreenSpace(float4 clipCoords, float2 screenSize)
 
     \param hitPixel Pixel coordinates of the first intersection with the scene
 
-    \param which Which layer has the ray hit
-
     \return true is visible, false is occluded
-
-    TODO: using depth-peeling to generate multi-layer depth buffer 
 */
 bool traceScreenSpaceShadowRay(
-    float3          csOrigin, 
-    float3          csDirection,
-    float2          csZBufferSize,
-    float           maxRayTraceDistance,
-    float           csZThickness = 0.f, 
-    float			stride = 1.0f,
-    float           jitterFraction = 0.0f,
-    float           maxSteps = 1,
+    float3 csOrigin, 
+    float3 csDirection,
+    float2 csZBufferSize,
+    float maxRayTraceDistance,
 )
 {
     // Clip ray to a near plane in 3D (doesn't have to be *the* near plane, although that would be a good idea)
@@ -88,38 +88,41 @@ bool traceScreenSpaceShadowRay(
                         maxRayTraceDistance;
 	float3 csEndPoint = csDirection * rayLength + csOrigin;
 
-    print("csOrigin = ", csOrigin);
-    print("csDireciton = ", csDirection);
     print("rayLength = ", rayLength);
+    print("csOrigin = ", csOrigin);
+    print("csEndPoint = ", csEndPoint);
+    print("csDireciton = ", csDirection);
+    // print("rayLength = ", rayLength);
 
     // Project into clip space
     float4 H0 = mul(float4(csOrigin, 1.0), gCameraToClip);
     float4 H1 = mul(float4(csEndPoint, 1.0), gCameraToClip);
-
-    print("H0 = ", H0);
 
     // There are a lot of divisions by w that can be turned into multiplications at some minor precision loss...and we need to interpolate these 1/w values anyway.
     // Because the caller was required to clip to the near plane, this homogeneous division (projecting from 4D to 2D) is guaranteed to succeed. 
     float k0 = 1.0 / H0.w; // LH system -> w = -z
     float k1 = 1.0 / H1.w;
 
+    print("k0 = ", k0);
+    print("k1 = ", k1);
+
     // Switch the original points to values that interpolate linearly in 2D.
     // Note: the "Q" notation from the paper refers to the camera space point without multipling with "k" and the z value in Q is in the range [0, 1]  
     float3 Q0 = csOrigin * k0; 
     float3 Q1 = csEndPoint * k1;
 
+    print("Q0 = ", Q0);
+    print("Q1 = ", Q1);
+
     // Clip space -> NDC -> Screen-space endpoints 
     float2 P0 = (H0.xy * k0  * float2(0.5f, -0.5f) + float2(0.5f)) * csZBufferSize; 
     float2 P1 = (H1.xy * k1  * float2(0.5f, -0.5f) + float2(0.5f)) * csZBufferSize; 
-
-    print("P0 = ", P0);
-    print("P1 = ", P1);
 
     // TODO: [Optional clipping to frustum sides here]
 
     // Initialize to off screen
     float2 hitPixel = float2(-1.0, -1.0); // This actually is uint2
-    int which = 0; // Only one layer
+    int hitLayer = -1; 
 
     // If the line is degenerate, make it cover at least one pixel to avoid handling zero-pixel extent as a special case later
     P1 += float2((distanceSquared(P0, P1) < 0.0001) ? 0.01 : 0.0);
@@ -136,28 +139,37 @@ bool traceScreenSpaceShadowRay(
         // Directly swizzle the inputs
 		delta = delta.yx;
 		P1 = P1.yx;
-		P0 = P0.yx;        
+		P0 = P0.yx;
 	}
+
+    print("permute = ", permute);
+    print("P0 = ", P0);
+    print("P1 = ", P1);
+    print("delta = ", delta);
     
 	// From now on, "x" is the primary iteration direction and "y" is the secondary one
 
     float stepDirection = sign(delta.x); // -1 or 1
     float invdx = stepDirection / delta.x; // Transform to +x direction
     float2 dP = float2(stepDirection, invdx * delta.y); // e.g. dP = (1, y/x), it is the differential of x, y in Eq.1
+    print("dP = ", dP);
 
     // Track the derivatives of Q and k
     float3 dQ = (Q1 - Q0) * invdx;
     float dk = (k1 - k0) * invdx;
 
+    print("dQ = ", dQ);
+    print("dk = ", dk);
+
     // Scale derivatives by the desired pixel stride
-	dP *= stride; 
-    dQ *= stride; 
-    dk *= stride;
+	dP *= gStride; 
+    dQ *= gStride; 
+    dk *= gStride;
 
     // Offset the starting values by the jitter fraction
-	P0 += dP * jitterFraction; 
-    Q0 += dQ * jitterFraction; 
-    k0 += dk * jitterFraction;
+	P0 += dP * gJitterFraction; 
+    Q0 += dQ * gJitterFraction; 
+    k0 += dk * gJitterFraction;
 
 	// Slide P from P0 to P1, (now-homogeneous) Q from Q0 to Q1, and k from k0 to k1
     float3 Q = Q0;
@@ -168,20 +180,17 @@ bool traceScreenSpaceShadowRay(
 	float prevZMaxEstimate = csOrigin.z;
     float stepCount = 0.0;
     float rayZMax = prevZMaxEstimate, rayZMin = prevZMaxEstimate;
-    float sceneZMax = rayZMax + 1e4;
+    float4 sceneZMax;
 
-    // P1.x is never modified after this point, so pre-scale it by the step direction for a signed comparison, this is to transform point to +x direction
+    // P1.x is never modified after this point, so pre-scale it by the step direction for a signed comparison.
     float end = P1.x * stepDirection;
+    print("end = ", end);
 
     // We only advance the z field of Q in the inner loop, since Q.xy is never used until after the loop terminates.
 
-	for (float2 P = P0;
-        ((P.x * stepDirection) <= end) && 
-        (stepCount < maxSteps) && 
-        ((rayZMax < sceneZMax - csZThickness) || // csZThickness is positive value, so we need to transform it to negative measure
-            (rayZMin > sceneZMax)) && // If sceneZMax is not inside the range of rayZMax and rayZMin, then there is no hit found
-        (sceneZMax != 0.0); // This is to perform implicit viewport clipping for out-of bound depth buffer sample  
-        P += dP, Q.z += dQ.z, k += dk, stepCount += 1.0) 
+    float2 P = P0;
+    for (; ((P.x * stepDirection) <= end) && (stepCount < gMaxSteps);
+        P += dP, Q.z += dQ.z, k += dk, stepCount += 1.0) // TODO: remove Q.z and dQ.z?
     {
         
         // Get the true pixel coordinate (not normalized)
@@ -193,27 +202,52 @@ bool traceScreenSpaceShadowRay(
         rayZMin = prevZMaxEstimate;
 
         // Compute the value at 1/2 pixel into the future
-        rayZMax = (dQ.z * 0.5 + Q.z) / (dk * 0.5 + k); // by dividing k, we transform back to the camera space (z is negative)
+        rayZMax = (Q.z + dQ.z * 0.5) / (k + dk * 0.5); // by dividing k, we transform back to the camera space (z is negative)
 		prevZMaxEstimate = rayZMax;
         if (rayZMin > rayZMax) swap(rayZMin, rayZMax);
 
-        // Camera-space z of the background
-        // Note: the z buffer need to be in camera space, sample location needs to be normalized
-        float2 texCoords = (uint2(hitPixel) + float2(0.5f)) / csZBufferSize; // Song: Do I need to add half pixel?
-        print("texCoords = ", texCoords);
-        sceneZMax = gCameraSpaceZBuffer.SampleLevel(gTrilinearSampler, texCoords, 0).r;
+        // Camera-space z of the background. We don't need to use sample method.
+        float4 sceneZMax = gCameraSpaceZBuffer[uint2(hitPixel)];
+        float4 sceneZMin = sceneZMax - gCsZThickness;
+
+        // Go over all layers to check whether there is a hit in one of the layer
+        // TODO: can we reduce the number of iteration by ignoring some dummy layers where depth is on the far plane?
+        for (uint layer = 0; layer < gLayers; layer++)
+        {
+            if (((rayZMax >= sceneZMin[layer]) && (rayZMin <= sceneZMax[layer])) || // A hit is found if there is a overlap between scene depth range and ray depth range 
+                (sceneZMax[layer] == 0)) // This is to perform implicit viewport clipping for out-of bound depth buffer sample
+            {
+                hitLayer = layer;
+                break;
+            }
+        }
+
+        // TODO: Ours approach for using multi-layers
+        // for (uint layer = 0; layer < gLayers; layer += 2)
+        // {
+
+        // }
+        
+        // Hit found also break the outer loop
+        if (hitLayer != -1)
+            break;
     }
-    print("csOrigin.z = ", csOrigin.z);
+
+    print("P = ", P);
+    print("hitPixel = ", hitPixel);
     print("stepCount = ", stepCount);
     print("rayZMax = ", rayZMax);
     print("rayZMin = ", rayZMin);
-    print("sceneZax = ", sceneZMax);
+    print("sceneZMax = ", sceneZMax);
 
     Q.xy += dQ.xy * stepCount;
     float3 csHitPoint = Q * (1.0 / k);
-    print("csHitPoint = ", csHitPoint);
+    // print("csHitPoint = ", csHitPoint);
 
-    // Check whether the ray hit
-    bool isVisible = !((rayZMax >= sceneZMax - csZThickness) && (rayZMin <= sceneZMax));
+    // Check the visibility
+    bool isVisible = hitLayer == -1                                                      ? true // Hit or not?
+                     : all(abs(hitPixel - (csZBufferSize * 0.5)) <= csZBufferSize * 0.5) ? false // If hit, is it a vaild screen point?
+                                                                                         : true;
     return isVisible;
 }
+

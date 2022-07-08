@@ -1,9 +1,18 @@
 
 # Define important scene parameters
-scene = 'Arcade/Arcade.pyscene'
+sceneName = 'CornellBox'
 currentTime = 0.0
 paused = True
 animateCamera = False
+
+scene = ''
+exposureCompensation = 0.0
+if sceneName == 'Arcade':
+    scene = 'Arcade/Arcade.pyscene'
+    exposureCompensation = 2.5
+elif sceneName == 'CornellBox':
+    scene = 'TestScenes/CornellBox.pyscene'
+    exposureCompensation = 0.0
 
 def graph_ImportanceResampling():
     # What libraries (with passes) do we need to load to build our renderer?
@@ -24,7 +33,7 @@ def graph_ImportanceResampling():
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 2.5, # default one is 0.0f
+        'exposureCompensation' : exposureCompensation, # default one is 0.0f
     }
     gAccumParams = {
         'enabled': False,

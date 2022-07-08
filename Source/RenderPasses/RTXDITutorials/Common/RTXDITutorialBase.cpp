@@ -126,6 +126,19 @@ void RTXDITutorialBase::compile(RenderContext* pContext, const CompileData& comp
     }
 }
 
+// Common execute functions
+void RTXDITutorialBase::execute(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    // Auto reset accumulation
+    auto& dict = renderData.getDictionary();
+    if (mResetAccumulation)
+    {
+        auto flags = dict.getValue(kRenderPassRefreshFlags, Falcor::RenderPassRefreshFlags::None);
+        flags |= Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        dict[Falcor::kRenderPassRefreshFlags] = flags;
+    }
+}
+
 
 /** Updates flags inside this base class to (selectively/lazily) rebuild structures due to dynamic scene changes
 */
@@ -164,17 +177,56 @@ void RTXDITutorialBase::setScene(RenderContext* pContext, const Scene::SharedPtr
     }
 }
 
+void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
+{
+    bool dirty = false;
+
+    // SSRT UI controls
+    Gui::Group SSRTOptions(widget.gui(), "SSRT Options", true);
+    dirty = SSRTOptions.var("SSRT Epsilon", mSSRTParams.csRayOriginLenEpsilon);
+    SSRTOptions.tooltip(
+        "Camera space ray origin and length offset (ray's parametric value t). The first is value t1 is used to advance the ray origin in ray direction"
+        "by t1 and the second value t2 (along with t1) is used to shorten the ray length."
+    );
+    dirty = SSRTOptions.var("Thickness", mSSRTParams.csZThickness, 0.0f, 1.0f);
+    SSRTOptions.tooltip(
+        "Camera space positive z thickness used for scene depth. It would result the scene depth has a range [sceneZMax, sceneZMax - zThickness] instead of a single value."
+        "Larger value will introduce more shadow in the scene"
+    );
+    dirty = SSRTOptions.var("stride", mSSRTParams.stride, 1.0f, 1000.0f, 1.0f);
+    SSRTOptions.tooltip(
+        "Stride for 2D ray marching iteration. It not only affects the differential stride we take, but also the ray's min and max range in each iteration."
+        "Larger value will increase the ray's depth range which would cause the banding issue (discrete evaluation start to show up)."
+    );
+    dirty = SSRTOptions.var("Jitter Fraction", mSSRTParams.jitterFraction, 0.0f, 1.0f);
+    SSRTOptions.tooltip(
+        "Jitter fraction for ray origin's pixel position. It is used to reduce banding artifact in large stride"
+    );
+    dirty = SSRTOptions.var("Max Steps", mSSRTParams.maxSteps, 1.0f, 1000.0f, 1.0f);
+    SSRTOptions.tooltip("Max iteration steps");
+    dirty = SSRTOptions.var("Layers", mSSRTParams.layers, 1u, 4u);
+    SSRTOptions.tooltip("Number of depth layers in z-buffer");
+    SSRTOptions.release();
+
+    widget.checkbox("Frozen current frame", mFrozenFrame);
+    mpPixelDebug->renderUI(widget);
+
+    mResetAccumulation = dirty;
+}
+
 bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
 {
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
     {
         mVisibilityMode = VisibilityMode::ShadowRay;
+        mResetAccumulation = true;
         return true;
     }
 
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
     {
         mVisibilityMode = VisibilityMode::SSRT;
+        mResetAccumulation = true;
         return true;
     }
 
@@ -544,46 +596,73 @@ void RTXDITutorialBase::loadShaders()
         mZBufferPass.pProgram->addDefines(mPassData.scene->getSceneDefines());
         mZBufferPass.pProgram->setTypeConformances(mPassData.scene->getTypeConformances());
 
+        DepthStencilState::Desc dsStateDesc;
+        auto pDepthStencilState = DepthStencilState::create(dsStateDesc);
+
         mZBufferPass.pState = GraphicsState::create(); // Note: the default depth stencil state compare funtion is LESS
         mZBufferPass.pState->setProgram(mZBufferPass.pProgram);
 
+
         mZBufferPass.pVars = GraphicsVars::create(mZBufferPass.pProgram->getReflector());
 
-        // We need 4 channels to perform multi-layer depth
-        mZBufferPass.pFbo = Fbo::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA16Float, ResourceFormat::D32Float);
+        // We need 4 channels to perform multi-layer depth.
+        // Note: we have to use 32-float because 16-float will cause some numerical issues
+        mZBufferPass.pFbo = Fbo::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA32Float, ResourceFormat::D32Float);
     }
 }
 
-void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars)
+void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderData)
 {
     // Set all constant buffer parameters
     vars["SSRT_CB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
     vars["SSRT_CB"]["gCameraToClip"] = mPassData.scene->getCamera()->getProjMatrix();
     vars["SSRT_CB"]["gVisibilityMode"] = uint(mVisibilityMode);
     vars["SSRT_CB"]["gNearPlaneZ"] = -mPassData.scene->getCamera()->getNearPlane(); // Note: negative number
+    vars["SSRT_CB"]["gCsRayOriginLenEpsilon"] = mSSRTParams.csRayOriginLenEpsilon; 
+    vars["SSRT_CB"]["gCsZThickness"] = mSSRTParams.csZThickness; 
+    vars["SSRT_CB"]["gStride"] = mSSRTParams.stride; 
+    vars["SSRT_CB"]["gJitterFraction"] = mSSRTParams.jitterFraction; 
+    vars["SSRT_CB"]["gMaxSteps"] = mSSRTParams.maxSteps;
+    vars["SSRT_CB"]["gLayers"] = mSSRTParams.layers;
     vars["SSRT_CB"]["gTrilinearSampler"] = mpTrilinearSampler;
 
     // Set other texture/buffer objects
     vars["gCameraSpaceZBuffer"] = mZBufferPass.pFbo->getColorTexture(0);
+    vars["gDebug"] = renderData["debug"]->asTexture(); // debug z-buffer, need to take absolute value
 }
 
 void RTXDITutorialBase::runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("zBuffer Raster");
 
-    //if (mVisibilityMode == VisibilityMode::ShadowRay) return;
+    if (mVisibilityMode == VisibilityMode::ShadowRay) return;
 
-    // Attach FBO
-    pRenderContext->clearFbo(mZBufferPass.pFbo.get(), float4(0.0f), 1.0f, 0); // clear all components (RTV, DSV)
+    // Ping-pong buffer for depth peeling
+    auto& pFbo = mZBufferPass.pFbo;
+
+    // Attach FBO. Note: we use color texture as camera space z-buffer
+    pRenderContext->clearRtv(mZBufferPass.pFbo->getRenderTargetView(0).get(), float4(-mPassData.scene->getCamera()->getFarPlane()));
     mZBufferPass.pState->setFbo(mZBufferPass.pFbo);
 
-    // Set shader variables
-    auto vars = mZBufferPass.pVars->getRootVar();
-    vars["ZBufferCB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
-    vars["ZBufferCB"]["gNearPlane"] = mPassData.scene->getCamera()->getNearPlane();
-    vars["ZBufferCB"]["gFarPlane"] = mPassData.scene->getCamera()->getFarPlane();
-    vars["gDebug"] = renderData["debug"]->asTexture(); // debug z-buffer, need to take absolute value
+    // We use FBO's color component as a multi-layer depth buffer (since color texture has four channels).
+    // And in each pass we store the depth into one of its channel and then move to process the next. We also need
+    // to use the previous pass's depth to peel current pass, so color info should be kept in this loop
+    for (uint i = 0; i < mSSRTParams.layers; i++)
+    {
+        // Clear the depth buffer
+        pRenderContext->clearDsv(mZBufferPass.pFbo->getDepthStencilView().get(), 1.0f, 0);
 
-    mpPixelDebug->prepareProgram(mZBufferPass.pProgram, vars);
-    mPassData.scene->rasterize(pRenderContext, mZBufferPass.pState.get(), mZBufferPass.pVars.get(), RasterizerState::CullMode::None);
+        // Set shader variables
+        auto vars = mZBufferPass.pVars->getRootVar();
+        vars["ZBufferCB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
+        vars["ZBufferCB"]["gNearPlane"] = mPassData.scene->getCamera()->getNearPlane();
+        vars["ZBufferCB"]["gFarPlane"] = mPassData.scene->getCamera()->getFarPlane();
+        vars["ZBufferCB"]["gPrevCurrLayerIndex"] = i == 0 ? uint2(0) : uint2(i - 1, i);
+        vars["gPrevZBuffer"] = mZBufferPass.pFbo->getColorTexture(0); // no need to peel in layer 0 
+
+        mpPixelDebug->prepareProgram(mZBufferPass.pProgram, vars);
+        mPassData.scene->rasterize(pRenderContext, mZBufferPass.pState.get(), mZBufferPass.pVars.get(), RasterizerState::CullMode::None);
+    }
+
+
 }

@@ -57,7 +57,8 @@ public:
 
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pContext, const CompileData& compileData) override;
-    virtual void renderUI(Gui::Widgets& widget) override { mpPixelDebug->renderUI(widget); }
+    virtual void execute(RenderContext* pContext, const RenderData& renderData) override;
+    virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
@@ -151,8 +152,8 @@ protected:
         uint32_t initialLightPdfMode = 2u;       // Which basic sampling technique do we use to sample lights? 
 
         // Below are parameters that specify the number of initial candidates (for RTXDI) or the total samples (RIS / basic Monte Carlo)
-        uint32_t primLightSamples = 24u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
-        uint32_t envLightSamples = 8u;           // How many samples do we take on the environment map?
+        uint32_t primLightSamples = 1u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
+        uint32_t envLightSamples = 0u;           // How many samples do we take on the environment map?
 
         // Below are parameters controlling initial light candidate sampling, prior to any reuse
         bool     traceInitialShadowRay = true;   // Before doing reuse, do we trace a shadow ray to the one selected candidate per pixel?
@@ -199,17 +200,28 @@ protected:
 
     // SSRT parameters 
     enum class VisibilityMode { ShadowRay, SSRT };
-    VisibilityMode mVisibilityMode = VisibilityMode::ShadowRay;
+    VisibilityMode mVisibilityMode = VisibilityMode::SSRT;
     Sampler::SharedPtr mpTrilinearSampler;
     bool mFrozenFrame = false;
+    bool mResetAccumulation = false;
 
-    struct {
+    struct
+    {
         GraphicsProgram::SharedPtr pProgram;
         GraphicsVars::SharedPtr pVars;
         GraphicsState::SharedPtr pState;
         Fbo::SharedPtr pFbo;
     } mZBufferPass;
 
+    struct
+    {
+        float2 csRayOriginLenEpsilon = float2(0.01f, 0.02f); // Offset values for camera space ray origin and length
+        float csZThickness = 0.1f;          // Camera space thickness to ascribe to each pixel in the depth buffer
+        float stride = 1.0f;                // Step in horizontal or vertical pixels between samples. This is a float because integer math is slow on GPUs, but should be set to an integer >= 1
+        float jitterFraction = 0.0f;        // Number between 0 and 1 for how far to bump the ray in stride units to conceal banding artifacts
+        float maxSteps = 400.0f;            // Maximum number of iterations. Higher gives better images but may be slow
+        uint layers = 4u; // Number of layers for z-buffer
+    } mSSRTParams;
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     // Various internal pass utilities, setup/allocation routines, and common routines for
@@ -264,6 +276,6 @@ protected:
     void loadCommonShaders(void);
 
     // SSRT functions
-    void setupSSRTVars(ShaderVar& vars);
+    void setupSSRTVars(ShaderVar& vars, const RenderData& renderData);
     void runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData);
 };

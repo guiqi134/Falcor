@@ -8,22 +8,10 @@ cbuffer ZBufferCB
     float4x4 gWorldToCamera;
     float gNearPlane;
     float gFarPlane;
+    uint2 gPrevCurrLayerIndex;
 }
 
-RWTexture2D gDebug;
-
-/** D3DXMatrixPerspectiveFovRH (be care, it is row major!!!):
-    xScale     0          0              0
-    0        yScale       0              0
-    0          0      zf/(zn-zf)        -1
-    0          0      zn*zf/(zn-zf)      0
-
-    Transform from NDC to camera space
-*/
-// float linearizeDepth(float depthNDC, float near, float far)
-// {
-//     return (near * far) / (depthNDC * (near - far) - far);
-// }
+Texture2D gPrevZBuffer;
 
 struct ZBufferVSOut
 {
@@ -35,6 +23,23 @@ struct ZBufferVSOut
 
     float4 posH : SV_Position;
 };
+
+
+/** D3DXMatrixPerspectiveFovRH (be care, it is row major!!!):
+    xScale     0          0              0
+    0        yScale       0              0
+    0          0      zf/(zn-zf)        -1
+    0          0      zn*zf/(zn-zf)      0
+
+    Transform from NDC to camera space
+*/
+float linearizeDepth(float depthNDC, float near, float far)
+{
+    return (near * far) / (depthNDC * (far - near) - far);
+}
+
+
+
 
 ZBufferVSOut vsMain(VSIn vsIn) 
 {
@@ -64,8 +69,16 @@ float4 psMain(ZBufferVSOut vsOut) : SV_Target0
     if (gScene.materials.alphaTest(v, vsOut.materialID, lod)) discard;
 #endif
 
-    gDebug[pixelPos] = abs(vsOut.posCS.z);
-    print("posCS.z = ", vsOut.posCS.z);
+    // Use previous pass's camera space depth (negative) to peel the scene
+    float4 prevDepths = gPrevZBuffer[pixelPos]; 
+    float currLayerDepth = vsOut.posCS.z;
+    if (gPrevCurrLayerIndex.y != 0 && currLayerDepth >= prevDepths[gPrevCurrLayerIndex.x])
+        discard;
 
-    return float4(vsOut.posCS.z);
+    // If not discard, store current depth to corresponding channel
+    float4 result = prevDepths;
+    result[gPrevCurrLayerIndex.y] = currLayerDepth;
+
+    // Then the peeled result will go to the depth test
+    return result;
 }

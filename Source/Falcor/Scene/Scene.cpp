@@ -295,6 +295,7 @@ namespace Falcor
         auto pCurrentRS = pState->getRasterizerState();
         bool isIndexed = hasIndexBuffer();
 
+        // mDrawArgs contains four different draw buffer: 16/32 bits + cw/ccw winding order
         for (const auto& draw : mDrawArgs)
         {
             FALCOR_ASSERT(draw.count > 0);

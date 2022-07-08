@@ -33,7 +33,7 @@ Transform from NDC to camera space
 */
 float LinearizeDepth(float depth)
 {
-    return (nearZ * farZ) / (depth * (nearZ - farZ) - farZ);
+    return (nearZ * farZ) / (depth * (farZ - nearZ) - farZ);
 }
 
 struct PSOut

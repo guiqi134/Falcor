@@ -49,6 +49,9 @@ void RTXDITutorial1::execute(RenderContext* pRenderContext, const RenderData& re
 {
     mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
 
+    // Run base execute method
+    RTXDITutorialBase::execute(pRenderContext, renderData);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -107,7 +110,7 @@ void RTXDITutorial1::runMonteCarloLighting(RenderContext* pRenderContext, const 
         mcVars["gOutputColor"] = renderData["color"]->asTexture();                 // Per-pixel output color goes here
         mcVars["gInputEmission"] = mResources.emissiveColors;                      // Input from prepareSurfaceData() -- contains directly seen emissives
         setupRTXDIBridgeVars(mcVars, renderData);                                  // Setup data structures needed by RTXDI shader routines
-        setupSSRTVars(mcVars);
+        setupSSRTVars(mcVars, renderData);
         mpPixelDebug->prepareProgram(mShader.monteCarloBaseline->getProgram(), mcVars);
         mShader.monteCarloBaseline->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
@@ -142,6 +145,5 @@ void RTXDITutorial1::renderUI(Gui::Widgets& widget)
         contextOptions.release();
     }
 
-    widget.checkbox("Frozen current frame", mFrozenFrame);
-    mpPixelDebug->renderUI(widget);
+    RTXDITutorialBase::renderUI(widget);
 }

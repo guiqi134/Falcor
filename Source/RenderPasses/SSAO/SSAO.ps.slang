@@ -70,11 +70,14 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
         return 1.0f;
     }
 
-    // Calculate world position of pixel
+    // Calculate world position of pixel, z is the depth from the depth map
     float3 posW = getPosition(texC).xyz;
-    float3 normal = normalize(gNormalTex.Sample(gTextureSampler, texC).xyz * 2.0f - 1.0f);
+
+    float3 normal = normalize(gNormalTex.Sample(gTextureSampler, texC).xyz * 2.0f - 1.0f); // world space normal
     float originDist = length(posW - gCamera.data.posW);
-    float3 randDir = gNoiseTex.Sample(gNoiseSampler, texC * gData.noiseScale).xyz * 2.0f - 1.0f;
+
+    // NoiseScale = screen size / noise texture size (16)
+    float3 randDir = gNoiseTex.Sample(gNoiseSampler, texC * gData.noiseScale).xyz * 2.0f - 1.0f; // z = -1.0f?
 
     float3 tangent = normalize(randDir - normal * dot(randDir, normal));
     float3 bitangent = cross(normal, tangent);
@@ -86,7 +89,7 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
         // First we need to transfer the sampler position from current pixel's local tangent
         // space all the way along to the screen space 
 
-        // Orient sample
+        // Transform hemispherical samples from local tangent space to world space
         float3 kernelPos = mul(gData.sampleKernel[i].xyz, tbn); 
 
         // Calculate sample world space pos
@@ -111,7 +114,7 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
         // if its depth values is within the sample's radius.
         // float rangeCheck = step(abs(sampleDist - sampleDepth), gData.radius); // radius >= difference -> 1
         float rangeCheck = abs(originDist - sampleDepth) < gData.radius ? 1.0 : 0.0;
-        occlusion += step(sampleDepth, sampleDist) * rangeCheck; // sampleDist >= sceneDepth -> occluded
+        occlusion += step(sampleDepth, sampleDist) * rangeCheck; // sampleDepth < sampleDist -> occluded
     }
 
     float factor = 1 - (occlusion / float(gData.kernelSize));

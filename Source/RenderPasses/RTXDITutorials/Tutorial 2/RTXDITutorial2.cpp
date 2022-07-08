@@ -64,6 +64,9 @@ void RTXDITutorial2::execute(RenderContext* pRenderContext, const RenderData& re
     // important in this simple RIS case, but it's vital for performance once we add spatiotemporal reuse. 
     prepareSurfaceData(pRenderContext, renderData);
 
+    // Do z-buffer raster pass
+    runZBufferRaster(pRenderContext, renderData);
+
     // For each pixel in our image, randomly select some number of points on our lights, select one
     // via simple resampled importance sampling (RIS) and send one shadow ray to the selected light.
     runBasicRISLighting(pRenderContext, renderData);

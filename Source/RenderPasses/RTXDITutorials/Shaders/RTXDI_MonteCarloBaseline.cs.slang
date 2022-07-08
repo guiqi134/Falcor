@@ -53,8 +53,8 @@ RWTexture2D<float4> gOutputColor;   // Full output color (diffuse, specular, emi
 float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission)
 {
     // Shoot a shadow ray to the selected light sample
-    float3 rayOrigin = computeRayOrigin(RAB_GetSurfaceWorldPos(surface), RAB_GetSurfaceNormal(surface));
-    // float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
+    // float3 rayOrigin = computeRayOrigin(RAB_GetSurfaceWorldPos(surface), RAB_GetSurfaceNormal(surface));
+    float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
     float4 rayDirLen = lightSample.getDirectionAndDistance();
     float isVisible = 1.0f;
 
@@ -64,10 +64,15 @@ float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmiss
     }
     else
     {
+        // Transform to camera space
         float3 csRayOrigin = mul(float4(rayOrigin, 1.0f), gWorldToCamera).xyz;
-        float3 csRayDir = mul(float4(rayDirLen.xyz, 1.0f), gWorldToCamera).xyz;
+        float3 csRayDir = mul(float4(rayDirLen.xyz, 0.0f), gWorldToCamera).xyz; // Note: direction needs to be 0.0f for w
         float2 csZBufferSize;
         gCameraSpaceZBuffer.GetDimensions(csZBufferSize.x, csZBufferSize.y);
+
+        // Analog to trace shadow ray, we need to include a small bias to the ray's origin and max distance (end point)
+        csRayOrigin += min(gCsRayOriginLenEpsilon.x, rayDirLen.w) * csRayDir; // cannot larger than ray length
+        rayDirLen.w = max(rayDirLen.w - gCsRayOriginLenEpsilon.x - gCsRayOriginLenEpsilon.y, 0.0f); // cannot be negative
 
         isVisible = traceScreenSpaceShadowRay(csRayOrigin, csRayDir, csZBufferSize, rayDirLen.w);
     }
@@ -97,6 +102,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
+
+    print("current pixel depth = ", gCameraSpaceZBuffer[launchIdx]);
 
     // Initialize our random number generator.  
     RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 1);
@@ -165,4 +172,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Add any directly-visible emssion & environment maps, then store our final color
     totalColor += gInputEmission[launchIdx].rgb;
     gOutputColor[launchIdx] = float4(totalColor.r, totalColor.g, totalColor.b, 1.0f);
+
+    gDebug[launchIdx] = float4(float3(abs(gCameraSpaceZBuffer[launchIdx].b) / 5.0f), 1.0f);
 }
