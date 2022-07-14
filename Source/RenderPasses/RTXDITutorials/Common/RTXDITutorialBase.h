@@ -204,6 +204,7 @@ protected:
     Sampler::SharedPtr mpTrilinearSampler;
     bool mFrozenFrame = false;
     bool mResetAccumulation = false;
+    bool mShadowRayForShading = false;
 
     struct
     {
@@ -216,12 +217,20 @@ protected:
     struct
     {
         float2 csRayOriginLenEpsilon = float2(0.01f, 0.02f); // Offset values for camera space ray origin and length
-        float csZThickness = 0.1f;          // Camera space thickness to ascribe to each pixel in the depth buffer
+        float csZThickness = 0.02f;          // Camera space thickness to ascribe to each pixel in the depth buffer
         float stride = 1.0f;                // Step in horizontal or vertical pixels between samples. This is a float because integer math is slow on GPUs, but should be set to an integer >= 1
         float jitterFraction = 0.0f;        // Number between 0 and 1 for how far to bump the ray in stride units to conceal banding artifacts
         float maxSteps = 400.0f;            // Maximum number of iterations. Higher gives better images but may be slow
-        uint layers = 4u; // Number of layers for z-buffer
+        uint layers = 2u; // Number of layers for z-buffer
+        bool clipToFrustum = false;
     } mSSRTParams;
+
+    // TODO: this may can be integrated into G-Buffer instead of a seperated raster pass
+    struct
+    {
+        Texture::SharedPtr currZBufferTexture;
+        Texture::SharedPtr prevZBufferTexture;
+    } mSSRTResources;
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     // Various internal pass utilities, setup/allocation routines, and common routines for
@@ -276,6 +285,6 @@ protected:
     void loadCommonShaders(void);
 
     // SSRT functions
-    void setupSSRTVars(ShaderVar& vars, const RenderData& renderData);
+    void setupSSRTVars(ShaderVar& vars, const RenderData& renderData, bool usePreviousZBuffer);
     void runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData);
 };

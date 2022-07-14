@@ -13,10 +13,11 @@ cbuffer SSRT_CB
     float gJitterFraction;
     float gMaxSteps;
     uint gLayers;
-    SamplerState gTrilinearSampler; // TODO: remove
+    bool gClipToFrustum;
+    bool gShadowRayForShading;
 }
 
-Texture2D gCameraSpaceZBuffer;
+Texture2D gCameraSpaceZBuffer; // Current or previous z-buffer
 RWTexture2D gDebug;
 
 void swap(inout float a, inout float b)
@@ -75,12 +76,23 @@ float4 toHomegeneousScreenSpace(float4 clipCoords, float2 screenSize)
     \return true is visible, false is occluded
 */
 bool traceScreenSpaceShadowRay(
-    float3 csOrigin, 
-    float3 csDirection,
-    float2 csZBufferSize,
+    float3 rayOrigin, 
+    float3 rayDirection,
     float maxRayTraceDistance,
 )
 {
+    // Transform to camera space
+    float3 csOrigin = mul(float4(rayOrigin, 1.0f), gWorldToCamera).xyz;
+    float3 csDirection = mul(float4(rayDirection, 0.0f), gWorldToCamera).xyz; // Note: direction needs to be 0.0f for w
+    float2 csZBufferSize;
+    gCameraSpaceZBuffer.GetDimensions(csZBufferSize.x, csZBufferSize.y);
+
+    print("maxRayTraceDistance = ", maxRayTraceDistance);
+
+    // Analog to trace shadow ray, we need to include a small bias to the ray's origin and max distance (end point)
+    csOrigin += min(gCsRayOriginLenEpsilon.x, maxRayTraceDistance) * csDirection; // cannot larger than ray length
+    maxRayTraceDistance = max(maxRayTraceDistance - gCsRayOriginLenEpsilon.x - gCsRayOriginLenEpsilon.y, 0.0f); // cannot be negative
+
     // Clip ray to a near plane in 3D (doesn't have to be *the* near plane, although that would be a good idea)
     // Note: all camera space z value is in negative measure
     float rayLength = ((csOrigin.z + csDirection.z * maxRayTraceDistance) > gNearPlaneZ) ?
@@ -118,10 +130,27 @@ bool traceScreenSpaceShadowRay(
     float2 P0 = (H0.xy * k0  * float2(0.5f, -0.5f) + float2(0.5f)) * csZBufferSize; 
     float2 P1 = (H1.xy * k1  * float2(0.5f, -0.5f) + float2(0.5f)) * csZBufferSize; 
 
-    // TODO: [Optional clipping to frustum sides here]
+    // [Optional clipping to frustum sides here]
+    if (gClipToFrustum)
+    {
+        float xMin = 0.5f, xMax = csZBufferSize.x - 0.5f;
+        float yMin = 0.5f, yMax = csZBufferSize.y - 0.5f;
+        float alpha = 0.0f;
+        
+        // Assume P0 is in the viewport (P1 - P0 is never zero when clipping)
+        if (P1.y > yMax || P1.y < yMin)
+            alpha = (P1.y - ((P1.y > yMax) ? yMax : yMin)) / (P1.y - P0.y);
+
+        if (P1.x > xMax || P1.x < xMin)
+            alpha = max(alpha, (P1.x - ((P1.x > xMax) ? xMax : xMin)) / (P1.x - P0.x));
+
+        P1 = lerp(P1, P0, alpha); 
+        k1 = lerp(k1, k0, alpha); 
+        Q1 = lerp(Q1, Q0, alpha);
+    }
 
     // Initialize to off screen
-    float2 hitPixel = float2(-1.0, -1.0); // This actually is uint2
+    float2 hitPixel = float2(-1.0, -1.0); // This actually is int2
     int hitLayer = -1; 
 
     // If the line is degenerate, make it cover at least one pixel to avoid handling zero-pixel extent as a special case later
@@ -171,6 +200,8 @@ bool traceScreenSpaceShadowRay(
     Q0 += dQ * gJitterFraction; 
     k0 += dk * gJitterFraction;
 
+    print("after jittering P0 = ", P0);
+
 	// Slide P from P0 to P1, (now-homogeneous) Q from Q0 to Q1, and k from k0 to k1
     float3 Q = Q0;
     float k = k0;
@@ -207,7 +238,7 @@ bool traceScreenSpaceShadowRay(
         if (rayZMin > rayZMax) swap(rayZMin, rayZMax);
 
         // Camera-space z of the background. We don't need to use sample method.
-        float4 sceneZMax = gCameraSpaceZBuffer[uint2(hitPixel)];
+        sceneZMax = gCameraSpaceZBuffer[int2(hitPixel)];
         float4 sceneZMin = sceneZMax - gCsZThickness;
 
         // Go over all layers to check whether there is a hit in one of the layer
@@ -239,6 +270,7 @@ bool traceScreenSpaceShadowRay(
     print("rayZMax = ", rayZMax);
     print("rayZMin = ", rayZMin);
     print("sceneZMax = ", sceneZMax);
+    print("hitLayer = ", hitLayer);
 
     Q.xy += dQ.xy * stepCount;
     float3 csHitPoint = Q * (1.0 / k);
@@ -246,8 +278,11 @@ bool traceScreenSpaceShadowRay(
 
     // Check the visibility
     bool isVisible = hitLayer == -1                                                      ? true // Hit or not?
-                     : all(abs(hitPixel - (csZBufferSize * 0.5)) <= csZBufferSize * 0.5) ? false // If hit, is it a vaild screen point?
+                     : all(abs(hitPixel - (csZBufferSize * 0.5)) <= csZBufferSize * 0.5) ? false // If hit, is it a vaild screen point? (this has the same functionality to frustum clipping)
                                                                                          : true;
+
+    // isVisible = hitLayer == -1 ? true : false;
+    print("isVisible = ", isVisible);
     return isVisible;
 }
 

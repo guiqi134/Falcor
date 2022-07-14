@@ -132,6 +132,8 @@ Texture2D<float4> gMotionVectorTexture;
 #include "RAB_LightInfo.slangh"
 #include "RAB_LightSample.slangh"
 
+import SSRT;
+
 // Go ahead and include the RTXDI SDK's HLSL functions
 // #include "rtxdi/ResamplingFunctions.hlsli"
 #include "ResamplingFunctions.hlsli"

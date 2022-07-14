@@ -32,6 +32,8 @@
 
 #include "RtxdiBridge.slangh"
 
+import SSRT;
+
 cbuffer ShadeCB
 {
     uint  gInputReservoirIndex;       // Which reservoir contains the samples we should shade
@@ -41,18 +43,27 @@ cbuffer ShadeCB
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 
-void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, bool hasSampleChanged,
+void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
     if (!RTXDI_IsValidReservoir(reservoir)) return;
 
-    // Where are we shading / computing a pdf?
-    float3 origin = RAB_GetSurfaceWorldPos(surface);
-
     // Shoot a shadow ray to the selected light sample
-    float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
-    // float isVisible = hasSampleChanged ? traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance()) : 1.0f;
+    float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
+    float4 rayDirLen = lightSample.getDirectionAndDistance();
+    float isVisible = 1.0f;
+    if (gShadowRayForShading)
+    {
+        isVisible = traceShadowRay(rayOrigin, rayDirLen);
+    }
+    else
+    {
+        if (gVisibilityMode == 0)
+            isVisible = traceShadowRay(rayOrigin, rayDirLen);
+        else
+            isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+    }
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -83,6 +94,8 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+    
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -97,8 +110,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
-    bool hasSampleChanged = gHasSampleChangedInReusing[launchIdx].r;
-
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0, specColor = 0;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
@@ -111,7 +122,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        Shade(reservoir, surface, lightSample, lightEmission, hasSampleChanged, difColor, specColor);
+        Shade(reservoir, surface, lightSample, lightEmission, difColor, specColor);
     }
 
     if (gDebugVis)

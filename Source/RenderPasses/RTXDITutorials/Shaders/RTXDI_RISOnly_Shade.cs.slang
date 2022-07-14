@@ -28,6 +28,8 @@
 
 #include "RtxdiBridge.slangh"
 
+import SSRT;
+
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 
@@ -41,7 +43,13 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     if (!RTXDI_IsValidReservoir(reservoir)) return;
 
     // Shoot a shadow ray to the selected light sample
-    float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
+    float4 rayDirLen = lightSample.getDirectionAndDistance();
+    float isVisible = 1.0f;
+    if (gVisibilityMode == 0)
+        isVisible = traceShadowRay(rayOrigin, rayDirLen);
+    else
+        isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
 
     // Compute the BRDF terms for the target function.
     float D = surface.getNdf(lightSample.NdotH());
@@ -73,6 +81,8 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+    
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;

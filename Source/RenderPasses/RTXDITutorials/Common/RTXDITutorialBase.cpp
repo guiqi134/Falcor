@@ -71,6 +71,7 @@ RTXDITutorialBase::RTXDITutorialBase(const Dictionary& dict, const RenderPass::I
         else if (key == "envEmissiveScale")    mLightingParams.relativeEnvMapWeight = float(value);
         else if (key == "epsilon")             mLightingParams.epsilon = float(value);
         else if (key == "compressLightTiles")  mLightingParams.storePerTileLightGeom = bool(value);
+        else if (key == "csZThickness") mSSRTParams.csZThickness = float(value);
         else logWarning("Unknown field '" + key + "' in RTXDITutorialBase dictionary");
     }
 
@@ -183,7 +184,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
 
     // SSRT UI controls
     Gui::Group SSRTOptions(widget.gui(), "SSRT Options", true);
-    dirty = SSRTOptions.var("SSRT Epsilon", mSSRTParams.csRayOriginLenEpsilon);
+    dirty = SSRTOptions.var("SSRT Epsilon", mSSRTParams.csRayOriginLenEpsilon, 0.0f, 1.0f);
     SSRTOptions.tooltip(
         "Camera space ray origin and length offset (ray's parametric value t). The first is value t1 is used to advance the ray origin in ray direction"
         "by t1 and the second value t2 (along with t1) is used to shorten the ray length."
@@ -195,19 +196,22 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     );
     dirty = SSRTOptions.var("stride", mSSRTParams.stride, 1.0f, 1000.0f, 1.0f);
     SSRTOptions.tooltip(
-        "Stride for 2D ray marching iteration. It not only affects the differential stride we take, but also the ray's min and max range in each iteration."
+        "Stride for 2D ray marching iteration. It not only affects the differential stride we take, but also change the ray's min and max range in each iteration."
         "Larger value will increase the ray's depth range which would cause the banding issue (discrete evaluation start to show up)."
     );
     dirty = SSRTOptions.var("Jitter Fraction", mSSRTParams.jitterFraction, 0.0f, 1.0f);
     SSRTOptions.tooltip(
-        "Jitter fraction for ray origin's pixel position. It is used to reduce banding artifact in large stride"
+        "Jitter fraction for ray origin's pixel position. It is used to reduce banding artifact in large stride. This parameter seems will only reduce the under-estimated"
+        "pixel samples. Those over-estimated (bright) pixels causing banding will not be fixed"
     );
     dirty = SSRTOptions.var("Max Steps", mSSRTParams.maxSteps, 1.0f, 1000.0f, 1.0f);
     SSRTOptions.tooltip("Max iteration steps");
     dirty = SSRTOptions.var("Layers", mSSRTParams.layers, 1u, 4u);
     SSRTOptions.tooltip("Number of depth layers in z-buffer");
+    dirty = SSRTOptions.checkbox("Enable clipping to frustum", mSSRTParams.clipToFrustum);
     SSRTOptions.release();
 
+    dirty = widget.checkbox("SSRT For Final Shading", mShadowRayForShading);
     widget.checkbox("Frozen current frame", mFrozenFrame);
     mpPixelDebug->renderUI(widget);
 
@@ -611,7 +615,7 @@ void RTXDITutorialBase::loadShaders()
     }
 }
 
-void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderData)
+void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderData, bool usePreviousZBuffer)
 {
     // Set all constant buffer parameters
     vars["SSRT_CB"]["gWorldToCamera"] = mPassData.scene->getCamera()->getViewMatrix();
@@ -624,10 +628,12 @@ void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderD
     vars["SSRT_CB"]["gJitterFraction"] = mSSRTParams.jitterFraction; 
     vars["SSRT_CB"]["gMaxSteps"] = mSSRTParams.maxSteps;
     vars["SSRT_CB"]["gLayers"] = mSSRTParams.layers;
-    vars["SSRT_CB"]["gTrilinearSampler"] = mpTrilinearSampler;
+    vars["SSRT_CB"]["gClipToFrustum"] = mSSRTParams.clipToFrustum;
+    vars["SSRT_CB"]["gShadowRayForShading"] = mShadowRayForShading;
 
     // Set other texture/buffer objects
-    vars["gCameraSpaceZBuffer"] = mZBufferPass.pFbo->getColorTexture(0);
+    // Unlike G-Buffer data, our camera space Z-buffer is either previous one or current one (only needs one of them, not both)
+    vars["gCameraSpaceZBuffer"] = usePreviousZBuffer ? mSSRTResources.prevZBufferTexture : mSSRTResources.currZBufferTexture;
     vars["gDebug"] = renderData["debug"]->asTexture(); // debug z-buffer, need to take absolute value
 }
 
@@ -664,5 +670,5 @@ void RTXDITutorialBase::runZBufferRaster(RenderContext* pRenderContext, const Re
         mPassData.scene->rasterize(pRenderContext, mZBufferPass.pState.get(), mZBufferPass.pVars.get(), RasterizerState::CullMode::None);
     }
 
-
+    mSSRTResources.currZBufferTexture = mZBufferPass.pFbo->getColorTexture(0);
 }

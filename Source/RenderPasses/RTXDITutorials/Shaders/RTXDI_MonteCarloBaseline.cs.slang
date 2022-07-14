@@ -53,29 +53,13 @@ RWTexture2D<float4> gOutputColor;   // Full output color (diffuse, specular, emi
 float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission)
 {
     // Shoot a shadow ray to the selected light sample
-    // float3 rayOrigin = computeRayOrigin(RAB_GetSurfaceWorldPos(surface), RAB_GetSurfaceNormal(surface));
     float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
     float4 rayDirLen = lightSample.getDirectionAndDistance();
     float isVisible = 1.0f;
-
     if (gVisibilityMode == 0)
-    {
         isVisible = traceShadowRay(rayOrigin, rayDirLen);
-    }
     else
-    {
-        // Transform to camera space
-        float3 csRayOrigin = mul(float4(rayOrigin, 1.0f), gWorldToCamera).xyz;
-        float3 csRayDir = mul(float4(rayDirLen.xyz, 0.0f), gWorldToCamera).xyz; // Note: direction needs to be 0.0f for w
-        float2 csZBufferSize;
-        gCameraSpaceZBuffer.GetDimensions(csZBufferSize.x, csZBufferSize.y);
-
-        // Analog to trace shadow ray, we need to include a small bias to the ray's origin and max distance (end point)
-        csRayOrigin += min(gCsRayOriginLenEpsilon.x, rayDirLen.w) * csRayDir; // cannot larger than ray length
-        rayDirLen.w = max(rayDirLen.w - gCsRayOriginLenEpsilon.x - gCsRayOriginLenEpsilon.y, 0.0f); // cannot be negative
-
-        isVisible = traceScreenSpaceShadowRay(csRayOrigin, csRayDir, csZBufferSize, rayDirLen.w);
-    }
+        isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
 
     // Compute the BRDF terms for the target function.
     float  D = surface.getNdf(lightSample.NdotH());
@@ -88,7 +72,6 @@ float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmiss
     float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model, with NdotLs cancelled
 
     // Return our shading result, <shadow-ray> * L * <geometry-term> * BRDF
-    // Song: why it is area to solid angle? According to PBRT book, I think we are integrating over area right?
     return isVisible * max(float3(0.0f), lightEmission * lightSample.getJacobianAtoW() * (diffuseLobe + specularLobe));
 }
 

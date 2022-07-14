@@ -47,6 +47,11 @@ RTXDITutorial2::SharedPtr RTXDITutorial2::create(RenderContext* pRenderContext, 
 
 void RTXDITutorial2::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
+    // Run base execute method
+    RTXDITutorialBase::execute(pRenderContext, renderData);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -72,7 +77,9 @@ void RTXDITutorial2::execute(RenderContext* pRenderContext, const RenderData& re
     runBasicRISLighting(pRenderContext, renderData);
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
-    mRtxdiFrameParams.frameIndex++;
+    if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void RTXDITutorial2::runBasicRISLighting(RenderContext* pRenderContext, const RenderData& renderData)
@@ -107,6 +114,8 @@ void RTXDITutorial2::runBasicRISLighting(RenderContext* pRenderContext, const Re
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();   // Per-pixel output color goes here
         shadeVars["gInputEmission"] = mResources.emissiveColors;        // Input from prepareSurfaceData() -- contains directly seen emissives
         setupRTXDIBridgeVars(shadeVars, renderData);
+        setupSSRTVars(shadeVars, renderData, false);
+        mpPixelDebug->prepareProgram(mShader.risOnlyShade->getProgram(), shadeVars);
         mShader.risOnlyShade->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 }
@@ -139,4 +148,6 @@ void RTXDITutorial2::renderUI(Gui::Widgets& widget)
         if (contextOptions.var("Tile Size", mLightingParams.presampledTileSize, 256u, 8192u, 128u)) mpRtxdiContext = nullptr;
         contextOptions.release();
     }
+
+    RTXDITutorialBase::renderUI(widget);
 }

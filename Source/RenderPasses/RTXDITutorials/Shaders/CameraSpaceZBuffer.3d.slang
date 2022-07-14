@@ -1,6 +1,8 @@
 import Scene.Raster;
 import Utils.Debug.PixelDebug;
 
+// This value should be aligned with inline ray tracing RAY_FLAG option.
+// Currently, inline shadow ray do not do alpha-test
 #define USE_ALPHA_TEST 0
 
 cbuffer ZBufferCB

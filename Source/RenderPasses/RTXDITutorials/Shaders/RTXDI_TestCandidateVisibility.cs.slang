@@ -32,6 +32,8 @@
 
 #include "RtxdiBridge.slangh"
 
+import SSRT;
+
 cbuffer SampleCB
 {
     uint  gReservoirIndex;   // Which of our reservoirs should we use for output?
@@ -60,7 +62,15 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Shoot a shadow ray and, if it's shadowed, update the visibility
     if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
-        if (!RAB_GetConservativeVisibility(surface, lightSample))  // Trace a shadow ray
+        float3 rayOrigin = RAB_GetSurfaceWorldPos(surface);
+        float4 rayDirLen = lightSample.getDirectionAndDistance();
+        float isVisible = 1.0f;
+        if (gVisibilityMode == 0)
+            isVisible = RAB_GetConservativeVisibility(surface, lightSample); // Trace a shadow ray
+        else
+            isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w); // SSRT
+            
+        if (!isVisible)  
         {
             RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);

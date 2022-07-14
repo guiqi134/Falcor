@@ -50,7 +50,7 @@ struct RTXDI_Reservoir
     // Screen-space distance between the current location of the reservoir
     // and the location where the visibility information was generated,
     // minus the motion vectors applied in temporal resampling
-    int2 spatialDistance;  // Song: when this term is used?
+    int2 spatialDistance;  
 
     // How many frames ago the visibility information was generated
     uint age;

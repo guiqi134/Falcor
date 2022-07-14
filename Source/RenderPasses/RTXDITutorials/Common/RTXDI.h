@@ -50,7 +50,6 @@ namespace rtxdi
         Onion = 2
     };
 
-    // Song: What is this ReGIR?
     struct ReGIRContextParameters
     {
         ReGIRMode Mode = ReGIRMode::Disabled;

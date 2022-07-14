@@ -110,7 +110,7 @@ void RTXDITutorial1::runMonteCarloLighting(RenderContext* pRenderContext, const 
         mcVars["gOutputColor"] = renderData["color"]->asTexture();                 // Per-pixel output color goes here
         mcVars["gInputEmission"] = mResources.emissiveColors;                      // Input from prepareSurfaceData() -- contains directly seen emissives
         setupRTXDIBridgeVars(mcVars, renderData);                                  // Setup data structures needed by RTXDI shader routines
-        setupSSRTVars(mcVars, renderData);
+        setupSSRTVars(mcVars, renderData, false);
         mpPixelDebug->prepareProgram(mShader.monteCarloBaseline->getProgram(), mcVars);
         mShader.monteCarloBaseline->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
