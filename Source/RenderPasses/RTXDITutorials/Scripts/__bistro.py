@@ -3,7 +3,7 @@
 scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 # scene = "Bistro/BistroExterior.pyscene"
 currentTime = 0.0
-paused = True
+paused = False
 animateCamera = False
 
 # Initial camera.  This camera is inconsistent between various Bistro versions,
@@ -32,7 +32,7 @@ def graph_ImportanceResampling():
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 4.4,
+        'exposureCompensation' : 2.7, #4.4
     }
     gAccumParams = {
         'enabled': False,
@@ -65,6 +65,10 @@ if (paused):
     t.pause()
 t.time = currentTime
 m.scene.camera.animated = animateCamera
-m.scene.camera.position = camera[0]
-m.scene.camera.target = camera[1]
-m.scene.camera.up = camera[2]
+# m.scene.camera.position = camera[0]
+# m.scene.camera.target = camera[1]
+# m.scene.camera.up = camera[2]
+
+m.scene.addViewpoint(
+    camera[0], camera[1], camera[2]
+)

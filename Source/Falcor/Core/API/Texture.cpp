@@ -416,6 +416,45 @@ namespace Falcor
         }
     }
 
+    void Texture::generateMaxMips(RenderContext* pContext)
+    {
+        if (mType != Type::Texture2D)
+        {
+            logWarning("Texture::generateMips() was only tested with Texture2Ds");
+        }
+
+        // #OPTME: should blit support arrays?
+        for (uint32_t m = 0; m < mMipLevels - 1; m++)
+        {
+            for (uint32_t a = 0; a < mArraySize; a++)
+            {
+                auto srv = getSRV(m, 1, a, 1);
+                auto rtv = getRTV(m + 1, a, 1);
+
+                const Sampler::ReductionMode redModes[] = {
+                    Sampler::ReductionMode::Max, Sampler::ReductionMode::Max, Sampler::ReductionMode::Max, Sampler::ReductionMode::Max
+                };
+
+                const float4 componentsTransform[] = {
+                    float4(1.0f, 0.0f, 0.0f, 0.0f), float4(0.0f, 1.0f, 0.0f, 0.0f), float4(0.0f, 0.0f, 1.0f, 0.0f), float4(0.0f, 0.0f, 0.0f, 1.0f)
+                };
+
+                // Blit execution will use rtv texture to get texture coordinate, so it is like doing a bilinear interpolation in srv texture
+                // and write the result to rtv texture which is one level higher
+                pContext->blit(srv, rtv, RenderContext::kMaxRect, RenderContext::kMaxRect, Sampler::Filter::Linear, redModes, componentsTransform);
+            }
+        }
+
+        if (mReleaseRtvsAfterGenMips)
+        {
+            // Releasing RTVs to free space on the heap.
+            // We only do it once to handle the case that generateMips() was called during load.
+            // If it was called more then once, the texture is probably dynamic and it's better to keep the RTVs around
+            mRtvs.clear();
+            mReleaseRtvsAfterGenMips = false;
+        }
+    }
+
     uint64_t Texture::getTexelCount() const
     {
         uint64_t count = 0;

@@ -59,7 +59,7 @@ float3 Shade(RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmiss
     if (gVisibilityMode == 0)
         isVisible = traceShadowRay(rayOrigin, rayDirLen);
     else
-        isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+        isVisible = ssrtUniformStepBinarySearch(rayOrigin, rayDirLen.xyz, rayDirLen.w);
 
     // Compute the BRDF terms for the target function.
     float  D = surface.getNdf(lightSample.NdotH());

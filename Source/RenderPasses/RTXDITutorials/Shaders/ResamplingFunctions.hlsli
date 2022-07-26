@@ -2170,6 +2170,7 @@ RTXDI_Reservoir RTXDI_SpatioTemporalResampling(
 
 // SSRT version of ReSTIR
 RTXDI_Reservoir RTXDI_SSRT_SpatioTemporalResampling(
+    uint ssrtMode,
     uint2 pixelPosition,
     RAB_Surface surface,
     RTXDI_Reservoir curSample,
@@ -2429,7 +2430,11 @@ RTXDI_Reservoir RTXDI_SSRT_SpatioTemporalResampling(
 
                         float3 rayOrigin = RAB_GetSurfaceWorldPos(fallbackSurface);
                         float4 rayDirLen = selectedSampleAtNeighbor.getDirectionAndDistance();
-                        if (!traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w)) 
+                        
+                        float isVisible = ssrtMode == 1 ? traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w) : 
+                            ssrtUniformStepBinarySearch(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+
+                        if (!isVisible) 
                         {
                             ps = 0.0f;
                         }

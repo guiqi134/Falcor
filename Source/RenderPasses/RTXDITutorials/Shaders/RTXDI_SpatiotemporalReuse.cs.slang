@@ -110,7 +110,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         }
         else
         {
-            restirResult = RTXDI_SSRT_SpatioTemporalResampling(pixelPosition, surface, curSample,
+            restirResult = RTXDI_SSRT_SpatioTemporalResampling(gVisibilityMode, pixelPosition, surface, curSample,
                 rng, stparams, params, selectedSamplePos, selectedSample);
         }
     }

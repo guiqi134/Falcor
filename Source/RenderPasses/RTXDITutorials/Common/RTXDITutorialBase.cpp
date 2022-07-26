@@ -78,10 +78,13 @@ RTXDITutorialBase::RTXDITutorialBase(const Dictionary& dict, const RenderPass::I
     mpPixelDebug = PixelDebug::create();
 
     Sampler::Desc samplerDesc;
-    samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(0.0f));
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(-1000.0f));
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
-    samplerDesc.setComparisonMode(Sampler::ComparisonMode::Disabled);
     mpTrilinearSampler = Sampler::create(samplerDesc);
+
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border).setBorderColor(float4(-1000.0f));
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    mpPointSampler = Sampler::create(samplerDesc);
 }
 
 
@@ -184,6 +187,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
 
     // SSRT UI controls
     Gui::Group SSRTOptions(widget.gui(), "SSRT Options", true);
+
     dirty = SSRTOptions.var("SSRT Epsilon", mSSRTParams.csRayOriginLenEpsilon, 0.0f, 1.0f);
     SSRTOptions.tooltip(
         "Camera space ray origin and length offset (ray's parametric value t). The first is value t1 is used to advance the ray origin in ray direction"
@@ -194,21 +198,27 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
         "Camera space positive z thickness used for scene depth. It would result the scene depth has a range [sceneZMax, sceneZMax - zThickness] instead of a single value."
         "Larger value will introduce more shadow in the scene"
     );
-    dirty = SSRTOptions.var("stride", mSSRTParams.stride, 1.0f, 1000.0f, 1.0f);
-    SSRTOptions.tooltip(
-        "Stride for 2D ray marching iteration. It not only affects the differential stride we take, but also change the ray's min and max range in each iteration."
-        "Larger value will increase the ray's depth range which would cause the banding issue (discrete evaluation start to show up)."
-    );
-    dirty = SSRTOptions.var("Jitter Fraction", mSSRTParams.jitterFraction, 0.0f, 1.0f);
-    SSRTOptions.tooltip(
-        "Jitter fraction for ray origin's pixel position. It is used to reduce banding artifact in large stride. This parameter seems will only reduce the under-estimated"
-        "pixel samples. Those over-estimated (bright) pixels causing banding will not be fixed"
-    );
-    dirty = SSRTOptions.var("Max Steps", mSSRTParams.maxSteps, 1.0f, 1000.0f, 1.0f);
-    SSRTOptions.tooltip("Max iteration steps");
     dirty = SSRTOptions.var("Layers", mSSRTParams.layers, 1u, 4u);
     SSRTOptions.tooltip("Number of depth layers in z-buffer");
+    dirty = SSRTOptions.var("Max Steps", mSSRTParams.maxSteps, 1.0f, 1000.0f, 1.0f);
+    SSRTOptions.tooltip("Max iteration steps");
+
+    if (mVisibilityMode == VisibilityMode::SSRT_binarySearch)
+    {
+        dirty = SSRTOptions.var("stride", mSSRTParams.stride, 1.0f, 1000.0f, 1.0f);
+        SSRTOptions.tooltip(
+            "Stride for 2D ray marching iteration. It not only affects the differential stride we take, but also change the ray's min and max range in each iteration."
+            "Larger value will increase the ray's depth range which would cause the banding issue (discrete evaluation start to show up)."
+        );
+        dirty = SSRTOptions.var("Jitter Fraction", mSSRTParams.jitterFraction, 0.0f, 1.0f);
+        SSRTOptions.tooltip(
+            "Jitter fraction for ray origin's pixel position. It is used to reduce banding artifact in large stride. This parameter seems will only reduce the under-estimated"
+            "pixel samples. Those over-estimated (bright) pixels causing banding will not be fixed"
+        );
+    }
+
     dirty = SSRTOptions.checkbox("Enable clipping to frustum", mSSRTParams.clipToFrustum);
+
     SSRTOptions.release();
 
     dirty = widget.checkbox("SSRT For Final Shading", mShadowRayForShading);
@@ -229,7 +239,14 @@ bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
 
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
     {
-        mVisibilityMode = VisibilityMode::SSRT;
+        mVisibilityMode = VisibilityMode::SSRT_binarySearch;
+        mResetAccumulation = true;
+        return true;
+    }
+
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key3)
+    {
+        mVisibilityMode = VisibilityMode::SSRT_maxMipmaps;
         mResetAccumulation = true;
         return true;
     }
@@ -523,6 +540,12 @@ bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const Re
     // we pack data into a coherent structure.
     mResources.lightGeometry = Buffer::createTyped<float4>(2 * mPassData.lights->getTotalLightCount());
 
+    // Create SSRT resources
+    uint maxOrder = (uint)glm::max(glm::log2((float)mPassData.screenSize.x), glm::log2((float)mPassData.screenSize.x));
+    uint zBufferTextureSize = 1 << (maxOrder + 1);
+    mSSRTResources.currZBufferTexture = Texture::create2D(zBufferTextureSize, zBufferTextureSize, ResourceFormat::RGBA32Float, 1, uint(-1), nullptr, kAutoMipBindFlags);
+    mSSRTResources.prevZBufferTexture = Texture::create2D(zBufferTextureSize, zBufferTextureSize, ResourceFormat::RGBA32Float, 1, uint(-1), nullptr, kAutoMipBindFlags);
+
     return true;
 }
 
@@ -613,6 +636,8 @@ void RTXDITutorialBase::loadShaders()
         // Note: we have to use 32-float because 16-float will cause some numerical issues
         mZBufferPass.pFbo = Fbo::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA32Float, ResourceFormat::D32Float);
     }
+
+    mpInitializeZBufferTexture = createComputeShader("InitializeZBufferTexture.cs.slang");
 }
 
 void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderData, bool usePreviousZBuffer)
@@ -623,6 +648,7 @@ void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderD
     vars["SSRT_CB"]["gVisibilityMode"] = uint(mVisibilityMode);
     vars["SSRT_CB"]["gNearPlaneZ"] = -mPassData.scene->getCamera()->getNearPlane(); // Note: negative number
     vars["SSRT_CB"]["gCsRayOriginLenEpsilon"] = mSSRTParams.csRayOriginLenEpsilon; 
+    vars["SSRT_CB"]["gScreenSize"] = float2(mPassData.screenSize);
     vars["SSRT_CB"]["gCsZThickness"] = mSSRTParams.csZThickness; 
     vars["SSRT_CB"]["gStride"] = mSSRTParams.stride; 
     vars["SSRT_CB"]["gJitterFraction"] = mSSRTParams.jitterFraction; 
@@ -630,6 +656,7 @@ void RTXDITutorialBase::setupSSRTVars(ShaderVar& vars, const RenderData& renderD
     vars["SSRT_CB"]["gLayers"] = mSSRTParams.layers;
     vars["SSRT_CB"]["gClipToFrustum"] = mSSRTParams.clipToFrustum;
     vars["SSRT_CB"]["gShadowRayForShading"] = mShadowRayForShading;
+    vars["SSRT_CB"]["gPointSampler"] = mpPointSampler;
 
     // Set other texture/buffer objects
     // Unlike G-Buffer data, our camera space Z-buffer is either previous one or current one (only needs one of them, not both)
@@ -670,5 +697,19 @@ void RTXDITutorialBase::runZBufferRaster(RenderContext* pRenderContext, const Re
         mPassData.scene->rasterize(pRenderContext, mZBufferPass.pState.get(), mZBufferPass.pVars.get(), RasterizerState::CullMode::None);
     }
 
-    mSSRTResources.currZBufferTexture = mZBufferPass.pFbo->getColorTexture(0);
+
+    {
+        FALCOR_PROFILE("Initialize z-buffer");
+        auto vars = mpInitializeZBufferTexture->getRootVar();
+        vars["CB"]["gFarPlaneZ"] = -mPassData.scene->getCamera()->getFarPlane();
+        vars["gRasterColorTexture"] = mZBufferPass.pFbo->getColorTexture(0);
+        vars["gZBufferTexture"] = mSSRTResources.currZBufferTexture;
+        mpInitializeZBufferTexture->execute(pRenderContext, mSSRTResources.currZBufferTexture->getWidth(), mSSRTResources.currZBufferTexture->getHeight());
+    }
+
+    {
+        FALCOR_PROFILE("Generate Max-mipmaps");
+        mSSRTResources.currZBufferTexture->generateMaxMips(pRenderContext);
+    }
 }
+

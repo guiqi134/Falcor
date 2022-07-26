@@ -67,8 +67,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float isVisible = 1.0f;
         if (gVisibilityMode == 0)
             isVisible = RAB_GetConservativeVisibility(surface, lightSample); // Trace a shadow ray
-        else
+        else if (gVisibilityMode == 1)
             isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w); // SSRT
+        else if (gVisibilityMode == 2)
+            isVisible = ssrtUniformStepBinarySearch(rayOrigin, rayDirLen.xyz, rayDirLen.w);
             
         if (!isVisible)  
         {

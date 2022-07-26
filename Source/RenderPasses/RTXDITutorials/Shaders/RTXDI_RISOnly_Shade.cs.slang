@@ -48,8 +48,10 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     float isVisible = 1.0f;
     if (gVisibilityMode == 0)
         isVisible = traceShadowRay(rayOrigin, rayDirLen);
-    else
-        isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+    else if (gVisibilityMode == 1)
+        isVisible = ssrtUniformStepBinarySearch(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+    else if (gVisibilityMode == 2)
+        isVisible = ssrtMaxMips(rayOrigin, rayDirLen.xyz, rayDirLen.w);
 
     // Compute the BRDF terms for the target function.
     float D = surface.getNdf(lightSample.NdotH());
@@ -82,11 +84,22 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 void main(uint3 threadId : SV_DispatchThreadID)
 {
     printSetPixel(threadId.xy);
+    // printSetPixel(uint2(900, 980));
     
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
+
+    float2 csZBufferSize;
+    gCameraSpaceZBuffer.GetDimensions(csZBufferSize.x, csZBufferSize.y);
+    float2 location = float2((launchIdx + 0.5f) / csZBufferSize);
+    float mipZ = gCameraSpaceZBuffer.SampleLevel(gPointSampler, location, 0).r;
+    print("location = ", location);
+    print("mipZ = ", mipZ);
+    
+    // gDebug[launchIdx] = float4(float3(abs(gCameraSpaceZBuffer[launchIdx].r) / 5.0f), 1.0f);
+    gDebug[launchIdx] = float4(float3(abs(mipZ) / 5.0f), 1.0f);
 
     // Get our G-buffer for the current pixel
     RAB_Surface surface = RAB_GetGBufferSurface(pixelPosition, false);

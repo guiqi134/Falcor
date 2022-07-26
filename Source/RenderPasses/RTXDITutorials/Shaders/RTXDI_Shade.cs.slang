@@ -61,8 +61,10 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     {
         if (gVisibilityMode == 0)
             isVisible = traceShadowRay(rayOrigin, rayDirLen);
-        else
+        else if (gVisibilityMode == 1)
             isVisible = traceScreenSpaceShadowRay(rayOrigin, rayDirLen.xyz, rayDirLen.w);
+        else if (gVisibilityMode == 2)
+            isVisible = ssrtUniformStepBinarySearch(rayOrigin, rayDirLen.xyz, rayDirLen.w);
     }
 
     // Compute our geometry term for the light sample

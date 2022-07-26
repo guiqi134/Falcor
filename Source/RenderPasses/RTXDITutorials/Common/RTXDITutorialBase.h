@@ -143,7 +143,7 @@ protected:
     */
     struct {
         // We provide a number of sample RTXDI pipelines and baslines.  Which one is currently displayed?
-        uint32_t selectedDisplayPipeline = 4u;
+        uint32_t selectedDisplayPipeline = 1u;
 
         // Configuration if using baselines (Monte Carlo integration or Talbot RIS); RTXDI passes defaults to the best of them (i.e., 2)
         // Note: The original ReSTIR paper uses an alias table (see Ch 21 in Ray Tracing Gems 2), which is not provided by RTXDI or used
@@ -152,8 +152,8 @@ protected:
         uint32_t initialLightPdfMode = 2u;       // Which basic sampling technique do we use to sample lights? 
 
         // Below are parameters that specify the number of initial candidates (for RTXDI) or the total samples (RIS / basic Monte Carlo)
-        uint32_t primLightSamples = 1u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
-        uint32_t envLightSamples = 0u;           // How many samples do we take on the environment map?
+        uint32_t primLightSamples = 24u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
+        uint32_t envLightSamples = 8u;           // How many samples do we take on the environment map?
 
         // Below are parameters controlling initial light candidate sampling, prior to any reuse
         bool     traceInitialShadowRay = true;   // Before doing reuse, do we trace a shadow ray to the one selected candidate per pixel?
@@ -199,12 +199,15 @@ protected:
     PixelDebug::SharedPtr mpPixelDebug;
 
     // SSRT parameters 
-    enum class VisibilityMode { ShadowRay, SSRT };
-    VisibilityMode mVisibilityMode = VisibilityMode::SSRT;
+    enum class VisibilityMode { ShadowRay, SSRT_binarySearch, SSRT_maxMipmaps };
+    VisibilityMode mVisibilityMode = VisibilityMode::SSRT_maxMipmaps;
     Sampler::SharedPtr mpTrilinearSampler;
+    Sampler::SharedPtr mpPointSampler;
     bool mFrozenFrame = false;
     bool mResetAccumulation = false;
     bool mShadowRayForShading = false;
+
+    ComputePass::SharedPtr mpInitializeZBufferTexture;
 
     struct
     {
@@ -218,11 +221,18 @@ protected:
     {
         float2 csRayOriginLenEpsilon = float2(0.01f, 0.02f); // Offset values for camera space ray origin and length
         float csZThickness = 0.02f;          // Camera space thickness to ascribe to each pixel in the depth buffer
-        float stride = 1.0f;                // Step in horizontal or vertical pixels between samples. This is a float because integer math is slow on GPUs, but should be set to an integer >= 1
+        float stride = 10.0f;                // Step in horizontal or vertical pixels between samples. This is a float because integer math is slow on GPUs, but should be set to an integer >= 1
         float jitterFraction = 0.0f;        // Number between 0 and 1 for how far to bump the ray in stride units to conceal banding artifacts
-        float maxSteps = 400.0f;            // Maximum number of iterations. Higher gives better images but may be slow
-        uint layers = 2u; // Number of layers for z-buffer
-        bool clipToFrustum = false;
+        float maxSteps = 100.0f;            // Maximum number of iterations. Higher gives better images but may be slow
+        uint layers = 1u; // Number of layers for z-buffer
+        bool clipToFrustum = true;
+
+        //float2 csRayOriginLenEpsilon = float2(0.03f, 0.02f); // Offset values for camera space ray origin and length
+        //float csZThickness = 0.015f;          // Camera space thickness to ascribe to each pixel in the depth buffer
+        //float stride = 2.0f;                // Step in horizontal or vertical pixels between samples. This is a float because integer math is slow on GPUs, but should be set to an integer >= 1
+        //float jitterFraction = 0.0f;        // Number between 0 and 1 for how far to bump the ray in stride units to conceal banding artifacts
+        //float maxSteps = 500.0f;            // Maximum number of iterations. Higher gives better images but may be slow
+        //uint layers = 1u; // Number of layers for z-buffer
     } mSSRTParams;
 
     // TODO: this may can be integrated into G-Buffer instead of a seperated raster pass
@@ -285,6 +295,6 @@ protected:
     void loadCommonShaders(void);
 
     // SSRT functions
-    void setupSSRTVars(ShaderVar& vars, const RenderData& renderData, bool usePreviousZBuffer);
     void runZBufferRaster(RenderContext* pRenderContext, const RenderData& renderData);
+    void setupSSRTVars(ShaderVar& vars, const RenderData& renderData, bool usePreviousZBuffer);
 };

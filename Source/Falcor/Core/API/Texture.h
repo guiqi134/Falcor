@@ -237,6 +237,8 @@ namespace Falcor
         */
         void generateMips(RenderContext* pContext, bool minMaxMips = false);
 
+        void generateMaxMips(RenderContext* pContext);
+
         /** In case the texture was loaded from a file, use this to set the file path
         */
         void setSourcePath(const std::filesystem::path& path) { mSourcePath = path; }
