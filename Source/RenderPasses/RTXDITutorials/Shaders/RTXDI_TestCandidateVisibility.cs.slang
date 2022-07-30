@@ -34,12 +34,16 @@
 
 cbuffer SampleCB
 {
-    uint  gReservoirIndex;   // Which of our reservoirs should we use for output?
+    uint gReservoirIndex; // Which of our reservoirs should we use for output?
 }
+
+Buffer<float2> gFirstStageRankings;
 
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -57,6 +61,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
     RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
     RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
+    // Check if the selected light mesh is within the top N list
+    bool checkVisibility = false;
+    if ()
+
     // Shoot a shadow ray and, if it's shadowed, update the visibility
     if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
@@ -66,4 +74,18 @@ void main(uint3 threadId : SV_DispatchThreadID)
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
     }
+
+    // Stage 2: Do statistics after testing visibility
+    float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+    if (RTXDI_IsValidReservoir(reservoir))
+    {
+        uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+        lightSampleData.y = triIdx;
+        lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir);
+    }
+
+    gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
+
+    print("lightSampleData = ", lightSampleData);
 }

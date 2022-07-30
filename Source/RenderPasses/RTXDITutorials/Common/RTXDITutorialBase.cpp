@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "RTXDITutorialBase.h"
 #include "RTXDITutorialConstants.h"
+#include "../LightMeshRankingData.h"
 
  /** This RenderPass has common resources and methods needed by all our tutorials.
 
@@ -54,6 +55,8 @@ namespace
         Resource::BindFlags::ShaderResource |        // Allows using the mipmapped texture as a Texture2D in HLSL
         Resource::BindFlags::UnorderedAccess |       // Allows writing the base mip layer as a RWTexture2D in HLSL
         Resource::BindFlags::RenderTarget;           // Needed for the automatic mipmap generation
+
+    const std::string kOutputFileDirectory = "D:/ReSTIR/Data";
 };
 
 
@@ -120,6 +123,27 @@ void RTXDITutorialBase::compile(RenderContext* pContext, const CompileData& comp
     }
 }
 
+// Common execute functions
+void RTXDITutorialBase::execute(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    // Auto reset accumulation
+    auto& dict = renderData.getDictionary();
+    if (mResetAccumulation)
+    {
+        auto flags = dict.getValue(kRenderPassRefreshFlags, Falcor::RenderPassRefreshFlags::None);
+        flags |= Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        dict[Falcor::kRenderPassRefreshFlags] = flags;
+    }
+}
+
+void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
+{
+    widget.var("Number of Top N light meshes", mLightMeshTopN);
+
+    widget.checkbox("Frozen Frame", mFrozenFrame);
+    mpPixelDebug->renderUI(widget);
+}
+
 
 /** Updates flags inside this base class to (selectively/lazily) rebuild structures due to dynamic scene changes
 */
@@ -156,6 +180,25 @@ void RTXDITutorialBase::setScene(RenderContext* pContext, const Scene::SharedPtr
         mPassData.updateEmissiveTriangleFlux = true;
         mPassData.updateEmissiveTriangleGeom = true;
     }
+}
+
+bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
+{
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
+    {
+        mVisMode = VisibilityMode::Origin;
+        mResetAccumulation = true;
+        return true;
+    }
+
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
+    {
+        mVisMode = VisibilityMode::ReducedShadowRay;
+        mResetAccumulation = true;
+        return true;
+    }
+
+    return false;
 }
 
 /** When RTXDI reuses spatial neighbors, it is _not_ a dense reuse (e.g., of all pixels in a 5x5 regions).
@@ -365,6 +408,14 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
 
     // Some debug textures
     vars["gHasSampleChangedInReusing"] = renderData["hasSampleChangedInReusing"]->asTexture();
+
+    // Statistics textures 
+    vars["gSelectedLightSampleTextures"] = mStatistics.selectedLightSampleTextures;
+    vars["gUnbiasedSampleResultTexture"] = mStatistics.unbiasedSampleResultTexture;
+
+    // Shared shader parameters
+    vars["SharedCB"]["gLightMeshTopN"] = mLightMeshTopN;
+    vars["SharedCB"]["gVisMode"] = uint(mVisMode);
 }
 
 bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const RenderData& data)
@@ -444,6 +495,16 @@ bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const Re
     // we pack data into a coherent structure.
     mResources.lightGeometry = Buffer::createTyped<float4>(2 * mPassData.lights->getTotalLightCount());
 
+    // Statistics texture containers
+    mStatistics.selectedLightSampleTextures = Texture::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA32Float, 1,
+        uint(-1), nullptr, kBufferBindFlags);
+    mStatistics.unbiasedSampleResultTexture = Texture::create2D(mPassData.screenSize.x, mPassData.screenSize.y, ResourceFormat::RGBA32Float, 1,
+        uint(-1), nullptr, kBufferBindFlags);
+
+    // Light mesh frequency ranking buffers
+    mpFirstStageBuffer = Buffer::createTyped<float2>(sizeof(kFirstStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kFirstStageRanking);
+    mpThirdStageBuffer = Buffer::createTyped<float2>(sizeof(kThirdStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kThirdStageRanking);
+
     return true;
 }
 
@@ -510,6 +571,120 @@ void RTXDITutorialBase::loadShaders()
     mShader.initialCandidates = createComputeShader(kRTXDI_InitialSamples);
     mShader.initialCandidateVisibility = createComputeShader(kRTXDI_InitialVisibility);
     mShader.shade = createComputeShader(kRTXDI_Shade);
+
+    
+}
+
+
+void RTXDITutorialBase::computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    if (!enableStatistics) return;
+
+    float numFrames = float(mStatistics.startEndFrame.y - mStatistics.startEndFrame.x);
+
+    for (uint stageIndex = 0; stageIndex < mStatistics.stages.size(); stageIndex++)
+    {
+        if (mRtxdiFrameParams.frameIndex >= mStatistics.startEndFrame.x && mRtxdiFrameParams.frameIndex < mStatistics.startEndFrame.y)
+        {
+
+            auto selectedSampleInBytes = mStatistics.stages[stageIndex].selectedSampleInBytes;
+
+            std::unordered_map<uint, uint> lightMeshCount;
+            std::unordered_map<uint, uint2> lightTriangleCount;
+
+            // Loop over the texture
+            for (uint i = 0; i < mPassData.screenSize.x * mPassData.screenSize.y; i++)
+            {
+                // Unpack light sample info
+                float4 selectedSampleInfo;
+                for (int j = 0; j < 4; j++)
+                {
+                    int startIndex = i * 16 + 4 * j;
+                    uint8_t bytesToFloat[4] = {
+                        selectedSampleInBytes[startIndex], selectedSampleInBytes[startIndex + 1],
+                        selectedSampleInBytes[startIndex + 2], selectedSampleInBytes[startIndex + 3],
+                    };
+                    memcpy(&selectedSampleInfo[j], &bytesToFloat, sizeof(float));
+                }
+
+                // Accumulate the info across frames
+                if (selectedSampleInfo.x != -1)
+                {
+                    lightMeshCount[uint(selectedSampleInfo.x)] += 1;
+                    mStatistics.stages[stageIndex].lightMeshTotalCount[uint(selectedSampleInfo.x)] += 1;
+
+                    lightTriangleCount[uint(selectedSampleInfo.y)].x = uint(selectedSampleInfo.x);
+                    lightTriangleCount[uint(selectedSampleInfo.y)].y += 1;
+                    mStatistics.stages[stageIndex].lightTriangTotalCount[uint(selectedSampleInfo.y)].x = uint(selectedSampleInfo.x);
+                    mStatistics.stages[stageIndex].lightTriangTotalCount[uint(selectedSampleInfo.y)].y += 1;
+                }
+            }
+
+            // Add current frame result to sum
+            float uniqueLightMeshes = (float)lightMeshCount.size();
+            float uniqueLightTriangles = (float)lightTriangleCount.size();
+            mStatistics.stages[stageIndex].uniqueMeshTriangleUvSums += float3(uniqueLightMeshes, uniqueLightTriangles, 0);
+        }
+    }
+
+    // Print the statistics data in the final frame
+    if (mRtxdiFrameParams.frameIndex == mStatistics.startEndFrame.y)
+    {
+        try
+        {
+            std::string directory = getExecutableDirectory().string();
+            logInfo(directory);
+
+            std::ofstream outMeshFile(directory + "/Statistics/Bistro/light_mesh_frequency.txt");
+            std::ofstream outTriangleFile(directory + "/Statistics/Bistro/light_triangle_frequency.txt");
+
+            for (uint stageIndex = 0; stageIndex < mStatistics.stages.size(); stageIndex++)
+            {
+                // Output number of unique lights in average
+                std::string output = std::format("Average unique light mesh and triangle across 100 frames in stage {}: {}\n",
+                    stageIndex, to_string(glm::round(mStatistics.stages[stageIndex].uniqueMeshTriangleUvSums / numFrames)));
+                logInfo(output);
+            
+
+                // Output the average frequency of each light been selected (do ceiling operation for average value)
+                std::string whichStage = std::format("Stage {}\n\n", stageIndex);
+
+                if (outMeshFile.is_open())
+                {
+                    logInfo("out mesh file opens");
+                    outMeshFile << whichStage;
+                    for (const auto& [key, value] : mStatistics.stages[stageIndex].lightMeshTotalCount)
+                    {
+                        std::string lightMeshCount = std::format("{} {}\n", key, glm::round(value / numFrames));
+                        outMeshFile << lightMeshCount;
+                    }
+                    outMeshFile << std::endl;
+                }
+
+                if (outTriangleFile.is_open())
+                {
+                    logInfo("out triangle file opens");
+                    outTriangleFile << whichStage;
+                    for (const auto& [key, value] : mStatistics.stages[stageIndex].lightTriangTotalCount)
+                    {
+                        std::string lightTriangleCount = std::format("{} {} {}\n", key, value.x, glm::round(value.y / numFrames));
+                        outTriangleFile << lightTriangleCount;
+                    }
+                    outTriangleFile << std::endl;
+                }
+            }
+
+            outMeshFile.close();
+            outTriangleFile.close();
+
+        }
+        catch (const std::exception& ex)
+        {
+            logError(ex.what());
+        }
+
+        enableStatistics = false;
+    }
 
 }
 

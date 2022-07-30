@@ -57,9 +57,11 @@ public:
 
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pContext, const CompileData& compileData) override;
-    virtual void renderUI(Gui::Widgets& widget) override { mpPixelDebug->renderUI(widget); }
+    virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
+    virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 
 protected:
@@ -153,8 +155,8 @@ protected:
         uint32_t initialLightPdfMode = 2u;       // Which basic sampling technique do we use to sample lights? 
 
         // Below are parameters that specify the number of initial candidates (for RTXDI) or the total samples (RIS / basic Monte Carlo)
-        uint32_t primLightSamples = 24u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
-        uint32_t envLightSamples = 8u;           // How many samples do we take on the environment map?
+        uint32_t primLightSamples = 32u;         // How many samples do we take on emissive primitive lights (in Falcor currently, just triangles)
+        uint32_t envLightSamples = 0u;           // How many samples do we take on the environment map?
 
         // Below are parameters controlling initial light candidate sampling, prior to any reuse
         bool     traceInitialShadowRay = true;   // Before doing reuse, do we trace a shadow ray to the one selected candidate per pixel?
@@ -196,6 +198,38 @@ protected:
         uint32_t currentGBufferIndex = 0u;          // Which of the two G-buffers is the current one?
         uint32_t priorGBufferIndex = 1u;            // Which of the two G-buffers is the prior one?
     } mLightingParams;
+
+    // ReSTIR Shadow Map part
+    enum class VisibilityMode { Origin, ReducedShadowRay };
+    VisibilityMode mVisMode = VisibilityMode::ReducedShadowRay;
+
+    bool mFrozenFrame = false;
+    bool mDisplayLightSampling = false;
+    bool enableStatistics = false;
+    bool mResetAccumulation = false;
+
+    uint mLightMeshTopN = 4u;
+    Buffer::SharedPtr mpFirstStageBuffer;
+    Buffer::SharedPtr mpThirdStageBuffer;
+
+    // Statistics part
+    struct UniqueLightData
+    {
+        std::vector<uint8_t> selectedSampleInBytes;
+        std::unordered_map<uint, uint> lightMeshTotalCount;
+        std::unordered_map<uint, uint2> lightTriangTotalCount;
+        float3 uniqueMeshTriangleUvSums = float3(0.0f);
+    };
+
+    struct 
+    {
+        Texture::SharedPtr selectedLightSampleTextures;
+        Texture::SharedPtr unbiasedSampleResultTexture;
+
+        std::array<UniqueLightData, 4> stages;
+
+        uint2 startEndFrame = uint2(100, 200);
+    } mStatistics;
 
 
     ////////////////////////////////////////////////////////////////////////////////////////////
@@ -249,4 +283,6 @@ protected:
         purposes must be understood for a very crude RTXDI integration.
     */
     void loadCommonShaders(void);
+
+    void computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& data);
 };

@@ -43,6 +43,8 @@ cbuffer SampleCB
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -71,7 +73,21 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // so we need to multiply it in final shading
     RAB_LightSample lightSample;
     RTXDI_Reservoir reservoir = RTXDI_SampleLightsForSurface(rng, tileRng, surface,
-        sampleParams, params, lightSample); 
+        sampleParams, params, lightSample);
+
+    // Stage 1: Do statistics after generating candidates
+    float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+    if (RTXDI_IsValidReservoir(reservoir))
+    {
+        uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+        lightSampleData.y = triIdx; 
+        lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir); 
+    }
+
+    gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
+
+    print("lightSampleData = ", lightSampleData);
 
     // Store data about our selected light in an intermediate reservoir for later reuse and shading.
     RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex);

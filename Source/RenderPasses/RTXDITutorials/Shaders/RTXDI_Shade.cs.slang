@@ -34,12 +34,15 @@
 
 cbuffer ShadeCB
 {
-    uint  gInputReservoirIndex;       // Which reservoir contains the samples we should shade
-    bool  gDebugVis;                  // Debugging. TODO: Remove
+    uint gInputReservoirIndex; // Which reservoir contains the samples we should shade
+    bool gDisplayLightSampling;
 }
 
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
+Texture2D<PackedHitInfo> gVbuffer;
+
+Buffer<float2> gThirdStageRankings;
 
 void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, bool hasSampleChanged,
            out float3 dif, out float3 spec)
@@ -83,6 +86,8 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    printSetPixel(threadId.xy);
+
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
@@ -114,20 +119,54 @@ void main(uint3 threadId : SV_DispatchThreadID)
         Shade(reservoir, surface, lightSample, lightEmission, hasSampleChanged, difColor, specColor);
     }
 
-    if (gDebugVis)
-    {
-        uint2 displayTexSize;
-        gLocalLightPdfTexture.GetDimensions(displayTexSize.x, displayTexSize.y);
+    // Add any directly-visible emission & environment maps, then store our final color
+    float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
+    gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
 
-        float2 offset = float2(launchIdx) / float2(gFrameSize);
-        uint2  mipTex = uint2(offset * displayTexSize);
-        float4 col = gLocalLightPdfTexture.Load(int3(mipTex.x, mipTex.y, 0));
-        gOutputColor[launchIdx] = float4(col.r, col.g, col.b, 1.0f);
-    }
-    else
+    // Visualize light mesh selection
+    if (gDisplayLightSampling)
     {
-        // Add any directly-visible emission & environment maps, then store our final color
-        float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
-        gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
+        outColor = luminance(outColor);
+        float4 currPixelResult = gSelectedLightSampleTextures[launchIdx];
+        // uint meshCount = gScene.lightCollection.meshCount;
+
+        uint firstLightID = gScene.lightCollection.meshData[27].instanceID;
+        uint secondLightID = gScene.lightCollection.meshData[32].instanceID;
+        uint thirdLightID = gScene.lightCollection.meshData[26].instanceID;
+        uint fourthLightID = gScene.lightCollection.meshData[99].instanceID;
+
+        print("firstLightID = ", firstLightID);
+
+        if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
+        {
+            HitInfo hit = HitInfo(gVbuffer[launchIdx]);
+            if (hit.isValid() && hit.getType() == HitType::Triangle)
+            {
+                // Extract a triangle hit from the V-buffer
+                const TriangleHit triangleHit = hit.getTriangleHit();
+
+                if (triangleHit.instanceID.index == firstLightID) outColor = float3(1.0, 0.0, 0.0);
+                else if (triangleHit.instanceID.index == secondLightID) outColor = float3(0.0, 1.0, 0.0);
+                else if (triangleHit.instanceID.index == thirdLightID) outColor = float3(0.0, 0.0, 1.0);
+                else if (triangleHit.instanceID.index == fourthLightID) outColor = float3(1.0, 1.0, 0.0);
+            }
+        }
+        else
+        {
+            outColor = float3(1.0f);
+            if (currPixelResult.x == -1)
+            {
+                outColor = float3(0.0f);
+            }
+            else
+            {
+                if (currPixelResult.x == 27) outColor = float3(1.0, 0.0, 0.0);
+                else if (currPixelResult.x == 32) outColor = float3(0.0, 1.0, 0.0);
+                else if (currPixelResult.x == 26) outColor = float3(0.0, 0.0, 1.0);
+                else if (currPixelResult.x == 99) outColor = float3(1.0, 1.0, 0.0);
+            }
+        }
+
+        gOutputColor[launchIdx] = float4(outColor, 1.0f);
     }
 }

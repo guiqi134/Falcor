@@ -111,6 +111,10 @@ Texture2D<float4> gMotionVectorTexture;
 // Deubg textures
 RWTexture2D<float4> gHasSampleChangedInReusing;
 
+// Textures for doing statistics
+RWTexture2D gSelectedLightSampleTextures;
+RWTexture2D gUnbiasedSampleResultTexture;
+
 // Define buffers for RTXDI to access data from.
 #define RTXDI_RIS_BUFFER gRisBuffer
 #define RTXDI_LIGHT_RESERVOIR_BUFFER gLightReservoirs
@@ -138,4 +142,10 @@ RWTexture2D<float4> gHasSampleChangedInReusing;
 // Go ahead and include the RTXDI SDK's HLSL functions
 // #include "rtxdi/ResamplingFunctions.hlsli"
 #include "ResamplingFunctions.hlsli"
+
+cbuffer SharedCB
+{
+    uint gLightMeshTopN;
+    uint gVisMode;
+}
 

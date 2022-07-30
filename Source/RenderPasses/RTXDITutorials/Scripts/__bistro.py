@@ -6,6 +6,8 @@ currentTime = 0.0
 paused = True
 animateCamera = False
 
+restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
+
 # Initial camera.  This camera is inconsistent between various Bistro versions,
 #    but seems to give decent (if not identical) views for most recent versions.
 camera = [
@@ -41,7 +43,7 @@ def graph_ImportanceResampling():
     # Create a renderer (i.e., graph) containing a number of render passes 
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
     tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
-    tracer.addPass(createPass("RTXDICombinedTutorial", gResamplingParams), "RTXDI Tutorials")
+    tracer.addPass(createPass(restirPassName, gResamplingParams), "RTXDI Tutorials")
     tracer.addPass(createPass("ToneMapper", gToneMappingParams), "ToneMapping")
     tracer.addPass(createPass("AccumulatePass", gAccumParams), "Accumulation")
 
@@ -68,3 +70,17 @@ m.scene.camera.animated = animateCamera
 m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
+
+# Add some view points
+m.scene.addViewpoint()
+
+viewport1 = [
+    float3( -30.359646, 7.155272, -11.375874 ),
+    float3( -29.451384, 7.025773, -10.978018 ),
+    float3( 0.000000,   1.000000,  0.000000 ) ]
+m.scene.addViewpoint(viewport1[0], viewport1[1], viewport1[2])
+
+# viewport2 = [
+#     float3( -16.477287, 3.650037, 1.189330 ),
+#     float3( -15.491768, 3.507777, 1.097058 ),
+#     float3( 0.000000,   1.000000,  0.000000 ) ]

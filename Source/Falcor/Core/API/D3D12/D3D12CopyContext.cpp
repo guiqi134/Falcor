@@ -154,6 +154,9 @@ namespace Falcor
         ID3D12Device* pDevice = gpDevice->getApiHandle();
         pDevice->GetCopyableFootprints(&texDesc, subresourceIndex, 1, 0, &footprint, &pThis->mRowCount, &rowSize, &size);
 
+        //logInfo("rowSize = " + std::to_string(rowSize));
+        //logInfo("size = " + std::to_string(size));
+
         //Create buffer
         pThis->mpBuffer = Buffer::create(size, Buffer::BindFlags::None, Buffer::CpuAccess::Read, nullptr);
 
@@ -181,6 +184,13 @@ namespace Falcor
         // Calculate row size. GPU pitch can be different because it is aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
         FALCOR_ASSERT(footprint.Footprint.Width % getFormatWidthCompressionRatio(mTextureFormat) == 0); // Should divide evenly
         uint32_t actualRowSize = (footprint.Footprint.Width / getFormatWidthCompressionRatio(mTextureFormat)) * getFormatBytesPerBlock(mTextureFormat);
+
+        //logInfo("actualRowSize = " + std::to_string((uint)actualRowSize));
+        //logInfo("footprint.Footprint.Depth = " + std::to_string(footprint.Footprint.Depth));
+        //logInfo("footprint.Footprint.RowPitch = " + std::to_string(footprint.Footprint.RowPitch));
+        //logInfo("mRowCount = " + std::to_string(mRowCount));
+        //logInfo("footprint.Footprint.Width = " + std::to_string(footprint.Footprint.Width));
+        //logInfo("footprint.Footprint.Format = " + std::to_string(footprint.Footprint.Format));
 
         // Get buffer data
         std::vector<uint8_t> result;

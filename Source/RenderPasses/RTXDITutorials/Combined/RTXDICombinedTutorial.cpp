@@ -56,6 +56,8 @@ RTXDICombinedTutorial::RTXDICombinedTutorial(const Dictionary& dict)
 
 void RTXDICombinedTutorial::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    mpPixelDebug->beginFrame(pRenderContext, mPassData.screenSize);
+
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
@@ -100,13 +102,18 @@ void RTXDICombinedTutorial::execute(RenderContext* pRenderContext, const RenderD
         break;
     }
 
+    // Output unique light statistics
+    computeUniqueLightSamples(pRenderContext, renderData);
+
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
-    mRtxdiFrameParams.frameIndex++;
+    if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
 
     // When we do temporal reuse, we need a G-buffer for this frame *and* last frame to compute shading.  We have
     // two G-buffer indicies (0 and 1), ping-pong back and forth between them each frame.
     mLightingParams.currentGBufferIndex = 1u - mLightingParams.currentGBufferIndex;
     mLightingParams.priorGBufferIndex = 1u - mLightingParams.priorGBufferIndex;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 // Renders the GUI used to change options on the fly when running in Mogwai.

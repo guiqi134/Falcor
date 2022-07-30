@@ -48,7 +48,7 @@ cbuffer CB
     bool gUpdatePrimitiveFlux;
 }
 
-// Our output PDF texture used for importance sampling primitves
+// Our output PDF texture used for importance sampling primitves -> localLightPdfTexture
 RWTexture2D<float> gPrimitivePDFTexture;
 
 // Output packed light data for later RTXDI consumption.

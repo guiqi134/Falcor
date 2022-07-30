@@ -1968,7 +1968,7 @@ RTXDI_Reservoir RTXDI_SpatioTemporalResampling(
     }
 
     // Clamp the sample count at 32 to make sure we can keep the neighbor mask in an uint (cachedResult)
-    uint numSamples = clamp(stparams.numSamples, 1, 32);
+    uint numSamples = clamp(stparams.numSamples, 1, 32); // = gNumSamples + 1
 
     // Apply disocclusion boost if there is no temporal surface
     if (!foundTemporalSurface)
@@ -2033,8 +2033,6 @@ RTXDI_Reservoir RTXDI_SpatioTemporalResampling(
         prevSample.M = min(prevSample.M, historyLimit);
         prevSample.spatialDistance += spatialOffset;
         prevSample.age += 1;
-
-        print("prevSample.spatialDistance = ", prevSample.spatialDistance);
 
         uint originalPrevLightID = RTXDI_GetReservoirLightIndex(prevSample);
 

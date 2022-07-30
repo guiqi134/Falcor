@@ -76,6 +76,9 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // lighting for one final selected light sample in each pixel.  This is ReSTIR with only spatial reuse.
     runSpatioTemporalReuse(pRenderContext, renderData);
 
+    // Output unique light statistics
+    computeUniqueLightSamples(pRenderContext, renderData);
+
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     mRtxdiFrameParams.frameIndex++;
 
@@ -108,8 +111,12 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         candidatesVars["SampleCB"]["gEnvironmentSamples"] = mLightingParams.envLightSamples;
         candidatesVars["SampleCB"]["gOutputReservoirIndex"] = uint(2);
         setupRTXDIBridgeVars(candidatesVars, renderData);
+        mpPixelDebug->prepareProgram(mShader.initialCandidates->getProgram(), candidatesVars);
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
+
+    if (enableStatistics)
+        mStatistics.stages[0].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
 
     // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.  
     if (mLightingParams.traceInitialShadowRay)
@@ -117,9 +124,14 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         FALCOR_PROFILE("Candidate Visibility");
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
+        visVars["SampleCB"]["gLightMeshTopN"] = mLightMeshTopN;
         setupRTXDIBridgeVars(visVars, renderData);
+        mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
+
+    if (enableStatistics)
+        mStatistics.stages[1].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
 
     // Step 3: Do spatiotemporal reuse
     {
@@ -145,13 +157,24 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
+    if (enableStatistics)
+    {
+        mStatistics.stages[2].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
+        mStatistics.stages[3].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.unbiasedSampleResultTexture.get(), 0);
+    }
+
+
     // Step 4: Do final shading
     {
         FALCOR_PROFILE("Final shading");
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
+        shadeVars["ShadeCB"]["gDisplayLightSampling"] = mDisplayLightSampling;
+        shadeVars["ShadeCB"]["gLightMeshTopN"] = mLightMeshTopN;
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
+        shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
+        shadeVars["gThirdStageRankings"] = mpThirdStageBuffer;
         setupRTXDIBridgeVars(shadeVars, renderData);
         mpPixelDebug->prepareProgram(mShader.shade->getProgram(), shadeVars);
         mShader.shade->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
@@ -166,8 +189,6 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
 // Renders the GUI used to change options on the fly when running in Mogwai.
 void RTXDITutorial5::renderUI(Gui::Widgets& widget)
 {
-    mpPixelDebug->renderUI(widget);
-
     // Provide controls for the number of samples on each light type (largely consistent options between tutorials)
     Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", true);
     candidateOptions.text("Number of per-pixel light candidates on:");
@@ -203,4 +224,6 @@ void RTXDITutorial5::renderUI(Gui::Widgets& widget)
     if (contextOptions.var("Tile Count", mLightingParams.presampledTileCount, 1u, 1024u)) mpRtxdiContext = nullptr;
     if (contextOptions.var("Tile Size", mLightingParams.presampledTileSize, 8u, 8192u, 128u)) mpRtxdiContext = nullptr;
     contextOptions.release();
+
+    RTXDITutorialBase::renderUI(widget);
 }

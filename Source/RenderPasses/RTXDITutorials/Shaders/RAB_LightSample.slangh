@@ -196,7 +196,7 @@ float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Sur
     //float F = spec < 1e-8f ? 0.0f : evalFresnelSchlick(spec, 1.0f, lightSample.LdotH());
 
     // Gives much less noisy results.  We can change the target PDF however we want, so use this.
-    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec); // Song: Why? Test this!
+    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec); 
 
     // Get the probability of sampling in the diffuse lobe (i.e., relative weight of diffuse vs
     //    specular lobes) and then linearly interpolate between the lobes.

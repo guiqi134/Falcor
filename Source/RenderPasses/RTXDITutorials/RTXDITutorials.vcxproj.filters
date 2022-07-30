@@ -193,4 +193,7 @@
   <ItemGroup>
     <Text Include="README.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="LightMeshRankingData.h" />
+  </ItemGroup>
 </Project>
