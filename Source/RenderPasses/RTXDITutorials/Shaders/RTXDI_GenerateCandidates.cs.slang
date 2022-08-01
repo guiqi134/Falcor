@@ -76,18 +76,21 @@ void main(uint3 threadId : SV_DispatchThreadID)
         sampleParams, params, lightSample);
 
     // Stage 1: Do statistics after generating candidates
-    float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
-    if (RTXDI_IsValidReservoir(reservoir))
+    if (gCollectingData)
     {
-        uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
-        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
-        lightSampleData.y = triIdx; 
-        lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir); 
+        float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+        if (RTXDI_IsValidReservoir(reservoir))
+        {
+            uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+            lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+            lightSampleData.y = triIdx; 
+            lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir); 
+        }
+    
+        gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
+    
+        print("lightSampleData = ", lightSampleData);
     }
-
-    gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
-
-    print("lightSampleData = ", lightSampleData);
 
     // Store data about our selected light in an intermediate reservoir for later reuse and shading.
     RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex);

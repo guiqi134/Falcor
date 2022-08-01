@@ -85,7 +85,24 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         currentLightIndex = RTXDI_GetReservoirLightIndex(curSample);
         currentSampleUV = RTXDI_GetReservoirSampleUV(curSample);
 
-        // print("environmentRisBufferOffset = ", params.environmentRisBufferOffset);
+        // Check if the selected light mesh is within the top N list
+        bool checkVisibility = false;
+        if (gVisMode == 1)
+        {
+            for (uint i = 0; i < gLightMeshTopN; i++)
+            {
+                print("gFirstStageRankings[i].x = ", gFirstStageRankings[i].x);
+                if (gScene.lightCollection.getLightIdx(lightIndex) == gFirstStageRankings[i].x)
+                {
+                    checkVisibility = true;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            checkVisibility = true;
+        }
 
         // ... with the results of our spatiotemporal resampling.  Set parameters here...
         RTXDI_SpatioTemporalResamplingParameters stparams;
@@ -107,7 +124,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         restirResult = RTXDI_SpatioTemporalResampling(pixelPosition, surface, curSample,
             rng, stparams, params, selectedSamplePos, selectedSample);
 
-        if (true)
+        if (gCollectingData)
         {
             stparams.biasCorrectionMode = 1;
             restirResultBiased = restirResult;
@@ -131,31 +148,34 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         any(currentSampleUV != RTXDI_GetReservoirSampleUV(restirResult));
     gHasSampleChangedInReusing[launchIdx] = hasSampleChanged ? float4(1.0f) : float4(0.0f);
 
-    // Stage 3: Do statistics after biased reusing 
-    float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
-    if (RTXDI_IsValidReservoir(restirResultBiased))
+    // Stage 3: Do statistics after biased reusing
+    if (gCollectingData)
     {
-        uint triIdx = RTXDI_GetReservoirLightIndex(restirResultBiased);
-        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
-        lightSampleData.y = triIdx;
-        lightSampleData.zw = RTXDI_GetReservoirSampleUV(restirResultBiased);
+        float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+        if (RTXDI_IsValidReservoir(restirResultBiased))
+        {
+            uint triIdx = RTXDI_GetReservoirLightIndex(restirResultBiased);
+            lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+            lightSampleData.y = triIdx;
+            lightSampleData.zw = RTXDI_GetReservoirSampleUV(restirResultBiased);
+        }
+        gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
+    
+        print("lightSampleData = ", lightSampleData);
+    
+        // Stage 4: Do statistics after unbiased reusing
+        lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+        if (RTXDI_IsValidReservoir(restirResultUnbiased) && RTXDI_GetReservoirInvPdf(restirResultUnbiased) != 0)
+        {
+            uint triIdx = RTXDI_GetReservoirLightIndex(restirResultUnbiased);
+            lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+            lightSampleData.y = triIdx;
+            lightSampleData.zw = RTXDI_GetReservoirSampleUV(restirResultUnbiased);
+        }
+        gUnbiasedSampleResultTexture[uint2(launchIdx)] = lightSampleData;
+    
+        // print("lightSampleData = ", lightSampleData);
     }
-    gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
-
-    print("lightSampleData = ", lightSampleData);
-
-    // Stage 4: Do statistics after unbiased reusing
-    lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
-    if (RTXDI_IsValidReservoir(restirResultUnbiased) && RTXDI_GetReservoirInvPdf(restirResultUnbiased) != 0)
-    {
-        uint triIdx = RTXDI_GetReservoirLightIndex(restirResultUnbiased);
-        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
-        lightSampleData.y = triIdx;
-        lightSampleData.zw = RTXDI_GetReservoirSampleUV(restirResultUnbiased);
-    }
-    gUnbiasedSampleResultTexture[uint2(launchIdx)] = lightSampleData;
-
-    // print("lightSampleData = ", lightSampleData);
 
     // Store the reservoir after spatiotemporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(restirResult, params, launchIdx, gOutputReservoirIndex);

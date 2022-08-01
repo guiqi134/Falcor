@@ -53,9 +53,25 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     // Where are we shading / computing a pdf?
     float3 origin = RAB_GetSurfaceWorldPos(surface);
 
-    // Shoot a shadow ray to the selected light sample
-    float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
-    // float isVisible = hasSampleChanged ? traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance()) : 1.0f;
+    // Check if the selected light mesh is within the top N list
+    float isVisible = 1.0f;
+    if (gVisMode == 1)
+    {
+        uint lightTriIndex = RTXDI_GetReservoirLightIndex(reservoir);
+        for (uint i = 0; i < gLightMeshTopN; i++)
+        {
+            print("gThirdStageRankings[i].x = ", gThirdStageRankings[i].x);
+            if (gScene.lightCollection.getLightIdx(lightTriIndex) == gThirdStageRankings[i].x)
+            {
+                isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+                break;
+            }
+        }
+    }
+    else
+    {
+        isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    }
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();

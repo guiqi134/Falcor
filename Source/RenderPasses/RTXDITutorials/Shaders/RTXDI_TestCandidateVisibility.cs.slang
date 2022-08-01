@@ -63,10 +63,25 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // Check if the selected light mesh is within the top N list
     bool checkVisibility = false;
-    if ()
+    if (gVisMode == 1)
+    {
+        for (uint i = 0; i < gLightMeshTopN; i++)
+        {
+            print("gFirstStageRankings[i].x = ", gFirstStageRankings[i].x);
+            if (gScene.lightCollection.getLightIdx(lightIndex) == gFirstStageRankings[i].x)
+            {
+                checkVisibility = true;
+                break;
+            }
+        }
+    }
+    else
+    {
+        checkVisibility = true;
+    }
 
     // Shoot a shadow ray and, if it's shadowed, update the visibility
-    if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
+    if (checkVisibility && RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
         if (!RAB_GetConservativeVisibility(surface, lightSample))  // Trace a shadow ray
         {
@@ -76,16 +91,19 @@ void main(uint3 threadId : SV_DispatchThreadID)
     }
 
     // Stage 2: Do statistics after testing visibility
-    float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
-    if (RTXDI_IsValidReservoir(reservoir))
+    if (gCollectingData)
     {
-        uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
-        lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
-        lightSampleData.y = triIdx;
-        lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir);
+        float4 lightSampleData = float4(-1); // light mesh ID, triangle ID, UV
+        if (RTXDI_IsValidReservoir(reservoir))
+        {
+            uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+            lightSampleData.x = gScene.lightCollection.getLightIdx(triIdx);
+            lightSampleData.y = triIdx;
+            lightSampleData.zw = RTXDI_GetReservoirSampleUV(reservoir);
+        }
+    
+        gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
+    
+        print("lightSampleData = ", lightSampleData);
     }
-
-    gSelectedLightSampleTextures[uint2(launchIdx)] = lightSampleData;
-
-    print("lightSampleData = ", lightSampleData);
 }

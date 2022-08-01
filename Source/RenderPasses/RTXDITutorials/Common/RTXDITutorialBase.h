@@ -205,12 +205,21 @@ protected:
 
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
-    bool enableStatistics = false;
+    bool mEnableStatistics = false;
     bool mResetAccumulation = false;
 
     uint mLightMeshTopN = 4u;
     Buffer::SharedPtr mpFirstStageBuffer;
+    Buffer::SharedPtr mpSecondStageBuffer;
     Buffer::SharedPtr mpThirdStageBuffer;
+
+    struct
+    {
+        GraphicsProgram::SharedPtr pProgram;
+        GraphicsState::SharedPtr pState;
+        GraphicsVars::SharedPtr pVars;
+        Fbo::SharedPtr pFbo;
+    } mShadowMapPass;
 
     // Statistics part
     struct UniqueLightData

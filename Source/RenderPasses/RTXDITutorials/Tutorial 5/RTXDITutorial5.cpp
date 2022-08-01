@@ -115,7 +115,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (enableStatistics)
+    if (mEnableStatistics)
         mStatistics.stages[0].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
 
     // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.  
@@ -124,13 +124,13 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         FALCOR_PROFILE("Candidate Visibility");
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
-        visVars["SampleCB"]["gLightMeshTopN"] = mLightMeshTopN;
+        visVars["gFirstStageRankings"] = mpFirstStageBuffer;
         setupRTXDIBridgeVars(visVars, renderData);
         mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (enableStatistics)
+    if (mEnableStatistics)
         mStatistics.stages[1].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
 
     // Step 3: Do spatiotemporal reuse
@@ -157,7 +157,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (enableStatistics)
+    if (mEnableStatistics)
     {
         mStatistics.stages[2].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
         mStatistics.stages[3].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.unbiasedSampleResultTexture.get(), 0);
@@ -170,7 +170,6 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
         shadeVars["ShadeCB"]["gDisplayLightSampling"] = mDisplayLightSampling;
-        shadeVars["ShadeCB"]["gLightMeshTopN"] = mLightMeshTopN;
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();

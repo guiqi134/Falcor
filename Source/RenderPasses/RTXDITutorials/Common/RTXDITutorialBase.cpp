@@ -405,6 +405,7 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     vars["gEnvMapPdfTexture"] = mResources.environmentPdfTexture;
     vars["gNeighborBuffer"] = mResources.neighborOffsetBuffer;
     vars["gMotionVectorTexture"] = renderData["mvec"]->asTexture();
+    vars["gThirdStageRankings"] = mpThirdStageBuffer;
 
     // Some debug textures
     vars["gHasSampleChangedInReusing"] = renderData["hasSampleChangedInReusing"]->asTexture();
@@ -416,6 +417,8 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     // Shared shader parameters
     vars["SharedCB"]["gLightMeshTopN"] = mLightMeshTopN;
     vars["SharedCB"]["gVisMode"] = uint(mVisMode);
+    vars["SharedCB"]["gCollectingData"] = mEnableStatistics;
+
 }
 
 bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const RenderData& data)
@@ -503,6 +506,7 @@ bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const Re
 
     // Light mesh frequency ranking buffers
     mpFirstStageBuffer = Buffer::createTyped<float2>(sizeof(kFirstStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kFirstStageRanking);
+    mpSecondStageBuffer = Buffer::createTyped<float2>(sizeof(kSecondStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kSecondStageRanking);
     mpThirdStageBuffer = Buffer::createTyped<float2>(sizeof(kThirdStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kThirdStageRanking);
 
     return true;
@@ -578,7 +582,7 @@ void RTXDITutorialBase::loadShaders()
 
 void RTXDITutorialBase::computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    if (!enableStatistics) return;
+    if (!mEnableStatistics) return;
 
     float numFrames = float(mStatistics.startEndFrame.y - mStatistics.startEndFrame.x);
 
@@ -683,7 +687,7 @@ void RTXDITutorialBase::computeUniqueLightSamples(RenderContext* pRenderContext,
             logError(ex.what());
         }
 
-        enableStatistics = false;
+        mEnableStatistics = false;
     }
 
 }

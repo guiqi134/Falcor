@@ -115,11 +115,12 @@ RWTexture2D<float4> gHasSampleChangedInReusing;
 RWTexture2D gSelectedLightSampleTextures;
 RWTexture2D gUnbiasedSampleResultTexture;
 
+Buffer<float2> gThirdStageRankings;
+
 // Define buffers for RTXDI to access data from.
 #define RTXDI_RIS_BUFFER gRisBuffer
 #define RTXDI_LIGHT_RESERVOIR_BUFFER gLightReservoirs
 #define RTXDI_NEIGHBOR_OFFSETS_BUFFER gNeighborBuffer
-
 
 // Include the API wrapper for the shadow rays used in the wrapper (in particular
 //   RAB_LightSample.hlsli uses `conservativeShadowRay()`
@@ -147,5 +148,6 @@ cbuffer SharedCB
 {
     uint gLightMeshTopN;
     uint gVisMode;
+    bool gCollectingData;
 }
 
