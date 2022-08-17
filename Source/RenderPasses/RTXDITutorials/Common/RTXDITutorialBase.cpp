@@ -56,6 +56,8 @@ namespace
         Resource::BindFlags::UnorderedAccess |       // Allows writing the base mip layer as a RWTexture2D in HLSL
         Resource::BindFlags::RenderTarget;           // Needed for the automatic mipmap generation
 
+    const Resource::BindFlags kShadowMapFlags = Resource::BindFlags::ShaderResource | Resource::BindFlags::DepthStencil;
+
     const std::string kOutputFileDirectory = "D:/ReSTIR/Data";
 };
 
@@ -78,6 +80,8 @@ RTXDITutorialBase::RTXDITutorialBase(const Dictionary& dict, const RenderPass::I
     }
 
     mpPixelDebug = PixelDebug::create();
+    mpFence = GpuFence::create();
+    mCubicShadowMapPerFrame.resize(mLightMeshTopN);
 }
 
 
@@ -102,8 +106,7 @@ RenderPassReflection RTXDITutorialBase::reflect(const CompileData& compileData)
     // This pass outputs a shaded color for display or for other passes to run postprocessing
     reflector.addOutput("color", "").format(ResourceFormat::RGBA16Float);
     reflector.addOutput("debug", "").format(ResourceFormat::RGBA16Float);
-    reflector.addOutput("hasSampleChangedInReusing", "").format(ResourceFormat::RGBA16Float);
-    reflector.addOutput("reservoirM", "").format(ResourceFormat::RGBA16Float);
+    reflector.addOutput("debugShadow", "").format(ResourceFormat::RGBA32Float).texture2D(mShadowMapSize, mShadowMapSize);
 
     return reflector;
 }
@@ -193,7 +196,7 @@ bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
 
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
     {
-        mVisMode = VisibilityMode::ReducedShadowRay;
+        mVisMode = VisibilityMode::ReSTIRShadowMap;
         mResetAccumulation = true;
         return true;
     }
@@ -405,7 +408,6 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     vars["gEnvMapPdfTexture"] = mResources.environmentPdfTexture;
     vars["gNeighborBuffer"] = mResources.neighborOffsetBuffer;
     vars["gMotionVectorTexture"] = renderData["mvec"]->asTexture();
-    vars["gThirdStageRankings"] = mpThirdStageBuffer;
 
     // Some debug textures
     vars["gHasSampleChangedInReusing"] = renderData["hasSampleChangedInReusing"]->asTexture();
@@ -509,6 +511,21 @@ bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const Re
     mpSecondStageBuffer = Buffer::createTyped<float2>(sizeof(kSecondStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kSecondStageRanking);
     mpThirdStageBuffer = Buffer::createTyped<float2>(sizeof(kThirdStageRanking) / sizeof(float2), kBufferBindFlags, Buffer::CpuAccess::None, kThirdStageRanking);
 
+    // Stochastic shadow map resources
+    const uint totalLightMeshCount = (uint)mPassData.lights->getMeshLights().size();
+
+    mpPrevLightMeshSelectionBuffer = Buffer::createTyped<int>(mPassData.screenSize.x * mPassData.screenSize.y, kBufferBindFlags);
+    mpLightMeshHistogramBuffer = Buffer::createTyped<uint>(totalLightMeshCount, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpSortedLightMeshBuffer = Buffer::createTyped<uint2>(totalLightMeshCount, kBufferBindFlags, Buffer::CpuAccess::Read);
+
+    // Create a buffer for holding all the light mesh IDs as keys used for sorting pass
+    std::vector<uint> keys;
+    for (uint i = 0; i < totalLightMeshCount; i++)
+    {
+        keys.push_back(i);
+    }
+    mpSortingKeysBuffer = Buffer::createTyped<uint>(totalLightMeshCount, kBufferBindFlags, Buffer::CpuAccess::Read, keys.data());
+
     return true;
 }
 
@@ -531,6 +548,25 @@ ComputePass::SharedPtr RTXDITutorialBase::createComputeShader(const std::string&
     // Falcor doesn't, by default, pass down scene geometry, materials, etc. for compute shaders.  But we'll need that
     // in all (or most) of our shaders in these tutorials, so just automatically send this data down.
     pShader->getRootVar()["gScene"] = mPassData.scene->getParameterBlock(); // Song: do we really need this? 
+    return pShader;
+}
+
+ComputePass::SharedPtr RTXDITutorialBase::createComputeShader(const std::string & file, const Program::DefineList & defines, const std::string & entryPoint)
+{
+    // Where is the shader?  What shader model to use?
+    Program::Desc risDesc(kShaderDirectory + file);
+    risDesc.setShaderModel("6_5");
+
+    // Create a Falcor shader wrapper, with specified entry point and scene-specific #defines (for common Falcor HLSL routines)
+    ComputePass::SharedPtr pShader = ComputePass::create(risDesc.csEntry(entryPoint), defines);
+
+    // Type conformances are needed for specific Slang language constructs used in common Falcor shaders, no need to worry
+    // about this unless you're using advanced Slang functionality in a very specific way.
+    pShader->getProgram()->setTypeConformances(mPassData.scene->getTypeConformances());
+
+    // Zero out structures to make sure they're regenerated with correct settings (conformances, scene defines, etc)
+    pShader->setVars(nullptr);
+
     return pShader;
 }
 
@@ -575,6 +611,179 @@ void RTXDITutorialBase::loadShaders()
     mShader.initialCandidates = createComputeShader(kRTXDI_InitialSamples);
     mShader.initialCandidateVisibility = createComputeShader(kRTXDI_InitialVisibility);
     mShader.shade = createComputeShader(kRTXDI_Shade);
+
+    // Load shaders to compute top N lights
+    Program::DefineList defines;
+    mComputeTopLightsPass.computeLightMeshHistogram = createComputeShader("ComputeHistogram.cs.slang", defines, "computeHistogramTwoAdds");
+    mComputeTopLightsPass.sortLightMeshHistogram = createComputeShader("SortHistogram.cs.slang", defines, "sortLightMeshHistogram");
+
+    // Load shadow map pass
+    Program::Desc desc;
+    desc.addShaderLibrary(kShaderDirectory + "GenerateShadowMap.3d.slang").vsEntry("vsMain").psEntry("psMain");
+    desc.setShaderModel("6_5");
+    mShadowMapPass.pProgram = GraphicsProgram::create(desc);
+    mShadowMapPass.pState = GraphicsState::create();
+    mShadowMapPass.pState->setProgram(mShadowMapPass.pProgram);
+
+    //DepthStencilState::Desc depthStencilDesc;
+    //depthStencilDesc.setDepthFunc(DepthStencilState::Func::LessEqual);
+    //auto depthStencilState = DepthStencilState::create(depthStencilDesc);
+    //mShadowMapPass.pState->setDepthStencilState(depthStencilState);
+
+    mShadowMapPass.pProgram->addDefines(mPassData.scene->getSceneDefines());
+    mShadowMapPass.pVars = GraphicsVars::create(mShadowMapPass.pProgram->getReflector());
+    mShadowMapPass.pProgram->setTypeConformances(mPassData.scene->getTypeConformances());
+
+    mShadowMapPass.pFbo = Fbo::create();
+}
+
+void RTXDITutorialBase::prepareLightMeshData()
+{
+
+    // Get light mesh data from scene
+    const auto& meshLights = mPassData.lights->getMeshLights();
+    uint totalLightMeshCount = (uint)meshLights.size();
+    std::vector<LightMeshData> lightMeshData(totalLightMeshCount);
+
+    for (uint i = 0; i < totalLightMeshCount; i++)
+    {
+        LightMeshData data;
+
+        // Get the center position
+        const auto& meshBound = mPassData.scene->getMeshBounds(meshLights[i].instanceID);
+        auto center = meshBound.center();
+        data.centerPosW = meshBound.center();
+
+        logInfo(std::format("Light {} Center = ({}, {})", i, center.x, center.y));
+
+        // Compute the light space matrix for six faces. Order: +X, -X, +Y, -Y, +Z, -Z
+        auto lightProj = glm::perspective(glm::radians(90.0f), 1.0f, mLightNearFarPlane.x, mLightNearFarPlane.y);
+        for (uint j = 0; j < 6; j++)
+        {
+            data.viewProjMat[0] = lightProj * glm::lookAt(center, center + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewProjMat[1] = lightProj * glm::lookAt(center, center + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewProjMat[2] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            data.viewProjMat[3] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+            data.viewProjMat[4] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewProjMat[5] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+        }
+        
+        lightMeshData[i] = data;
+    }
+    
+    // Light mesh buffer for mesh center and light space view & projection matrix
+    mpLightMeshDataBuffer = Buffer::createStructured(mShadowMapPass.pVars->getRootVar()["gLightMeshDataBuffer"], totalLightMeshCount, kBufferBindFlags,
+        Buffer::CpuAccess::None, lightMeshData.data());
+}
+
+void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    const uint totalLightMeshCount = (uint)mPassData.lights->getMeshLights().size();
+    mLightMeshTopN = std::min(mLightMeshTopN, totalLightMeshCount);
+
+    // Because we are directly adding to the histogram buffer, so in each frame we need to clear this buffer instead of accumulating the result
+    pRenderContext->clearUAV(mpLightMeshHistogramBuffer->getUAV().get(), uint4(0));
+
+    {
+        FALCOR_PROFILE("Compute Top N Lights");
+
+        // 1. Count the frequency of each light mesh 
+        auto histogramVars = mComputeTopLightsPass.computeLightMeshHistogram->getRootVar();
+        histogramVars["histogramCB"]["gTotalLightMeshCount"] = totalLightMeshCount;
+        histogramVars["gPrevLightMeshSelectionBuffer"] = mpPrevLightMeshSelectionBuffer; // input
+        histogramVars["gFinalHistogramBuffer"] = mpLightMeshHistogramBuffer; // output
+        mpPixelDebug->prepareProgram(mComputeTopLightsPass.computeLightMeshHistogram->getProgram(), histogramVars);
+        mComputeTopLightsPass.computeLightMeshHistogram->execute(pRenderContext, mPassData.screenSize.x * mPassData.screenSize.y, 1);
+
+        // 2. Sort the light mesh based on their frequency
+        auto sortingVars = mComputeTopLightsPass.sortLightMeshHistogram->getRootVar();
+        sortingVars["sortCB"]["gTotalLightMeshCount"] = totalLightMeshCount;
+        sortingVars["gKeysBuffer"] = mpSortingKeysBuffer;
+        sortingVars["gValuesBuffer"] = mpLightMeshHistogramBuffer;
+        sortingVars["gSortedLightMeshBuffer"] = mpSortedLightMeshBuffer;
+        mpPixelDebug->prepareProgram(mComputeTopLightsPass.sortLightMeshHistogram->getProgram(), sortingVars);
+        mComputeTopLightsPass.sortLightMeshHistogram->execute(pRenderContext, totalLightMeshCount, 1);
+    }
+
+    // Debugging GPU result
+    if (mRtxdiFrameParams.frameIndex == 100)
+    {
+        // Must use a staging buffer which has no bind flags to map data
+        auto pStagingBuffer1 = Buffer::createTyped<uint>(totalLightMeshCount, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        auto pStagingBuffer2 = Buffer::createTyped<uint2>(totalLightMeshCount, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        pRenderContext->copyBufferRegion(pStagingBuffer1.get(), 0, mpLightMeshHistogramBuffer.get(), 0, sizeof(uint) * totalLightMeshCount);
+        pRenderContext->copyBufferRegion(pStagingBuffer2.get(), 0, mpSortedLightMeshBuffer.get(), 0, sizeof(uint2) * totalLightMeshCount);
+
+        // Flush GPU and wait for results to be available.
+        pRenderContext->flush(false);
+        mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+        mpFence->syncCpu();
+
+        // Read back GPU results
+        uint* pData1 = reinterpret_cast<uint*>(pStagingBuffer1->map(Buffer::MapType::Read));
+        std::vector<uint> deviceResult1(pData1, pData1 + totalLightMeshCount); // invoke range constructor (linear time)
+        pStagingBuffer1->unmap();
+
+        uint2* pData2 = reinterpret_cast<uint2*>(pStagingBuffer2->map(Buffer::MapType::Read));
+        std::vector<uint2> deviceResult2(pData2, pData2 + totalLightMeshCount); // invoke range constructor (linear time)
+        pStagingBuffer2->unmap();
+
+        // Printing to log
+        for (uint i = 0; i < deviceResult1.size(); i++)
+        {
+            logInfo(std::format("mpSortedLightMeshBuffer[{}] = {}", i, deviceResult1[i]));
+        }
+
+        logInfo("");
+
+        for (uint i = 0; i < deviceResult2.size(); i++)
+        {
+            logInfo(std::format("Light Mesh ID {} = {}", deviceResult2[i].x, deviceResult2[i].y));
+        }
+    }
+
+    {
+        FALCOR_PROFILE("Generate Shadow Maps");
+
+        auto shadowVars = mShadowMapPass.pVars->getRootVar();
+        shadowVars["shadowMapCB"]["gLightNear"] = mLightNearFarPlane.x;
+        shadowVars["shadowMapCB"]["gLightFar"] = mLightNearFarPlane.y;
+        shadowVars["gLightMeshDataBuffer"] = mpLightMeshDataBuffer;
+        shadowVars["gSortedLightMeshBuffer"] = mpSortedLightMeshBuffer;
+
+        // Loop over top N light mesh index from sorted list and generate a shadow map for each one
+        // TODO: try to generate six faces of one cubic shadow map in one pass
+        auto pCubicShadowMapTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::RGBA32Float, 6, 1, nullptr, kAutoMipBindFlags);
+        auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 6, 1, nullptr, kShadowMapFlags);
+        for (uint i = 0; i < mLightMeshTopN; i++)
+        {
+            // Clear the texture for each light mesh shadow map
+            pRenderContext->clearFbo(mShadowMapPass.pFbo.get(), float4(1.0f), 1.0f, 0);
+
+            // Render the six faces
+            uint j = 3;
+            //for (uint j = 0; j < 6; j++)
+            {
+                mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, j, 1);
+                mShadowMapPass.pFbo->attachColorTarget(pCubicShadowMapTexture, 0, 0, j, 1);
+                mShadowMapPass.pState->setFbo(mShadowMapPass.pFbo);
+
+                shadowVars["shadowMapCB"]["ranking"] = i;
+                shadowVars["shadowMapCB"]["face"] = j;
+                mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, shadowVars);
+                mPassData.scene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::Back);
+            }
+
+            mCubicShadowMapPerFrame[i] = pCubicShadowMapTexture;
+
+            // Store current frame shadow maps, but we need to know the index of thoes top lights from GPU
+            ShadowMapData shadowMapData = { };
+            //mShadowMapsForReusing.push_front(shadowMapData);
+        }
+
+        const auto& pDebugShadowTex = renderData["debugShadow"]->asTexture();
+        pRenderContext->copySubresource(pDebugShadowTex.get(), 0, pCubicShadowMapTexture.get(), 3);
+    }
 
     
 }
@@ -691,5 +900,4 @@ void RTXDITutorialBase::computeUniqueLightSamples(RenderContext* pRenderContext,
     }
 
 }
-
 

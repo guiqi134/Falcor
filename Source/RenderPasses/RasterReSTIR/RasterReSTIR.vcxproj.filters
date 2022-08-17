@@ -6,4 +6,7 @@
   <ItemGroup>
     <ClInclude Include="RasterReSTIR.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="ComputeTopNLights.cs.slang" />
+  </ItemGroup>
 </Project>

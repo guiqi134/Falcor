@@ -115,8 +115,6 @@ RWTexture2D<float4> gHasSampleChangedInReusing;
 RWTexture2D gSelectedLightSampleTextures;
 RWTexture2D gUnbiasedSampleResultTexture;
 
-Buffer<float2> gThirdStageRankings;
-
 // Define buffers for RTXDI to access data from.
 #define RTXDI_RIS_BUFFER gRisBuffer
 #define RTXDI_LIGHT_RESERVOIR_BUFFER gLightReservoirs

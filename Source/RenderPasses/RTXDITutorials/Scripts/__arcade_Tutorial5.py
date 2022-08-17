@@ -1,6 +1,17 @@
 
 # Define important scene parameters
-scene = 'Arcade/Arcade.pyscene'
+
+sceneName = 'CornellBox'
+exposureCompensation = 2.5
+scene = ''
+
+if sceneName == 'CornellBox':
+    scene = 'TestScenes/CornellBox.pyscene'
+    exposureCompensation = 1.0
+elif sceneName == 'Arcade':
+    scene = 'Arcade/Arcade.pyscene'
+    exposureCompensation = 2.5
+
 currentTime = 0.0
 paused = True
 animateCamera = False
@@ -24,7 +35,7 @@ def graph_ImportanceResampling():
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 2.5,
+        'exposureCompensation' : exposureCompensation,
     }
     gAccumParams = {
         'enabled': False,

@@ -64,6 +64,7 @@
     <ClInclude Include="Common\RtxdiTypes.h">
       <Filter>Common Code</Filter>
     </ClInclude>
+    <ClInclude Include="HostDeviceSharedDefinitions.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">

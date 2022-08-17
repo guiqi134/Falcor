@@ -27,6 +27,9 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "Utils/Sampling/SampleGenerator.h"
+#include "Utils/Algorithm/BitonicSort.h"
+
 
 using namespace Falcor;
 
@@ -46,11 +49,11 @@ public:
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override {}
+    virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
-    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
+    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { mpPixelDebug->onMouseEvent(mouseEvent); return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
@@ -58,7 +61,23 @@ private:
     void parseDictionary(const Dictionary& dict);
 
     Scene::SharedPtr mpScene;
+    GpuFence::SharedPtr mpFence;
+    PixelDebug::SharedPtr mpPixelDebug;
 
-    // ReSTIR parameters
-    uint mInitialCandicates = 32u;
+    uint2 screenSize;
+    uint mFrameCount = 0;
+    SampleGenerator::SharedPtr mpSampleGenerator;
+
+    LightCollection::SharedPtr mpLights;
+
+    Buffer::SharedPtr mpPrevLightMeshSelectionBuffer;
+    Buffer::SharedPtr mpLightMeshHistogramBuffer;
+    Buffer::SharedPtr mpSortedLightMeshBuffer;
+    Buffer::SharedPtr mpKeysBuffer;
+
+    ComputePass::SharedPtr mpInitializeBuffer;
+    ComputePass::SharedPtr mpComputeLightMeshHistogram;
+    ComputePass::SharedPtr mpSortLightMeshHistogram;
+
+    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint);    
 };

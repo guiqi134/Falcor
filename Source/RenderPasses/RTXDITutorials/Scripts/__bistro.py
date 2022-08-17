@@ -1,7 +1,8 @@
 
 # Define important scene parameters
 scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
-# scene = "Bistro/BistroExterior.pyscene"
+# scene = 'Arcade/Arcade.pyscene'
+
 currentTime = 0.0
 paused = True
 animateCamera = False

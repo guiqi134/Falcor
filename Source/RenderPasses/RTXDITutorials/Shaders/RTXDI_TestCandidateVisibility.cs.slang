@@ -61,27 +61,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
     RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
     RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
-    // Check if the selected light mesh is within the top N list
-    bool checkVisibility = false;
-    if (gVisMode == 1)
-    {
-        for (uint i = 0; i < gLightMeshTopN; i++)
-        {
-            print("gFirstStageRankings[i].x = ", gFirstStageRankings[i].x);
-            if (gScene.lightCollection.getLightIdx(lightIndex) == gFirstStageRankings[i].x)
-            {
-                checkVisibility = true;
-                break;
-            }
-        }
-    }
-    else
-    {
-        checkVisibility = true;
-    }
-
     // Shoot a shadow ray and, if it's shadowed, update the visibility
-    if (checkVisibility && RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
+    if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
         if (!RAB_GetConservativeVisibility(surface, lightSample))  // Trace a shadow ray
         {
@@ -89,6 +70,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
     }
+
+    // TODO: Pick a shadow map from top N lights and evaluate the visibility
+    
 
     // Stage 2: Do statistics after testing visibility
     if (gCollectingData)

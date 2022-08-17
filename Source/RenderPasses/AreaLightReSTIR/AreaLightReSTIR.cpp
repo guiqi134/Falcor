@@ -236,7 +236,7 @@ void AreaLightReSTIR::execute(RenderContext* pRenderContext, const RenderData& r
         //rasterizeDesc.setDepthBias(2, mLightParams.mDepthBias);
         //auto rasterizeState = RasterizerState::create(rasterizeDesc);
         //mShadowMapPass.pState->setRasterizerState(rasterizeState);
-
+            
         //auto pBlendState = mShadowMapPass.pState->getBlendState();
         //logInfo("isBlendEnabled = " + std::to_string(pBlendState->isBlendEnabled(0)));
 

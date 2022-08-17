@@ -44,6 +44,13 @@ Texture2D<PackedHitInfo> gVbuffer;
 
 Buffer<float2> gThirdStageRankings;
 
+// Shadow map textures
+Texture2DArray<float> gTop1Texture;
+Texture2DArray<float> gTop2Texture;
+Texture2DArray<float> gTop3Texture;
+Texture2DArray<float> gTop4Texture;
+
+
 void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, bool hasSampleChanged,
            out float3 dif, out float3 spec)
 {
@@ -55,23 +62,7 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
 
     // Check if the selected light mesh is within the top N list
     float isVisible = 1.0f;
-    if (gVisMode == 1)
-    {
-        uint lightTriIndex = RTXDI_GetReservoirLightIndex(reservoir);
-        for (uint i = 0; i < gLightMeshTopN; i++)
-        {
-            print("gThirdStageRankings[i].x = ", gThirdStageRankings[i].x);
-            if (gScene.lightCollection.getLightIdx(lightTriIndex) == gThirdStageRankings[i].x)
-            {
-                isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
-                break;
-            }
-        }
-    }
-    else
-    {
-        isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
-    }
+    isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -138,6 +129,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
+
+    // Debug shadow map
+    // if (true)
+    // {
+    //     uint face = 3 // -Y
+    // }
 
     // Visualize light mesh selection
     if (gDisplayLightSampling)

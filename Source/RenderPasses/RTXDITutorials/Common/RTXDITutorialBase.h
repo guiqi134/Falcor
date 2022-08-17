@@ -42,6 +42,7 @@
 #include "Falcor.h"
 #include "rtxdi/RTXDI.h"
 #include <random>
+#include "../HostDeviceSharedDefinitions.h"
 
 using namespace Falcor;
 
@@ -200,8 +201,9 @@ protected:
     } mLightingParams;
 
     // ReSTIR Shadow Map part
-    enum class VisibilityMode { Origin, ReducedShadowRay };
-    VisibilityMode mVisMode = VisibilityMode::ReducedShadowRay;
+    enum class VisibilityMode { Origin, ReSTIRShadowMap };
+    VisibilityMode mVisMode = VisibilityMode::ReSTIRShadowMap;
+    GpuFence::SharedPtr mpFence;
 
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
@@ -209,9 +211,35 @@ protected:
     bool mResetAccumulation = false;
 
     uint mLightMeshTopN = 4u;
+    uint mShadowMapSize = 1 << 11;
+    uint mToatalShadowMapStored = 20u;
+    float2 mLightNearFarPlane = float2(0.001f, 100.0f);
+
+    Buffer::SharedPtr mpLightMeshDataBuffer;
+    Buffer::SharedPtr mpPrevLightMeshSelectionBuffer;
+    Buffer::SharedPtr mpLightMeshHistogramBuffer;
+    Buffer::SharedPtr mpSortingKeysBuffer;
+    Buffer::SharedPtr mpSortedLightMeshBuffer;
+
+    std::vector<Texture::SharedPtr> mCubicShadowMapPerFrame;
+
+    struct ShadowMapData
+    {
+        uint lightIndex;
+        Texture::SharedPtr cubicShadowMapTexture;
+    };
+    std::deque<ShadowMapData> mShadowMapsForReusing;
+
+    // TODO: remove these
     Buffer::SharedPtr mpFirstStageBuffer;
     Buffer::SharedPtr mpSecondStageBuffer;
     Buffer::SharedPtr mpThirdStageBuffer;
+
+    struct
+    {
+        ComputePass::SharedPtr computeLightMeshHistogram;
+        ComputePass::SharedPtr sortLightMeshHistogram;
+    } mComputeTopLightsPass;
 
     struct
     {
@@ -287,6 +315,7 @@ protected:
     /** A function to simplify loading shaders throughout our tutorials.
     */
     ComputePass::SharedPtr createComputeShader(const std::string& file, const std::string& entryPoint = "main");
+    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint);
 
     /** Load and compile the common shaders needed for all tutorials; these are the first shaders whose
         purposes must be understood for a very crude RTXDI integration.
@@ -294,4 +323,6 @@ protected:
     void loadCommonShaders(void);
 
     void computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& data);
+    void prepareLightMeshData();
+    void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
 };
