@@ -204,15 +204,21 @@ protected:
     enum class VisibilityMode { Origin, ReSTIRShadowMap };
     VisibilityMode mVisMode = VisibilityMode::ReSTIRShadowMap;
     GpuFence::SharedPtr mpFence;
+    Sampler::SharedPtr mpPointSampler;
+    Sampler::SharedPtr mpLinearSampler;
 
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
     bool mEnableStatistics = false;
     bool mResetAccumulation = false;
+    bool mShadowParamsChanged = false;
 
+    uint mTotalLightMeshCount = 1u;
     uint mLightMeshTopN = 4u;
-    uint mShadowMapSize = 1 << 11;
-    uint mToatalShadowMapStored = 20u;
+    uint mShadowMapSize = 1 << 10;
+    uint mTemporalReusingLength = 5u;
+    uint mShadowMapsPerLight = 6u;
+    uint mCurrFrameLightStartIdx = 0u;
     float2 mLightNearFarPlane = float2(0.001f, 100.0f);
 
     Buffer::SharedPtr mpLightMeshDataBuffer;
@@ -220,26 +226,18 @@ protected:
     Buffer::SharedPtr mpLightMeshHistogramBuffer;
     Buffer::SharedPtr mpSortingKeysBuffer;
     Buffer::SharedPtr mpSortedLightMeshBuffer;
+    Buffer::SharedPtr mpReusingLightIndexBuffer;
+    Buffer::SharedPtr mpCurrTopLightsMeshIndex;
 
-    std::vector<Texture::SharedPtr> mCubicShadowMapPerFrame;
-
-    struct ShadowMapData
-    {
-        uint lightIndex;
-        Texture::SharedPtr cubicShadowMapTexture;
-    };
-    std::deque<ShadowMapData> mShadowMapsForReusing;
-
-    // TODO: remove these
-    Buffer::SharedPtr mpFirstStageBuffer;
-    Buffer::SharedPtr mpSecondStageBuffer;
-    Buffer::SharedPtr mpThirdStageBuffer;
+    Texture::SharedPtr mpCurrFrameShadowMapsTexture;
+    Texture::SharedPtr mpReusingShadowMapsTexture;
 
     struct
     {
         ComputePass::SharedPtr computeLightMeshHistogram;
         ComputePass::SharedPtr sortLightMeshHistogram;
     } mComputeTopLightsPass;
+
 
     struct
     {
@@ -248,6 +246,10 @@ protected:
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
     } mShadowMapPass;
+
+    ComputePass::SharedPtr mpUpdateLightMeshData;
+    ComputePass::SharedPtr mpShadowMapDebug;
+
 
     // Statistics part
     struct UniqueLightData
@@ -322,7 +324,10 @@ protected:
     */
     void loadCommonShaders(void);
 
+    // TODO: remove
     void computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& data);
+
     void prepareLightMeshData();
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
+    void printDeviceResources(RenderContext* pRenderContext);
 };

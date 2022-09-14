@@ -1,6 +1,7 @@
 // --------------------------------------------------------------------
 // 2. Sort the input buffer from previous counting result
 // --------------------------------------------------------------------
+#include "../HostDeviceSharedDefinitions.h"
 #include "Utils/NVAPI.slangh" // We need this to get shuffle-xor operations.
 import Utils.Debug.PixelDebug;
 
@@ -14,11 +15,13 @@ import Utils.Debug.PixelDebug;
 cbuffer sortCB
 {
     uint gTotalLightMeshCount; ///< Total number of elements.
+    uint gLightMeshTopN;
 };
 
 Buffer<uint> gKeysBuffer;
 Buffer<uint> gValuesBuffer;
 RWBuffer<uint2> gSortedLightMeshBuffer;
+RWStructuredBuffer<LightMeshData> gLightMeshDataBuffer;
 
 groupshared uint sKeys[GROUP_SIZE * 2];
 groupshared uint sValues[GROUP_SIZE * 2];
@@ -38,14 +41,9 @@ void bitonicSortInWarp(inout uint key, inout uint value, uint i, uint j, bool di
         uint key_ixj = NvShflXor(key, j);
         uint value_ixj = NvShflXor(value, j);
 
-        // print("sorting partner index = ", i ^ j);
-        print("keyValue = ", uint2(key, value));
-        print("keyValue_ixj = ", uint2(key_ixj, value_ixj));
-
         // Decide whether to swap.
         // i & j operation is to get the bit value in log2(j)-th location
         bool pred = (((i & j) == 0) != dir) == value < value_ixj;
-        print("pred = ", pred);
 
         if (pred && value != value_ixj)
         {
@@ -101,8 +99,6 @@ void sortLightMeshHistogram(uint3 threadId: SV_DispatchThreadID, uint3 groupID: 
     for (uint k = 64; k <= N; k <<= 1)
     {
         const bool dir = ((i & k) == 0); // Sort ascending (true) or descending (false)
-        print("", 1);
-        print("dir = ", dir);
 
         // We ping-pong data in shared memory between adjacent addresses, using offset = {0, 1} to denote which one.
         uint offset = 0;
@@ -132,13 +128,9 @@ void sortLightMeshHistogram(uint3 threadId: SV_DispatchThreadID, uint3 groupID: 
             }
         }
 
-        print("keyValue = ", keyValue);
-
         // Minor steps for iterations j = {16, 8, ..., 1} in warp.
         uint jStart = min(k >> 1, 16);
         bitonicSortInWarp(keyValue.x, keyValue.y, i, jStart, dir);
-
-        // print("keyValue = ", keyValue);
 
         // Store result for major step (except for last iteration).
         if (k < N)
@@ -150,12 +142,11 @@ void sortLightMeshHistogram(uint3 threadId: SV_DispatchThreadID, uint3 groupID: 
     }
 #endif
 
-    print("keyValue = ", keyValue);
-
-    // Write result to memory.
+    // Sorting finish, write result to memory.
     if (globalIdx < gTotalLightMeshCount)
     {
-        gSortedLightMeshBuffer[gTotalLightMeshCount - globalIdx - 1] = keyValue;
-        // gSortedLightMeshBuffer[globalIdx] = keyValue;
+        // In descending order
+        uint bufferIndex = gTotalLightMeshCount - 1 - globalIdx;
+        gSortedLightMeshBuffer[bufferIndex] = keyValue;
     }
 }

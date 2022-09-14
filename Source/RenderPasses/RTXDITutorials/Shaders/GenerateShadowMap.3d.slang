@@ -5,29 +5,25 @@ import Utils.Debug.PixelDebug;
 
 cbuffer shadowMapCB
 {
-    uint ranking;
-    uint face;
+    uint gRanking;
+    uint gCurrFrameLightStartIdx;
     float gLightNear;
     float gLightFar;
 }
 
-Buffer<uint2> gSortedLightMeshBuffer;
-StructuredBuffer<LightMeshData> gLightMeshDataBuffer;
+Buffer<uint> gReusingLightIndexBuffer;
+StructuredBuffer<LightMeshData> gLightMeshDataBuffer; // 0, 1, ..., Max
 
-// struct ShadowVSOut
-// {
-//     float2 texCoords : TEXCRD;
-//     float4 posCS : PosCameraSpace; // TODO: this can be further reduce to only z component
-
-//     nointerpolation GeometryInstanceID instanceID : INSTANCE_ID;
-//     nointerpolation uint materialID : MATERIAL_ID;
-
-//     float4 posH : SV_Position;
-// }
+struct GSOut
+{
+    VSOut vsOut;
+    uint rtIndex : SV_RenderTargetArrayIndex;
+    uint triangleIndex : SV_PrimitiveID;
+}
 
 struct PSOut
 {
-    float4 color : SV_Target0;
+    float color : SV_Target0;
     float depth : SV_Depth;
 }
 
@@ -36,19 +32,34 @@ VSOut vsMain(VSIn vIn)
     VSOut vsOut;
     vsOut = defaultVS(vIn);
 
-    // Get current light mesh's data
-    uint lightMeshIndex = gSortedLightMeshBuffer[ranking].x;
-    float4x4 lightViewProj = gLightMeshDataBuffer[lightMeshIndex].viewProjMat[face];
-
-    float3 posW = vsOut.posW;
-    vsOut.posH = mul(float4(posW.xyz, 1.0f), lightViewProj);
-
     return vsOut;
 }
 
-// Note: check for SV_RenderTargetArrayIndex Semantic
-void gsMain()
+// Must use built-in instance to represent each render target 
+[instance(1)]
+[maxvertexcount(3)]
+void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout TriangleStream<GSOut> outStream)
 {
+    // Get current light mesh's data
+    uint lightMeshIndex = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking].x;
+    uint face = 3;
+    
+    GSOut gsOut;
+
+    // for (uint face = 0; face < 6; face++)
+    {
+        gsOut.rtIndex = face;
+        gsOut.triangleIndex = face;
+        float4x4 lightViewProj = gLightMeshDataBuffer[lightMeshIndex].viewProjMat[face];
+
+        for (uint v = 0; v < 3; v++)
+        {
+            gsOut.vsOut = gsIn[v];
+            gsOut.vsOut.posH = mul(float4(gsIn[v].posW, 1.0f), lightViewProj);
+            outStream.Append(gsOut);
+        }
+        outStream.RestartStrip();
+    }
 
 }
 
@@ -65,34 +76,28 @@ float linearizeDepth(float depthNDC, float near, float far)
     return (near * far) / (depthNDC * (far - near) - far);
 }
 
-PSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID)
+PSOut psMain(GSOut psIn)
 {
-    printSetPixel(vsOut.posH.xy);
+    // printSetPixel(uint2(psIn.vsOut.posH.xy));
 
     PSOut psOut;
 
-    let lod = ImplicitLodTextureSampler();
-    if (alphaTest(vsOut, triangleIndex, lod)) discard;
+    // let lod = ImplicitLodTextureSampler();
+    // if (alphaTest(psIn.vsOut, triangleIndex, lod)) discard;
 
-    // Note: need to ignore the emissive surface's fragment
+    print("posH = ", psIn.vsOut.posH);
+    print("psIn.vsOut.instanceID = ", psIn.vsOut.instanceID.index);
+    print("psIn.triangleIndex = ", psIn.triangleIndex);
 
+    // TODO: ignore the emissive surface's fragment
+    let lod = ExplicitLodTextureSampler(0.f);
+    float3 viewDir = normalize(gScene.camera.getPosition() - psIn.vsOut.posW);
+    ShadingData sd = prepareShadingData(psIn.vsOut, psIn.triangleIndex, viewDir, lod);
+    print("isEmissive = ", sd.mtl.isEmissive());
+    if (sd.mtl.isEmissive()) discard;
 
-    float depth = saturate(vsOut.posH.z);
-
-    float depthCS = linearizeDepth(depth, gLightNear, gLightFar);
-    float4 debugColor = float4(float3(abs(depthCS) / 5.0f), 1.0f);
-
-    print("face = ", face);
-    print("depth = ", depth);
-    print("depthCS = ", depthCS);
-    uint lightMeshIndex = gSortedLightMeshBuffer[ranking].x;
-    float4x4 lightViewProj = gLightMeshDataBuffer[lightMeshIndex].viewProjMat[face];
-    print("lightViewProj = ", lightViewProj[0]);
-    print("lightViewProj = ", lightViewProj[1]);
-    print("lightViewProj = ", lightViewProj[2]);
-    print("lightViewProj = ", lightViewProj[3]);
-
-    psOut.color = debugColor;
+    float depth = saturate(psIn.vsOut.posH.z);
+    psOut.color = depth;
     psOut.depth = depth;
 
     return psOut;

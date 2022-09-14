@@ -126,7 +126,7 @@
       <PreprocessorDefinitions>PROJECT_DIR=R"($(ProjectDir))";_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(FALCOR_CORE_DIRECTORY)\Externals\.packman\rtxdi\rtxdi-sdk\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>

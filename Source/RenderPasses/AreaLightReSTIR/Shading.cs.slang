@@ -115,7 +115,7 @@ void main(uint2 threadIndex : SV_DispatchThreadID, uint3 groupIndex : SV_GROUPID
             float4 lightSpacePosH = mul(float4(sd.posW, 1.0f), gLightParams.lightSpaceMat); // clipping space
             float3 lightSpacePos = lightSpacePosH.xyz / lightSpacePosH.w; // NDC
             lightSpacePos.y *= -1; // DirectX flips the Y axis in viewport scale matrix
-            float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); // NDC
+            float3 projCoords = float3(lightSpacePos.xy * 0.5f + 0.5f, lightSpacePos.z - bias); 
             float3 shadingPosLightView = mul(float4(sd.posW, 1.0f), gLightParams.lightView).xyz;
             float zReceiver = abs(shadingPosLightView.z);
 

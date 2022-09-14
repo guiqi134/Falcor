@@ -121,7 +121,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     gHasSampleChangedInReusing[launchIdx] = hasSampleChanged ? float4(1.0f) : float4(0.0f);
 
     // Stage 3: Do statistics after biased reusing
-    if (gVisMode == 1)
+    // if (gVisMode == 1)
     {
         int lightMeshID = -1;
         if (RTXDI_IsValidReservoir(restirResult))

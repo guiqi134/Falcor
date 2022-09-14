@@ -68,6 +68,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // data passed to RTXDI.  This queries our Falcor scene to update flags that track changes.
     checkForSceneUpdates();
 
+    RTXDITutorialBase::execute(pRenderContext, renderData);
+
     // Pre-compute the center of all light meshes and their transformation matrix 
     if (mPassData.updateEmissiveTriangleGeom) prepareLightMeshData();
 
@@ -122,13 +124,9 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mStatistics.stages[0].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
 
     // Do stochastic shadow map passes using last frame ReSTIR sample data if it is not the first frame
-    if (mRtxdiFrameParams.frameIndex != 0)
+    if (mVisMode == VisibilityMode::ReSTIRShadowMap && mRtxdiFrameParams.frameIndex != 0)
     {
         prepareStochasticShadowMaps(pRenderContext, renderData);
-    }
-    else
-    {
-
     }
 
     // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.  
@@ -137,7 +135,6 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         FALCOR_PROFILE("Candidate Visibility");
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
-        visVars["gFirstStageRankings"] = mpFirstStageBuffer;
         setupRTXDIBridgeVars(visVars, renderData);
         mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
@@ -188,10 +185,6 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
-        shadeVars["gTop1Texture"] = mCubicShadowMapPerFrame[0];
-        shadeVars["gTop2Texture"] = mCubicShadowMapPerFrame[1];
-        shadeVars["gTop3Texture"] = mCubicShadowMapPerFrame[2];
-        shadeVars["gTop4Texture"] = mCubicShadowMapPerFrame[3];
         setupRTXDIBridgeVars(shadeVars, renderData);
         mpPixelDebug->prepareProgram(mShader.shade->getProgram(), shadeVars);
         mShader.shade->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);

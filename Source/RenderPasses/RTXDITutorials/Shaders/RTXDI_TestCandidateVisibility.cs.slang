@@ -32,17 +32,17 @@
 
 #include "RtxdiBridge.slangh"
 
+
 cbuffer SampleCB
 {
     uint gReservoirIndex; // Which of our reservoirs should we use for output?
 }
 
-Buffer<float2> gFirstStageRankings;
 
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
 
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
@@ -56,23 +56,46 @@ void main(uint3 threadId : SV_DispatchThreadID)
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex);
 
     // Get the light sample
-    uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
+    uint lightTriIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV = RTXDI_GetReservoirSampleUV(reservoir);
-    RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
+    RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightTriIndex, false);
     RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
     // Shoot a shadow ray and, if it's shadowed, update the visibility
     if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
-        if (!RAB_GetConservativeVisibility(surface, lightSample))  // Trace a shadow ray
+        bool isVisible = true;
+        uint lightMeshIndex = gScene.lightCollection.getLightIdx(lightTriIndex);
+
+        // Trace a shadow ray
+        if (gVisMode == 0) 
+        {
+            isVisible = RAB_GetConservativeVisibility(surface, lightSample);
+        }
+        // Evaulate shadow maps
+        else if (gVisMode == 1)
+        {
+            // Get the data for the selected light
+            LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
+            print("lightMeshIndex = ", lightMeshIndex);
+            print("lightData.shadowMapCount = ", lightData.shadowMapCount);
+            print("lightData.startIndex = ", lightData.startIndex);
+
+            if (lightData.shadowMapCount > 0)
+            {
+                float3 posW = RAB_GetSurfaceWorldPos(surface);
+                float3 normalW = RAB_GetSurfaceNormal(surface);
+
+                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler);
+            }
+        }
+        
+        if (!isVisible)  
         {
             RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
     }
-
-    // TODO: Pick a shadow map from top N lights and evaluate the visibility
-    
 
     // Stage 2: Do statistics after testing visibility
     if (gCollectingData)

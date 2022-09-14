@@ -42,16 +42,8 @@ Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 Texture2D<PackedHitInfo> gVbuffer;
 
-Buffer<float2> gThirdStageRankings;
 
-// Shadow map textures
-Texture2DArray<float> gTop1Texture;
-Texture2DArray<float> gTop2Texture;
-Texture2DArray<float> gTop3Texture;
-Texture2DArray<float> gTop4Texture;
-
-
-void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, bool hasSampleChanged,
+void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightTriIndex,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
@@ -60,9 +52,26 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     // Where are we shading / computing a pdf?
     float3 origin = RAB_GetSurfaceWorldPos(surface);
 
-    // Check if the selected light mesh is within the top N list
+    // Evaluate the visibility
     float isVisible = 1.0f;
-    isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    uint lightMeshIndex = gScene.lightCollection.getLightIdx(lightTriIndex);
+    if (gVisMode == 0)
+    {
+        isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    }
+    else if (gVisMode == 1)
+    {
+        // Get the data for the selected light
+        LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
+
+        if (lightData.shadowMapCount > 0)
+        {
+            float3 posW = RAB_GetSurfaceWorldPos(surface);
+            float3 normalW = RAB_GetSurfaceNormal(surface);
+
+            isVisible = (float)evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler);
+        }
+    }
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -109,8 +118,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
-    bool hasSampleChanged = gHasSampleChangedInReusing[launchIdx].r;
-
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0, specColor = 0;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
@@ -123,20 +130,15 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        Shade(reservoir, surface, lightSample, lightEmission, hasSampleChanged, difColor, specColor);
+        Shade(reservoir, surface, lightSample, lightEmission, lightIndex, difColor, specColor);
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
 
-    // Debug shadow map
-    // if (true)
-    // {
-    //     uint face = 3 // -Y
-    // }
 
-    // Visualize light mesh selection
+    // Visualize light mesh selection. TODO: remove
     if (gDisplayLightSampling)
     {
         outColor = luminance(outColor);

@@ -142,10 +142,20 @@ RWTexture2D gUnbiasedSampleResultTexture;
 // #include "rtxdi/ResamplingFunctions.hlsli"
 #include "ResamplingFunctions.hlsli"
 
+// Stochastic shadow map part 
+import EvaluateShadowMaps;
+
 cbuffer SharedCB
 {
     uint gLightMeshTopN;
     uint gVisMode;
     bool gCollectingData;
+    SamplerState gLinearSampler;
 }
+
+Texture2DArray<float> gCurrFrameShadowMaps;
+Texture2DArray<float> gReusingShadowMaps;
+Buffer<uint2> gSortedLightMeshBuffer;
+StructuredBuffer<LightMeshData> gLightMeshDataBuffer;
+
 
