@@ -27,30 +27,34 @@
  **************************************************************************/
 #include "WireFramePass.h"
 
-
-namespace
-{
-    const char kDesc[] = "Renders a scene as a wireframe";    
-}
+const RenderPass::Info WireFramePass::kInfo{ "Wireframe", "Insert pass description here." };
 
 // Don't remove this. it's required for hot-reload to function properly
-extern "C" __declspec(dllexport) const char* getProjDir()
+extern "C" FALCOR_API_EXPORT const char* getProjDir()
 {
     return PROJECT_DIR;
 }
 
-extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
+extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary & lib)
 {
-    lib.registerClass("WireFramePass", kDesc, WireFramePass::create);
+    lib.registerPass(WireFramePass::kInfo, WireFramePass::create);
+}
+
+WireFramePass::WireFramePass(const Dictionary& dict)
+    : RenderPass(kInfo)
+{
+    for (const auto& [key, value] : dict)
+    {
+        //if (key == kOptions) mOptions = value;
+        //else logWarning("Unknown field '{}' in RTXDIPass dictionary.", key);
+    }
 }
 
 WireFramePass::SharedPtr WireFramePass::create(RenderContext* pRenderContext, const Dictionary& dict)
 {
-    SharedPtr pPass = SharedPtr(new WireFramePass);
+    SharedPtr pPass = SharedPtr(new WireFramePass(dict));
     return pPass;
 }
-
-std::string WireFramePass::getDesc() { return kDesc; }
 
 Dictionary WireFramePass::getScriptingDictionary()
 {
@@ -68,18 +72,18 @@ RenderPassReflection WireFramePass::reflect(const CompileData& compileData)
 
 void WireFramePass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    if (!mpScene) return;
+
     auto pTargetFbo = Fbo::create({ renderData["output"]->asTexture() });
     const float4 clearColor(0, 0, 0, 1);
     pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
     mpGraphicsState->setFbo(pTargetFbo);
 
-    if (mpScene)
-    {
-        // Set render state
-        mpVars["PerFrameCB"]["gColor"] = float4(0, 1, 0, 1);
 
-        mpScene->rasterize(pRenderContext, mpGraphicsState.get(), mpVars.get(), RasterizerState::CullMode::None);
-    }
+    // Set render state
+    mpVars["PerFrameCB"]["gColor"] = float4(0, 1, 0, 1);
+
+    mpScene->rasterize(pRenderContext, mpGraphicsState.get(), mpVars.get(), RasterizerState::CullMode::None);
 }
 
 void WireFramePass::renderUI(Gui::Widgets& widget)
@@ -89,13 +93,12 @@ void WireFramePass::renderUI(Gui::Widgets& widget)
 void WireFramePass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     mpScene = pScene;
-    if (mpScene) mpProgram->addDefines(mpScene->getSceneDefines());
-    mpVars = GraphicsVars::create(mpProgram->getReflector());
-}
 
-WireFramePass::WireFramePass()
-{
-    mpProgram = GraphicsProgram::createFromFile("RenderPasses/WireFramePass/Wireframe.ps.slang", "", "main");
+    Program::Desc desc;
+    desc.addShaderLibrary("RenderPasses/WireFramePass/Wireframe.ps.slang").vsEntry("vsMain").psEntry("main");
+    mpProgram = GraphicsProgram::create(desc);
+    mpProgram->addDefines(mpScene->getSceneDefines());
+    mpProgram->setTypeConformances(mpScene->getTypeConformances());
 
     RasterizerState::Desc wireframeDesc;
     wireframeDesc.setFillMode(RasterizerState::FillMode::Wireframe);
@@ -105,4 +108,7 @@ WireFramePass::WireFramePass()
     mpGraphicsState = GraphicsState::create();
     mpGraphicsState->setProgram(mpProgram);
     mpGraphicsState->setRasterizerState(mpRasterState);
+
+    if (mpScene) mpProgram->addDefines(mpScene->getSceneDefines());
+    mpVars = GraphicsVars::create(mpProgram->getReflector());
 }

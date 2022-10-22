@@ -44,6 +44,11 @@
 #include <random>
 #include "../HostDeviceSharedDefinitions.h"
 
+// For baseline method use
+#include "Rendering/Lights/EmissivePowerSampler.h"
+#include "Rendering/Lights/EmissiveUniformSampler.h"
+#include "Utils/Sampling/SampleGenerator.h"
+
 using namespace Falcor;
 
 class RTXDITutorialBase : public RenderPass
@@ -201,7 +206,7 @@ protected:
     } mLightingParams;
 
     // ReSTIR Shadow Map part
-    enum class VisibilityMode { Origin, ReSTIRShadowMap };
+    enum class VisibilityMode { Origin, ReSTIRShadowMap, BaselineSM };
     VisibilityMode mVisMode = VisibilityMode::ReSTIRShadowMap;
     GpuFence::SharedPtr mpFence;
     Sampler::SharedPtr mpPointSampler;
@@ -210,32 +215,45 @@ protected:
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
     bool mEnableStatistics = false;
-    bool mResetAccumulation = false;
+    bool mVisModeChanged = false;
     bool mShadowParamsChanged = false;
+    bool mTurnOffShadowRay = false;
+    bool mDebugLight = false;
+    bool mShadowRayForRestPixels = false;
+    bool mGetDataFromGPU = false;
+    bool mShadingVisibility = true;
 
     uint mTotalLightMeshCount = 1u;
     uint mLightMeshTopN = 4u;
-    uint mShadowMapSize = 1 << 10;
+    uint mShadowMapSize = 1 << 10; // max count = 1023
     uint mTemporalReusingLength = 5u;
     uint mShadowMapsPerLight = 6u;
     uint mCurrFrameLightStartIdx = 0u;
+    uint mDebugLightMeshID = 0u;
     float2 mLightNearFarPlane = float2(0.001f, 100.0f);
+    float mDepthBias = 1e-6f;
 
     Buffer::SharedPtr mpLightMeshDataBuffer;
     Buffer::SharedPtr mpPrevLightMeshSelectionBuffer;
     Buffer::SharedPtr mpLightMeshHistogramBuffer;
-    Buffer::SharedPtr mpSortingKeysBuffer;
     Buffer::SharedPtr mpSortedLightMeshBuffer;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
-    Buffer::SharedPtr mpCurrTopLightsMeshIndex;
+    Buffer::SharedPtr mpShadowOptionsBuffer; // Each pixel's shadow option (two places)
 
-    Texture::SharedPtr mpCurrFrameShadowMapsTexture;
     Texture::SharedPtr mpReusingShadowMapsTexture;
 
     struct
     {
         ComputePass::SharedPtr computeLightMeshHistogram;
-        ComputePass::SharedPtr sortLightMeshHistogram;
+        ComputePass::SharedPtr createKeyValuePairs;
+
+        struct
+        {
+            ComputePass::SharedPtr preSort;
+            ComputePass::SharedPtr innerSort;
+            ComputePass::SharedPtr outerSort;
+        } bitonicSort;
+
     } mComputeTopLightsPass;
 
 
@@ -250,8 +268,19 @@ protected:
     ComputePass::SharedPtr mpUpdateLightMeshData;
     ComputePass::SharedPtr mpShadowMapDebug;
 
+    struct
+    {
+        std::vector<float> shadowOptionsCoverage1;
+        std::vector<float> shadowOptionsCoverage2;
+    } mValuesToPrint;
 
-    // Statistics part
+    // Baseline shadow map params/resources
+    SampleGenerator::SharedPtr mpSampleGenerator; // remove
+    EmissiveLightSampler::SharedPtr mpEmissiveSampler;
+    Texture::SharedPtr mpHeroLightShadowMapsTexture;
+    ComputePass::SharedPtr mpBaselineShading;
+
+    // Statistics part. TODO: remove
     struct UniqueLightData
     {
         std::vector<uint8_t> selectedSampleInBytes;
@@ -317,7 +346,7 @@ protected:
     /** A function to simplify loading shaders throughout our tutorials.
     */
     ComputePass::SharedPtr createComputeShader(const std::string& file, const std::string& entryPoint = "main");
-    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint);
+    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint, bool hasScene = false);
 
     /** Load and compile the common shaders needed for all tutorials; these are the first shaders whose
         purposes must be understood for a very crude RTXDI integration.
@@ -327,7 +356,62 @@ protected:
     // TODO: remove
     void computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& data);
 
+    ////////////////////////////////////////////////////////////////////////////////////////////
+    // ReSTIR shadow map functions
+    ////////////////////////////////////////////////////////////////////////////////////////////
+
     void prepareLightMeshData();
+    void computeTopLightsPass(RenderContext* pRenderContext);
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
+
+    // Baseline shadow map function
+    void runBaselineShadowMap(RenderContext* pRenderContext, const RenderData& data);
+
+    // Debug & Print helper functions
     void printDeviceResources(RenderContext* pRenderContext);
+    void calcDiffShadowCoverage(const std::vector<uint32_t>& shadowOptionsList, uint offset);
+
+    // This function only supports getting the typed buffer data
+    template <typename T>
+    std::vector<T> getDeviceResourceData(RenderContext* pRenderContext, const Resource::SharedPtr& pResource)
+    {
+        auto resourceType = pResource->getType();
+        auto size = pResource->getSize();
+        std::vector<T> deviceResult;
+        if (resourceType == Resource::Type::Buffer)
+        {
+            auto pBuffer = pResource->asBuffer();
+            auto elementCount = pBuffer->getElementCount();
+
+            if (pBuffer->getCpuAccess() != Buffer::CpuAccess::Read)
+            {
+                logError("Cannot read the buffer");
+            }
+
+            // Must use a staging buffer which has no bind flags to map data
+            auto pStagingBuffer = Buffer::createTyped<T>(elementCount, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+            pRenderContext->copyBufferRegion(pStagingBuffer.get(), 0, pBuffer.get(), 0, size);
+
+            // Flush GPU and wait for results to be available.
+            pRenderContext->flush(false);
+            mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+            mpFence->syncCpu();
+
+            // Read back GPU results
+            T* pData = reinterpret_cast<T*>(pStagingBuffer->map(Buffer::MapType::Read));
+            deviceResult.assign(pData, pData + elementCount); // invoke range constructor (linear time)
+            pStagingBuffer->unmap();
+        }
+        else
+        {
+            auto pTexture = pResource->asTexture();
+            auto elementCount = pTexture->getWidth() * pTexture->getHeight();
+
+            // TODO: Texture has a built-in function to get data from GPU
+            auto dataInBytes = pRenderContext->readTextureSubresource(pTexture.get(), 0);
+
+        }
+
+        return deviceResult;
+    }
 };

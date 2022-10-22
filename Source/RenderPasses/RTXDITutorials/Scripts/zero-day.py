@@ -1,20 +1,15 @@
 
 # Define important scene parameters
-scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
-# scene = 'Arcade/Arcade.pyscene'
-
+scene = "ZeroDay/ZeroDay.pyscene"
 currentTime = 0.0
-paused = True
-animateCamera = False
+paused = False
+restirPassName = "RTXDITutorial5" 
 
-restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
-
-# Initial camera.  This camera is inconsistent between various Bistro versions,
-#    but seems to give decent (if not identical) views for most recent versions.
+# Initial camera.
 camera = [
-    float3( -16.477287, 3.650037, 1.189330 ),
-    float3( -15.491768, 3.507777, 1.097058 ),
-    float3( 0.000000,   1.000000,  0.000000 ) ]
+    float3( 12.667848, -0.026128, -0.044340 ),
+    float3( 11.669118, -0.074956, -0.031895 ),
+    float3( -0.000925,   1.000000,  0.000012 ) ]
 
 def graph_ImportanceResampling():
     # What libraries (with passes) do we need to load to build our renderer?
@@ -35,7 +30,7 @@ def graph_ImportanceResampling():
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 4.4,
+        'exposureCompensation' : 1.3,
     }
     gAccumParams = {
         'enabled': False,
@@ -58,32 +53,26 @@ def graph_ImportanceResampling():
 
     return tracer
 
+# Create render graph
 ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene)
-m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
 if (paused):
     t.pause()
 t.time = currentTime
-m.scene.camera.animated = animateCamera
+
+m.scene.camera.animated = False
 m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
-m.scene.cameraSpeed = 5
+m.scene.cameraSpeed = 1
 m.scene.animated = False
 
 # Add some view points
-m.scene.addViewpoint()
-
-viewport1 = [
-    float3( -30.359646, 7.155272, -11.375874 ),
-    float3( -29.451384, 7.025773, -10.978018 ),
-    float3( 0.000000,   1.000000,  0.000000 ) ]
-m.scene.addViewpoint(viewport1[0], viewport1[1], viewport1[2])
-
-# viewport2 = [
-#     float3( -16.477287, 3.650037, 1.189330 ),
-#     float3( -15.491768, 3.507777, 1.097058 ),
+# viewport1 = [
+#     float3( -30.359646, 7.155272, -11.375874 ),
+#     float3( -29.451384, 7.025773, -10.978018 ),
 #     float3( 0.000000,   1.000000,  0.000000 ) ]
+# m.scene.addViewpoint(viewport1[0], viewport1[1], viewport1[2])

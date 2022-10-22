@@ -35,19 +35,21 @@
 cbuffer ShadeCB
 {
     uint gInputReservoirIndex; // Which reservoir contains the samples we should shade
-    bool gDisplayLightSampling;
+
+    uint gDebugLightMeshID;
+    bool gDebugLight;
+    bool gShadingVisibility;
 }
 
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 Texture2D<PackedHitInfo> gVbuffer;
 
-
-void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightTriIndex,
+uint Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightTriIndex, uint2 launchIdx,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
-    if (!RTXDI_IsValidReservoir(reservoir)) return;
+    if (!RTXDI_IsValidReservoir(reservoir)) return 0;
 
     // Where are we shading / computing a pdf?
     float3 origin = RAB_GetSurfaceWorldPos(surface);
@@ -55,21 +57,36 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     // Evaluate the visibility
     float isVisible = 1.0f;
     uint lightMeshIndex = gScene.lightCollection.getLightIdx(lightTriIndex);
-    if (gVisMode == 0)
+    if (gShadingVisibility)
     {
-        isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
-    }
-    else if (gVisMode == 1)
-    {
-        // Get the data for the selected light
-        LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
-
-        if (lightData.shadowMapCount > 0)
+        if (gVisMode == 0)
         {
-            float3 posW = RAB_GetSurfaceWorldPos(surface);
-            float3 normalW = RAB_GetSurfaceNormal(surface);
-
-            isVisible = (float)evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler);
+            isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+        }
+        else if (gVisMode == 1)
+        {
+            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+            gShadowOptionsBuffer[bufferIndex] = 1;
+    
+            // Get the data for the selected light
+            LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
+    
+            if (lightData.shadowMapCount > 0)
+            {
+                float3 posW = RAB_GetSurfaceWorldPos(surface);
+                float3 normalW = RAB_GetSurfaceNormal(surface);
+    
+                isVisible = (float)evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler, gDepthBias);
+                gShadowOptionsBuffer[bufferIndex] = 2;
+            }
+            else
+            {
+                if (gShadowRayForRestPixels)
+                {
+                    // isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+                    // gShadowOptionsBuffer[bufferIndex] = 3;
+                }
+            }
         }
     }
 
@@ -92,10 +109,14 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     //     of the sum to here.
     float invPdf = RTXDI_GetReservoirInvPdf(reservoir) * lightSample.getInverseSampleArea();
 
+    print("invPdf = ", invPdf);
+
     // Return our result, separate in diffuse and specular channels:
     //   -> [ <shadow-ray> * L * BRDF * <geometry-term> ] / <pdf-of-ReSTIR-sampling>
     dif  = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * diffuseLobe);
     spec = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * specularLobe);
+
+    return (uint)isVisible;
 }
 
 
@@ -115,7 +136,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // Load the reservoir with the light sample we need to shade
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex);
-    uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
+    uint lightTriIdx = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
@@ -123,34 +144,37 @@ void main(uint3 threadId : SV_DispatchThreadID)
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
     {
         // Lookup the selected light and the specific light sample on it.
-        RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
+        RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightTriIdx, false);
         RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
         // Load the RGB emissive color for this particular light sample
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        Shade(reservoir, surface, lightSample, lightEmission, lightIndex, difColor, specColor);
+        uint visbility = Shade(reservoir, surface, lightSample, lightEmission, lightTriIdx, launchIdx, difColor, specColor);
+
+        // Do statistics on light sampling, but also count for the visibility 
+        // if (gVisMode == 1)
+        // {
+        //     int lightMeshID = -1;
+        //     uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+        //     lightMeshID = (int)gScene.lightCollection.getLightIdx(triIdx);
+
+        //     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+        //     gPrevLightMeshSelectionBuffer[bufferIndex] = int2(lightMeshID, (int)visbility);
+        // }
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
-    gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
 
-
-    // Visualize light mesh selection. TODO: remove
-    if (gDisplayLightSampling)
+    // Visual debugging
+    if (gDebugLight)
     {
-        outColor = luminance(outColor);
-        float4 currPixelResult = gSelectedLightSampleTextures[launchIdx];
-        // uint meshCount = gScene.lightCollection.meshCount;
+        uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightMeshID].instanceID;
+        uint pixelLightMeshID = gScene.lightCollection.getLightIdx(lightTriIdx);
 
-        uint firstLightID = gScene.lightCollection.meshData[27].instanceID;
-        uint secondLightID = gScene.lightCollection.meshData[32].instanceID;
-        uint thirdLightID = gScene.lightCollection.meshData[26].instanceID;
-        uint fourthLightID = gScene.lightCollection.meshData[99].instanceID;
-
-        print("firstLightID = ", firstLightID);
+        print("light Center = ", gLightMeshDataBuffer[gDebugLightMeshID].centerPosW);
 
         if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
         {
@@ -160,28 +184,17 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 // Extract a triangle hit from the V-buffer
                 const TriangleHit triangleHit = hit.getTriangleHit();
 
-                if (triangleHit.instanceID.index == firstLightID) outColor = float3(1.0, 0.0, 0.0);
-                else if (triangleHit.instanceID.index == secondLightID) outColor = float3(0.0, 1.0, 0.0);
-                else if (triangleHit.instanceID.index == thirdLightID) outColor = float3(0.0, 0.0, 1.0);
-                else if (triangleHit.instanceID.index == fourthLightID) outColor = float3(1.0, 1.0, 0.0);
+                if (triangleHit.instanceID.index != debugLightMeshInstanceID) outColor = float3(0.0f);
             }
         }
         else
         {
-            outColor = float3(1.0f);
-            if (currPixelResult.x == -1)
+            if (pixelLightMeshID != gDebugLightMeshID)
             {
                 outColor = float3(0.0f);
             }
-            else
-            {
-                if (currPixelResult.x == 27) outColor = float3(1.0, 0.0, 0.0);
-                else if (currPixelResult.x == 32) outColor = float3(0.0, 1.0, 0.0);
-                else if (currPixelResult.x == 26) outColor = float3(0.0, 0.0, 1.0);
-                else if (currPixelResult.x == 99) outColor = float3(1.0, 1.0, 0.0);
-            }
         }
-
-        gOutputColor[launchIdx] = float4(outColor, 1.0f);
     }
+
+    gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
 }

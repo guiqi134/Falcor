@@ -21,7 +21,7 @@ RWStructuredBuffer<LightMeshData> gLightMeshDataBuffer;
 [numthreads(1, 1, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
     print("Update Light Mesh Data Shader", 1);
 
     uint reusingBufferIdx = gCurrFrameLightStartIdx;

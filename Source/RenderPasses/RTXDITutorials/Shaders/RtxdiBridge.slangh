@@ -111,7 +111,7 @@ Texture2D<float4> gMotionVectorTexture;
 // Deubg textures
 RWTexture2D<float4> gHasSampleChangedInReusing;
 
-// Textures for doing statistics
+// Textures for doing statistics. TODO: remove
 RWTexture2D gSelectedLightSampleTextures;
 RWTexture2D gUnbiasedSampleResultTexture;
 
@@ -150,12 +150,16 @@ cbuffer SharedCB
     uint gLightMeshTopN;
     uint gVisMode;
     bool gCollectingData;
+    bool gShadowRayForRestPixels;
     SamplerState gLinearSampler;
+    float gDepthBias;
+    uint2 gScreenSize;
 }
 
-Texture2DArray<float> gCurrFrameShadowMaps;
+// Texture2DArray<float> gCurrFrameShadowMaps;
 Texture2DArray<float> gReusingShadowMaps;
 Buffer<uint2> gSortedLightMeshBuffer;
 StructuredBuffer<LightMeshData> gLightMeshDataBuffer;
+RWBuffer<uint> gShadowOptionsBuffer;
 
 

@@ -26,27 +26,47 @@
   </ImportGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\src\RTXDI.cpp" />
-    <ClCompile Include="Combined\RTXDICombinedTutorial.cpp" />
+    <ClCompile Include="Combined\RTXDICombinedTutorial.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="Common\RTXDITutorialBase.cpp" />
     <ClCompile Include="Common\RTXDITutorialConstants.cpp" />
     <ClCompile Include="RTXDITutorials.cpp" />
-    <ClCompile Include="Tutorial 1\RTXDITutorial1.cpp" />
-    <ClCompile Include="Tutorial 2\RTXDITutorial2.cpp" />
-    <ClCompile Include="Tutorial 3\RTXDITutorial3.cpp" />
-    <ClCompile Include="Tutorial 4\RTXDITutorial4.cpp" />
+    <ClCompile Include="Tutorial 1\RTXDITutorial1.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Tutorial 2\RTXDITutorial2.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Tutorial 3\RTXDITutorial3.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Tutorial 4\RTXDITutorial4.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="Tutorial 5\RTXDITutorial5.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Combined\RTXDICombinedTutorial.h" />
+    <ClInclude Include="Combined\RTXDICombinedTutorial.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="Common\RtxdiParameters.h" />
     <ClInclude Include="Common\RTXDITutorialBase.h" />
     <ClInclude Include="Common\RTXDITutorialConstants.h" />
     <ClInclude Include="Common\RtxdiTypes.h" />
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
-    <ClInclude Include="Tutorial 1\RTXDITutorial1.h" />
-    <ClInclude Include="Tutorial 2\RTXDITutorial2.h" />
-    <ClInclude Include="Tutorial 3\RTXDITutorial3.h" />
-    <ClInclude Include="Tutorial 4\RTXDITutorial4.h" />
+    <ClInclude Include="Tutorial 1\RTXDITutorial1.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="Tutorial 2\RTXDITutorial2.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="Tutorial 3\RTXDITutorial3.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="Tutorial 4\RTXDITutorial4.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="Tutorial 5\RTXDITutorial5.h" />
     <ShaderSource Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\ResamplingFunctions.hlsli">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
@@ -88,9 +108,6 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="README.txt" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="LightMeshRankingData.h" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

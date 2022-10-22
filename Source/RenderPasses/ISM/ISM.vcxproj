@@ -11,11 +11,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{DC42C624-9654-4257-8C0B-CAF8780B8427}</ProjectGuid>
+    <ProjectGuid>{0E830607-1417-4C9C-B366-F436616EB17A}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>RasterReSTIR</RootNamespace>
+    <RootNamespace>ISM</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
-    <ProjectName>RasterReSTIR</ProjectName>
+    <ProjectName>ISM</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -25,10 +25,11 @@
     <Import Project="..\..\Falcor\Falcor.props" />
   </ImportGroup>
   <ItemGroup>
-    <ClCompile Include="RasterReSTIR.cpp" />
+    <ClCompile Include="ISM.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="RasterReSTIR.h" />
+    <ClInclude Include="HostDeviceSharedDefinitions.h" />
+    <ClInclude Include="ISM.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Falcor\Falcor.vcxproj">
@@ -36,9 +37,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="BuildKeyValuePairs.cs.slang" />
-    <ShaderSource Include="ComputeTopNLights.cs.slang" />
-    <ShaderSource Include="Sorting.cs.slang" />
+    <ShaderSource Include="Pull.cs.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

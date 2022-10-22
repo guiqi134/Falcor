@@ -98,40 +98,82 @@ void RasterReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 
     mpPixelDebug->beginFrame(pRenderContext, screenSize);
 
-    uint totalLightMeshCount = (uint)mpLights->getMeshLights().size();
-
     // Initialize buffer with random numbers for testing
     {
         auto vars = mpInitializeBuffer->getRootVar();
         vars["CB"]["gScreenSize"] = screenSize;
         vars["CB"]["gFrameIndex"] = mFrameCount;
+        vars["CB"]["gTotalLightMeshCount"] = totalLightMeshCount;
         vars["gInputBuffer"] = mpPrevLightMeshSelectionBuffer;
-        mpPixelDebug->prepareProgram(mpInitializeBuffer->getProgram(), vars);
+        //mpPixelDebug->prepareProgram(mpInitializeBuffer->getProgram(), vars);
         mpInitializeBuffer->execute(pRenderContext, screenSize.x * screenSize.y, 1);
     }
 
+    // Because we are directly adding to the histogram buffer, so in each frame we need to clear this buffer instead of accumulating the result
+    pRenderContext->clearUAV(mpLightMeshHistogramBuffer->getUAV().get(), uint4(0));
+
     // Counting pass
     {
+        FALCOR_PROFILE("Counting Lights");
+
         auto histogramVars = mpComputeLightMeshHistogram->getRootVar();
+        histogramVars["CB"]["gTotalLightMeshCount"] = totalLightMeshCount;
         histogramVars["gPrevLightMeshSelectionBuffer"] = mpPrevLightMeshSelectionBuffer; // input
         histogramVars["gFinalHistogramBuffer"] = mpLightMeshHistogramBuffer; // output
-        //mpPixelDebug->prepareProgram(mComputeTopLightsPass.computeLightMeshHistogram->getProgram(), histogramVars);
+        //histogramVars["gSortBuffer"] = mpSortedLightMeshBuffer;
+        //mpPixelDebug->prepareProgram(mpComputeLightMeshHistogram->getProgram(), histogramVars);
         mpComputeLightMeshHistogram->execute(pRenderContext, screenSize.x * screenSize.y, 1);
     }
 
-
-    // Sorting pass
+    //if (false)
     {
-        auto sortingVars = mpSortLightMeshHistogram->getRootVar();
-        sortingVars["sortCB"]["gTotalSize"] = totalLightMeshCount;
-        sortingVars["gKeysBuffer"] = mpKeysBuffer;
-        sortingVars["gValuesBuffer"] = mpLightMeshHistogramBuffer;
-        sortingVars["gSortedLightMeshBuffer"] = mpSortedLightMeshBuffer;
-        mpSortLightMeshHistogram->execute(pRenderContext, totalLightMeshCount, 1);
+        FALCOR_PROFILE("Sorting Lights");
+
+        // Get the max iteration for inner and outer sort pass. This excludes the pre-sort pass.
+        const uint alignedTotalLightCount = (uint)pow(2, (uint)log2(totalLightMeshCount) + 1);
+        const uint maxIterations = (uint)log2(std::max(2048u, alignedTotalLightCount)) - 10u;
+        const uint nThreads = alignedTotalLightCount / 2;
+
+        //logInfo(std::format("alignedTotalLightCount = {}", alignedTotalLightCount));
+        //logInfo(std::format("maxIterations = ", maxIterations));
+
+        // Pre-Sort the buffer up to k = 2048.  This also pads the list with invalid indices
+        // that will drift to the end of the sorted list.
+        auto preSortVars = mBitonicSort.preSort->getRootVar();
+        preSortVars["sortCB"]["gTotalLightMeshCount"] = totalLightMeshCount;
+        preSortVars["sortCB"]["gNullItem"] = uint(0);
+        preSortVars["gSortBuffer"] = mpSortedLightMeshBuffer;
+        //mpPixelDebug->prepareProgram(mBitonicSort.preSort->getProgram(), preSortVars);
+        mBitonicSort.preSort->execute(pRenderContext, nThreads, 1);
+
+        // We have already pre-sorted up through k = 2048 when first writing our list, so
+        // we continue sorting with k = 4096.  For unnecessarily large values of k, these
+        // indirect dispatches will be skipped over with thread counts of 0.
+        for (uint k = 4096; k <= alignedTotalLightCount; k <<= 1)
+        {
+            // Outer sort on j >= 2048
+            auto outerSortVars = mBitonicSort.outerSort->getRootVar();
+            outerSortVars["sortCB"]["gTotalLightMeshCount"] = totalLightMeshCount;
+            outerSortVars["outerCB"]["k"] = k;
+            for (uint j = k / 2; j >= 2048; j >>= 1)
+            {
+                outerSortVars["outerCB"]["j"] = j;
+                outerSortVars["gSortBuffer"] = mpSortedLightMeshBuffer;
+
+                mBitonicSort.outerSort->execute(pRenderContext, nThreads, 1);
+            }
+
+            // Inner sort on j <= 1024
+            auto innerSortVars = mBitonicSort.innerSort->getRootVar();
+            innerSortVars["sortCB"]["gTotalLightMeshCount"] = totalLightMeshCount;
+            innerSortVars["sortCB"]["gNullItem"] = uint(0);
+            innerSortVars["gSortBuffer"] = mpSortedLightMeshBuffer;
+            mBitonicSort.innerSort->execute(pRenderContext, nThreads, 1);
+        }
     }
 
     // Check GPU reuslt with CPU
-    if (mFrameCount == 100)
+    if (mFrameCount == 50)
     {
         // Must use a staging buffer which has no bind flags to map data
         auto pStagingBuffer1 = Buffer::createTyped<uint>(totalLightMeshCount, ResourceBindFlags::None, Buffer::CpuAccess::Read);
@@ -154,15 +196,23 @@ void RasterReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
         pStagingBuffer2->unmap();
         
         // Printing to log
+        uint sum = 0;
         for (uint i = 0; i < deviceResult1.size(); i++)
         {
-            logInfo(std::format("mpSortedLightMeshBuffer[{}] = {}", i, deviceResult1[i]));
+            sum += deviceResult1[i];
+            logInfo(std::format("mpLightMeshHistogramBuffer[{}] = {}", i, deviceResult1[i]));
         }
 
+        logInfo(std::format("sum = {}, pixels = {}", sum, screenSize.x * screenSize.y));
+
+        sum = 0;
         for (uint i = 0; i < deviceResult2.size(); i++)
         {
+            sum += deviceResult2[i].y;
             logInfo(std::format("Light Mesh ID {} = {}", deviceResult2[i].x, deviceResult2[i].y));
         }
+
+        logInfo(std::format("sum = {}, pixels = {}", sum, screenSize.x* screenSize.y));
 
     }
 
@@ -174,6 +224,17 @@ void RasterReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 void RasterReSTIR::renderUI(Gui::Widgets& widget)
 {
     mpPixelDebug->renderUI(widget);
+}
+
+bool RasterReSTIR::onKeyEvent(const KeyboardEvent& keyEvent)
+{
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
+    {
+        mFrameCount = 0;
+        return true;
+    }
+
+    return false;
 }
 
 void RasterReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -190,22 +251,28 @@ void RasterReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPt
 
     // Create resources
     mpPrevLightMeshSelectionBuffer = Buffer::createTyped<int>(screenSize.x * screenSize.y, kBufferBindFlags);
-    mpLightMeshHistogramBuffer = Buffer::createTyped<uint>((uint)mpLights->getMeshLights().size(), kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpSortedLightMeshBuffer = Buffer::createTyped<uint2>((uint)mpLights->getMeshLights().size(), kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpLightMeshHistogramBuffer = Buffer::createTyped<uint>(totalLightMeshCount, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpSortedLightMeshBuffer = Buffer::createTyped<uint2>(totalLightMeshCount, kBufferBindFlags, Buffer::CpuAccess::Read);
 
-    std::vector<uint> keys;
-    for (uint i = 0; i < (uint)mpLights->getMeshLights().size(); i++)
+    if (mpScene->useEmissiveLights())
     {
-        keys.push_back(i);
+        mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
     }
-    mpKeysBuffer = Buffer::createTyped<uint>((uint)mpLights->getMeshLights().size(), kBufferBindFlags, Buffer::CpuAccess::Read, keys.data());
+
+    auto emissiveDefines = mpEmissiveSampler->getDefines();
 
     // Load shaders
     Program::DefineList defines;
     defines.add(mpSampleGenerator->getDefines());
     mpInitializeBuffer = createComputeShader("ComputeTopNLights.cs.slang", defines, "initializeBuffer");
     mpComputeLightMeshHistogram = createComputeShader("ComputeTopNLights.cs.slang", defines, "computeHistogramTwoAdd");
-    mpSortLightMeshHistogram = createComputeShader("ComputeTopNLights.cs.slang", defines, "sortLightMeshHistogram");
+    defines.clear();
+
+    mBitonicSort.preSort = createComputeShader("Sorting.cs.slang", defines, "preSortCS");
+    mBitonicSort.innerSort = createComputeShader("Sorting.cs.slang", defines, "innerSortCS");
+    mBitonicSort.outerSort = createComputeShader("Sorting.cs.slang", defines, "outerSortCS");
+
+    mpBuildKeyValuePairs = createComputeShader("BuildKeyValuePairs.cs.slang", defines, "buildKeyValuePairs");
 }
 
 RasterReSTIR::RasterReSTIR(const Dictionary& dict)
@@ -230,11 +297,15 @@ ComputePass::SharedPtr RasterReSTIR::createComputeShader(const std::string& file
     risDesc.setShaderModel("6_5");
 
     // Create a Falcor shader wrapper, with specified entry point and scene-specific #defines (for common Falcor HLSL routines)
-    ComputePass::SharedPtr pShader = ComputePass::create(risDesc.csEntry(entryPoint), defines);
+    auto sceneDefines = mpScene->getSceneDefines();
+    sceneDefines.add(defines);
+    ComputePass::SharedPtr pShader = ComputePass::create(risDesc.csEntry(entryPoint), sceneDefines);
 
     // Type conformances are needed for specific Slang language constructs used in common Falcor shaders, no need to worry
     // about this unless you're using advanced Slang functionality in a very specific way.
     pShader->getProgram()->setTypeConformances(mpScene->getTypeConformances());
+
+    pShader->getRootVar()["gScene"] = mpScene->getParameterBlock();
 
     // Zero out structures to make sure they're regenerated with correct settings (conformances, scene defines, etc)
     pShader->setVars(nullptr);

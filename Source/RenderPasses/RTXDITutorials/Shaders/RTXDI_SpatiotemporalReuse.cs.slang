@@ -52,7 +52,6 @@ cbuffer ReuseCB
     uint  gSamplesInDisocclusions;
     bool  gUseVisibilityShortcut;
     bool gEnablePermutationSampling;
-    uint2 gScreenSize;
 }
 
 RWBuffer<int> gPrevLightMeshSelectionBuffer;
@@ -60,7 +59,7 @@ RWBuffer<int> gPrevLightMeshSelectionBuffer;
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    printSetPixel(threadId);
+    // printSetPixel(threadId);
     
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
@@ -115,11 +114,6 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     }
 #endif
 
-    // Check if current pixel's sample has been replaced in reusing
-    bool hasSampleChanged = (currentLightIndex != RTXDI_GetReservoirLightIndex(restirResult)) || 
-        any(currentSampleUV != RTXDI_GetReservoirSampleUV(restirResult));
-    gHasSampleChangedInReusing[launchIdx] = hasSampleChanged ? float4(1.0f) : float4(0.0f);
-
     // Stage 3: Do statistics after biased reusing
     // if (gVisMode == 1)
     {
@@ -127,7 +121,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         if (RTXDI_IsValidReservoir(restirResult))
         {
             uint triIdx = RTXDI_GetReservoirLightIndex(restirResult);
-            lightMeshID = gScene.lightCollection.getLightIdx(triIdx);
+            lightMeshID = (int)gScene.lightCollection.getLightIdx(triIdx);
         }
         // gPrevLightMeshSelectionTex[uint2(launchIdx)] = lightMeshID;
 

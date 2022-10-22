@@ -14,4 +14,11 @@ struct LightMeshData
     int shadowMapCount;
 };
 
+enum class ShadowEvaluateOption : uint
+{
+    ShadowMap = 0,
+    FullyLit = 1,
+    ShadowRay = 2,
+};
+
 END_NAMESPACE_FALCOR

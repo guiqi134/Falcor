@@ -297,7 +297,9 @@ namespace Falcor
 
         for (const auto& draw : mDrawArgs)
         {
-            FALCOR_ASSERT(draw.count > 0);
+            FALCOR_ASSERT(draw.count > 0); // draw.count = # of instance
+
+            //logInfo("draw.count = " + std::to_string(draw.count)); 
 
             // Set state.
             pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);

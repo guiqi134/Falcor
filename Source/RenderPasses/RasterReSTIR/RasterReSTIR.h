@@ -28,7 +28,7 @@
 #pragma once
 #include "Falcor.h"
 #include "Utils/Sampling/SampleGenerator.h"
-#include "Utils/Algorithm/BitonicSort.h"
+#include "Rendering/Lights/EmissivePowerSampler.h"
 
 
 using namespace Falcor;
@@ -54,7 +54,7 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { mpPixelDebug->onMouseEvent(mouseEvent); return false; }
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 private:
     RasterReSTIR(const Dictionary& dict);
@@ -66,7 +66,9 @@ private:
 
     uint2 screenSize;
     uint mFrameCount = 0;
+    uint totalLightMeshCount = 3500;
     SampleGenerator::SharedPtr mpSampleGenerator;
+    EmissiveLightSampler::SharedPtr mpEmissiveSampler;
 
     LightCollection::SharedPtr mpLights;
 
@@ -77,7 +79,15 @@ private:
 
     ComputePass::SharedPtr mpInitializeBuffer;
     ComputePass::SharedPtr mpComputeLightMeshHistogram;
-    ComputePass::SharedPtr mpSortLightMeshHistogram;
+    ComputePass::SharedPtr mpBuildKeyValuePairs;
+
+
+    struct
+    {
+        ComputePass::SharedPtr preSort;
+        ComputePass::SharedPtr innerSort;
+        ComputePass::SharedPtr outerSort;
+    } mBitonicSort;
 
     ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint);    
 };

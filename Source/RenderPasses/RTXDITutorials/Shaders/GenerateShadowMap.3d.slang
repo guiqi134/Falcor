@@ -7,12 +7,14 @@ cbuffer shadowMapCB
 {
     uint gRanking;
     uint gCurrFrameLightStartIdx;
+    uint gVisMode;
     float gLightNear;
     float gLightFar;
 }
 
 Buffer<uint> gReusingLightIndexBuffer;
 StructuredBuffer<LightMeshData> gLightMeshDataBuffer; // 0, 1, ..., Max
+Buffer<uint2> gSortedLightMeshBuffer; // for baseline use
 
 struct GSOut
 {
@@ -37,16 +39,24 @@ VSOut vsMain(VSIn vIn)
 
 // Must use built-in instance to represent each render target 
 [instance(1)]
-[maxvertexcount(3)]
+[maxvertexcount(18)]
 void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout TriangleStream<GSOut> outStream)
 {
     // Get current light mesh's data
-    uint lightMeshIndex = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking].x;
-    uint face = 3;
+    uint lightMeshIndex;
+    if (gVisMode == 1)
+    {
+        lightMeshIndex = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking];        
+    }
+    else if (gVisMode == 2)
+    {
+        lightMeshIndex = gSortedLightMeshBuffer[gRanking].x;
+    }
+    // uint face = 3;
     
     GSOut gsOut;
 
-    // for (uint face = 0; face < 6; face++)
+    for (uint face = 0; face < 6; face++)
     {
         gsOut.rtIndex = face;
         gsOut.triangleIndex = face;
@@ -82,15 +92,14 @@ PSOut psMain(GSOut psIn)
 
     PSOut psOut;
 
-    // let lod = ImplicitLodTextureSampler();
-    // if (alphaTest(psIn.vsOut, triangleIndex, lod)) discard;
+    let lod = ExplicitLodTextureSampler(0.f);
+    if (alphaTest(psIn.vsOut, psIn.triangleIndex, lod)) discard;
 
     print("posH = ", psIn.vsOut.posH);
     print("psIn.vsOut.instanceID = ", psIn.vsOut.instanceID.index);
     print("psIn.triangleIndex = ", psIn.triangleIndex);
 
-    // TODO: ignore the emissive surface's fragment
-    let lod = ExplicitLodTextureSampler(0.f);
+    // Ignore the emissive surface's fragment
     float3 viewDir = normalize(gScene.camera.getPosition() - psIn.vsOut.posW);
     ShadingData sd = prepareShadingData(psIn.vsOut, psIn.triangleIndex, viewDir, lod);
     print("isEmissive = ", sd.mtl.isEmissive());

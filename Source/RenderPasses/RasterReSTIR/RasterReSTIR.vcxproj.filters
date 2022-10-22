@@ -8,5 +8,7 @@
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="ComputeTopNLights.cs.slang" />
+    <ShaderSource Include="BuildKeyValuePairs.cs.slang" />
+    <ShaderSource Include="Sorting.cs.slang" />
   </ItemGroup>
 </Project>

@@ -3,8 +3,6 @@
 // --------------------------------------------------------------------
 import Utils.Debug.PixelDebug;
 
-#define BLOCK_SIZE 128
-
 cbuffer histogramCB
 {
     uint gTotalLightMeshCount;
@@ -13,37 +11,70 @@ cbuffer histogramCB
 Buffer<int> gPrevLightMeshSelectionBuffer;
 RWBuffer<uint> gFinalHistogramBuffer;
 
-groupshared uint sBlockHistogram[BLOCK_SIZE];
+groupshared uint sBlockHistogram[8192];
 
 // One atomic add in shared memory and one in global memory
-[numthreads(BLOCK_SIZE, 1, 1)]
+[numthreads(1024, 1, 1)]
 void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThreadId: SV_GroupThreadID, uint3 groupId: SV_GroupID)
 {
     // printSetPixel(threadId.xy);
 
+    uint nSections = (gTotalLightMeshCount - 1) / 1024 + 1;
+    // print("nSections = ", nSections);
+
     // Initialize shared memory
-    sBlockHistogram[groupThreadId.x] = 0;
+    for (uint i = 0; i < nSections; i++)
+    {
+        uint sharedIndex = groupThreadId.x + (i * 1024);
+        sBlockHistogram[sharedIndex] = 0;
+    }
     GroupMemoryBarrierWithGroupSync();
 
-    // Add to the shared memory
-    int lightMeshIndex = gPrevLightMeshSelectionBuffer[threadId.x];
-    if (lightMeshIndex != -1) InterlockedAdd(sBlockHistogram[lightMeshIndex], 1);
+    // Add to the shared memory. Only 1024 data will be loaded
+    uint lightMeshIndex = gPrevLightMeshSelectionBuffer[threadId.x];
+    InterlockedAdd(sBlockHistogram[lightMeshIndex], 1);
     GroupMemoryBarrierWithGroupSync();
 
     // Add to global memory
-    if (groupThreadId.x < gTotalLightMeshCount)
+    if (nSections == 1)
     {
-        uint sum = sBlockHistogram[groupThreadId.x];
-        InterlockedAdd(gFinalHistogramBuffer[groupThreadId.x], sum);
-        GroupMemoryBarrierWithGroupSync();
+        if (groupThreadId.x < gTotalLightMeshCount)
+        {
+            uint sum = sBlockHistogram[groupThreadId.x];
+            if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[groupThreadId.x], sum);
+        }
+    }
+    else
+    {
+        for (uint i = 0; i < nSections; i++)
+        {
+            uint sharedIndex = groupThreadId.x + (i * 1024);
+            if (sharedIndex < gTotalLightMeshCount)
+            {
+                uint sum = sBlockHistogram[sharedIndex];
+                if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[sharedIndex], sum);
+            }
+        }
     }
 }
 
+RWBuffer<uint2> gSortBuffer;
+
+[numthreads(256, 1, 1)]
+void createKeyValuePairs(uint3 threadID : SV_DispatchThreadID)
+{
+    gSortBuffer[threadID.x] = uint2(threadID.x, gFinalHistogramBuffer[threadID.x]);
+}
+
+
+
 // The following part is another unchecked counting method
 
+/*
+#define BLOCK_SIZE 128
 #define WORD_COUNT 4 // this should be ceil(gTotalLightMeshCount / 32)
 
-// Max shared memory size = 19KB. We only need 1-bit to store mark each position in shared memory
+// Max shared memory size = 32KB. We only need 1-bit to store mark each position in shared memory
 groupshared uint sPerBlockHistogram[WORD_COUNT * BLOCK_SIZE];
 
 // TODO: Test this method later if two atmoic add method is too slow
@@ -95,6 +126,6 @@ void computeHistogramTesting(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
         // gFinalHistogramBuffer[groupId.x * BLOCK_SIZE + groupThreadId.x] = sum;
     }
 }
-
+*/
 
 

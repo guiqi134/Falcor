@@ -2,8 +2,6 @@
 # Define important scene parameters
 
 sceneName = 'CornellBox'
-exposureCompensation = 2.5
-scene = ''
 
 if sceneName == 'CornellBox':
     scene = 'TestScenes/CornellBox.pyscene'
@@ -11,6 +9,8 @@ if sceneName == 'CornellBox':
 elif sceneName == 'Arcade':
     scene = 'Arcade/Arcade.pyscene'
     exposureCompensation = 2.5
+
+# scene = 'ReSTIRShadowMap/testScenes.pyscene'
 
 currentTime = 0.0
 paused = True

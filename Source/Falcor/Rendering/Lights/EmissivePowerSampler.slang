@@ -88,6 +88,44 @@ struct EmissivePowerSampler : IEmissiveLightSampler
         return true;
     }
 
+    // Add-on function: sample the target light
+    bool sampleTargetLight<S : ISampleGenerator>(const uint lightMeshID, const float3 posW, const float3 normalW, const bool upperHemisphere, inout S sg, out TriangleLightSample ls)
+    {
+        if (gScene.lightCollection.isEmpty()) return false;
+
+        // Randomly pick a triangle out of the local list with uniform probability.
+        float uTriangle = sampleNext1D(sg);
+        uint triangleCount = gScene.lightCollection.triangleCount;
+
+        // Get the target light total triangle count and start offset
+        uint lightTriangleCount = gScene.lightCollection.meshData[lightMeshID].triangleCount;
+        uint triangleIndexOffset = gScene.lightCollection.meshData[lightMeshID].triangleOffset;
+
+        // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
+        uint triangleIndex = triangleIndexOffset + min((uint)(uTriangle * lightTriangleCount), lightTriangleCount - 1);
+
+        uint2 packed = _emissivePower.triangleAliasTable[triangleIndex];
+        float threshold = f16tof32(packed.x >> 16u);
+        uint selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
+        uint selectBelow = packed.y & 0xFFFFFFu;
+
+        // Test the threshold in the current table entry; pick one of the two options
+        triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
+
+        // We also need to scale the pdf since invWeightsSum is for the global list
+        float scale = triangleCount / lightTriangleCount;
+        float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * _emissivePower.invWeightsSum;
+
+        // Sample the triangle uniformly.
+        float2 u = sampleNext2D(sg);
+
+        if (!sampleTriangle(posW, triangleIndex, u, ls)) return false;
+
+        // The final probability density is the product of the sampling probabilities.
+        ls.pdf *= triangleSelectionPdf;
+        return true;
+    }
+
     /** Evaluate the PDF associated with selecting an emissive triangle.
         \param[in] posW Shading point in world space.
         \param[in] normalW Normal at the shading point in world space.

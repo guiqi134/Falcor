@@ -51,8 +51,18 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // The rest of the rendering code in this pass may fail if there's no scene loaded
     if (!mPassData.scene) return;
 
+    // Update the scene, especially dynamic meshes because they will not be pre-transferred
+    mPassData.scene->update(pRenderContext, gpFramework->getGlobalClock().getTime());
+
     // If we haven't loaded our shaders yet, go ahead and load them.
     if (!mShader.shade) loadShaders();
+
+    // Add emissive sampler define to baseline shading
+    if (mpEmissiveSampler)
+    {
+        mpEmissiveSampler->update(pRenderContext);
+        mpBaselineShading->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+    }
 
     // If needed, allocate an RTXDI context & resources so we can run our lighting code
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
@@ -68,21 +78,36 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // data passed to RTXDI.  This queries our Falcor scene to update flags that track changes.
     checkForSceneUpdates();
 
-    RTXDITutorialBase::execute(pRenderContext, renderData);
-
     // Pre-compute the center of all light meshes and their transformation matrix 
     if (mPassData.updateEmissiveTriangleGeom) prepareLightMeshData();
+
+    // Update some common params
+    RTXDITutorialBase::execute(pRenderContext, renderData);
+
+    // Wait until ReSTIR is stable. This should happen after updating the params
+    mTurnOffShadowRay = mRtxdiFrameParams.frameIndex >= mLightingParams.maxHistoryLength ? true : false;
 
     // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
     prepareSurfaceData(pRenderContext, renderData);
 
-    // For each pixel in our image, randomly select some number of candidate light samples, (optionally) send
-    // shadow rays to the selected one, reuse this data spatially between some neighbors, and then accumulate
-    // lighting for one final selected light sample in each pixel.  This is ReSTIR with only spatial reuse.
-    runSpatioTemporalReuse(pRenderContext, renderData);
-
-    // Output unique light statistics
-    computeUniqueLightSamples(pRenderContext, renderData);
+    // Toggle between different visibility algorithms
+    if (mVisMode == VisibilityMode::ReSTIRShadowMap && mTurnOffShadowRay)
+    {
+        // Do stochastic shadow map passes using last frame ReSTIR sample data 
+        prepareStochasticShadowMaps(pRenderContext, renderData);
+        runSpatioTemporalReuse(pRenderContext, renderData);
+    }
+    else if (mVisMode == VisibilityMode::BaselineSM && mTurnOffShadowRay)
+    {
+        runBaselineShadowMap(pRenderContext, renderData);
+    }
+    else 
+    {
+        // For each pixel in our image, randomly select some number of candidate light samples, (optionally) send
+        // shadow rays to the selected one, reuse this data spatially between some neighbors, and then accumulate
+        // lighting for one final selected light sample in each pixel.  This is ReSTIR with only spatial reuse.
+        runSpatioTemporalReuse(pRenderContext, renderData);
+    }
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     mRtxdiFrameParams.frameIndex++;
@@ -120,15 +145,6 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (mEnableStatistics)
-        mStatistics.stages[0].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
-
-    // Do stochastic shadow map passes using last frame ReSTIR sample data if it is not the first frame
-    if (mVisMode == VisibilityMode::ReSTIRShadowMap && mRtxdiFrameParams.frameIndex != 0)
-    {
-        prepareStochasticShadowMaps(pRenderContext, renderData);
-    }
-
     // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.  
     if (mLightingParams.traceInitialShadowRay)
     {
@@ -140,8 +156,12 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (mEnableStatistics)
-        mStatistics.stages[1].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
+    // How pixels' visibility is evaluated in previous pass
+    if (mGetDataFromGPU)
+    {
+        auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
+        calcDiffShadowCoverage(shadowOptionsResult, 0);
+    }
 
     // Step 3: Do spatiotemporal reuse
     {
@@ -162,26 +182,20 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         reuseVars["ReuseCB"]["gSamplesInDisocclusions"] = uint(mLightingParams.spatialSamples);
         reuseVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         reuseVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
-        reuseVars["ReuseCB"]["gScreenSize"] = mPassData.screenSize;
         reuseVars["gPrevLightMeshSelectionBuffer"] = mpPrevLightMeshSelectionBuffer;
         setupRTXDIBridgeVars(reuseVars, renderData);
         mpPixelDebug->prepareProgram(mShader.spatiotemporalReuse->getProgram(), reuseVars);
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    if (mEnableStatistics)
-    {
-        mStatistics.stages[2].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.selectedLightSampleTextures.get(), 0);
-        mStatistics.stages[3].selectedSampleInBytes = pRenderContext->readTextureSubresource(mStatistics.unbiasedSampleResultTexture.get(), 0);
-    }
-
-
     // Step 4: Do final shading
     {
         FALCOR_PROFILE("Final shading");
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
-        shadeVars["ShadeCB"]["gDisplayLightSampling"] = mDisplayLightSampling;
+        shadeVars["ShadeCB"]["gDebugLightMeshID"] = mDebugLightMeshID;
+        shadeVars["ShadeCB"]["gDebugLight"] = mDebugLight;
+        shadeVars["ShadeCB"]["gShadingVisibility"] = mShadingVisibility;
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
@@ -192,6 +206,13 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         // Our "last frame" is now the one we just rendered; remember where we stored out output reservoir.
         // (Currently just toggling between 0 & 1 in alternate frames)
         mLightingParams.lastFrameOutput = 1u - mLightingParams.lastFrameOutput;
+    }
+
+    // How pixels' visibility is evaluated in previous pass
+    if (mGetDataFromGPU)
+    {
+        auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
+        calcDiffShadowCoverage(shadowOptionsResult, 1);
     }
 }
 

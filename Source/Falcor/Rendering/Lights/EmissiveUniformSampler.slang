@@ -72,6 +72,32 @@ struct EmissiveUniformSampler : IEmissiveLightSampler
         return true;
     }
 
+    // Add-on function: sample the target light
+    bool sampleTargetLight<S : ISampleGenerator>(const uint lightMeshID, const float3 posW, const float3 normalW, const bool upperHemisphere, inout S sg, out TriangleLightSample ls)
+    {
+        if (gScene.lightCollection.getActiveTriangleCount() == 0) return false;
+
+        // Randomly pick a triangle out of the local list with uniform probability.
+        float uTriangle = sampleNext1D(sg);
+
+        // Get the target light total triangle count and start offset
+        uint lightTriangleCount = gScene.lightCollection.meshData[lightMeshID].triangleCount;
+        uint triangleIndexOffset = gScene.lightCollection.meshData[lightMeshID].triangleOffset;
+
+        // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
+        uint triangleIndex = triangleIndexOffset + min((uint)(uTriangle * lightTriangleCount), lightTriangleCount - 1);
+
+        float triangleSelectionPdf = 1.f / (float)lightTriangleCount;
+
+        // Sample the triangle uniformly.
+        float2 u = sampleNext2D(sg);
+        if (!sampleTriangle(posW, triangleIndex, u, ls)) return false;
+
+        // The final probability density is the product of the sampling probabilities.
+        ls.pdf *= triangleSelectionPdf;
+        return true;
+    }
+
     /** Evaluate the PDF associated with selecting an emissive triangle.
         \param[in] posW Shading point in world space.
         \param[in] normalW Normal at the shading point in world space.

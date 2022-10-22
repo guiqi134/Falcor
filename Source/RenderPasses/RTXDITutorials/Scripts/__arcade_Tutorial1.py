@@ -1,6 +1,7 @@
 
 # Define important scene parameters
 scene = 'Arcade/Arcade.pyscene'
+scene = "ReSTIRShadowMap/test.pyscene"
 currentTime = 0.0
 paused = True
 animateCamera = False

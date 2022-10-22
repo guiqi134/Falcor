@@ -1,6 +1,6 @@
 
 # Define important scene parameters
-scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
+scene = scene = 'TestScenes/CornellBox.pyscene'
 
 currentTime = 0.0
 paused = True

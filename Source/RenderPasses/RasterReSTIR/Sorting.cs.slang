@@ -1,15 +1,4 @@
-// Copyright (c) Microsoft. All rights reserved.
-// This code is licensed under the MIT License (MIT).
-// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
-// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
-// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
-//
-// Developed by Minigraph
-//
-// Author:  James Stanard 
-
-import Utils.Debug.PixelDebug;
+import Scene.Scene;
 
 cbuffer sortCB
 {
@@ -23,6 +12,7 @@ cbuffer sortCB
     uint gNullItem;
 };
 
+// RWBuffer<uint> gSortBuffer;
 RWBuffer<uint2> gSortBuffer;
 
 groupshared uint sKeys[2048];
@@ -59,6 +49,7 @@ void fillSortKeys(uint elementIdx, bool innerPass = false)
         uint2 keyValuePair = gSortBuffer[elementIdx];
         sKeys[sharedIdx] = keyValuePair.x;
         sValues[sharedIdx] = keyValuePair.y;
+        // sValues[sharedIdx] = gSortBuffer[elementIdx];
     }
     else
     {
@@ -72,10 +63,11 @@ void storeKeyValuePair(uint elementIdx)
 
     if (elementIdx < gTotalLightMeshCount)
         gSortBuffer[elementIdx] = uint2(sKeys[sharedIdx], sValues[sharedIdx]);
+        // gSortBuffer[elementIdx] = uint(sValues[sharedIdx]);
 }
 
 [numthreads(1024, 1, 1)]
-void preSortCS(uint3 groupID: SV_GroupID, uint groupIdx: SV_GroupIndex)
+void preSortCS(uint3 groupID : SV_GroupID, uint groupIdx : SV_GroupIndex)
 {
     // Item index of the start of this group. This is not the thread global index!!!
     const uint elementGroupStart = groupID.x * 2048;
@@ -126,7 +118,7 @@ void preSortCS(uint3 groupID: SV_GroupID, uint groupIdx: SV_GroupIndex)
 }
 
 [numthreads(1024, 1, 1)]
-void innerSortCS(uint3 groupID: SV_GroupID, uint groupIdx: SV_GroupIndex)
+void innerSortCS(uint3 groupID : SV_GroupID, uint groupIdx : SV_GroupIndex)
 {
     // Item index of the start of this group
     const uint elementGroupStart = groupID.x * 2048;
@@ -175,7 +167,7 @@ cbuffer outerCB
 }
 
 [numthreads(1024, 1, 1)]
-void outerSortCS(uint3 threadId: SV_DispatchThreadID)
+void outerSortCS(uint3 threadId : SV_DispatchThreadID)
 {
     // Form unique index pair from dispatch thread ID
     uint index2 = InsertOneBit(threadId.x, j);
@@ -187,7 +179,11 @@ void outerSortCS(uint3 threadId: SV_DispatchThreadID)
     uint2 A = gSortBuffer[index1];
     uint2 B = gSortBuffer[index2];
 
+    // uint A = gSortBuffer[index1];
+    // uint B = gSortBuffer[index2];
+
     if (ShouldSwap(A.y, B.y))
+    // if (ShouldSwap(A, B))
     {
         gSortBuffer[index1] = B;
         gSortBuffer[index2] = A;

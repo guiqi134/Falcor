@@ -75,6 +75,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
         // Evaulate shadow maps
         else if (gVisMode == 1)
         {
+            // isVisible = false;
+            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+            gShadowOptionsBuffer[bufferIndex] = 1;
+
             // Get the data for the selected light
             LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
             print("lightMeshIndex = ", lightMeshIndex);
@@ -86,8 +90,18 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 float3 posW = RAB_GetSurfaceWorldPos(surface);
                 float3 normalW = RAB_GetSurfaceNormal(surface);
 
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler);
+                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler, gDepthBias);
+                gShadowOptionsBuffer[bufferIndex] = 2;
             }
+            else
+            {
+                if (gShadowRayForRestPixels)
+                {
+                    isVisible = RAB_GetConservativeVisibility(surface, lightSample);
+                    gShadowOptionsBuffer[bufferIndex] = 3;
+                }
+            }
+            
         }
         
         if (!isVisible)  

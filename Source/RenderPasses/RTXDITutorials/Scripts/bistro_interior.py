@@ -1,20 +1,11 @@
-
-# Define important scene parameters
-scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
-# scene = 'Arcade/Arcade.pyscene'
-
+# scene = "ReSTIRShadowMap/FailCase.pyscene"
+scene = "Bistro_v5_2/BistroInterior.pyscene"
+# scene = "EmeraldSquare/EmeraldSquare_Dusk.pyscene" # make this to thousands of lights
+# scene = "SunTemple_v4/SunTemple/SunTemple.pyscene"
+# scene = "ReSTIRShadowMap/testScenes.pyscene"
 currentTime = 0.0
-paused = True
-animateCamera = False
-
-restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
-
-# Initial camera.  This camera is inconsistent between various Bistro versions,
-#    but seems to give decent (if not identical) views for most recent versions.
-camera = [
-    float3( -16.477287, 3.650037, 1.189330 ),
-    float3( -15.491768, 3.507777, 1.097058 ),
-    float3( 0.000000,   1.000000,  0.000000 ) ]
+paused = False
+restirPassName = "RTXDITutorial5" 
 
 def graph_ImportanceResampling():
     # What libraries (with passes) do we need to load to build our renderer?
@@ -29,13 +20,13 @@ def graph_ImportanceResampling():
     }
     gResamplingParams = {
         "envEmissiveScale" : 1.0,
-        "triEmissiveScale" : 15.91,
+        "triEmissiveScale" : 1.0,
         "useLowerShininess" : True,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 4.4,
+        'exposureCompensation' : 1.2,
     }
     gAccumParams = {
         'enabled': False,
@@ -58,32 +49,26 @@ def graph_ImportanceResampling():
 
     return tracer
 
+# Create render graph
 ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene)
-m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
 if (paused):
     t.pause()
 t.time = currentTime
-m.scene.camera.animated = animateCamera
+
+# Initial camera.
+camera = [
+    float3(3.947781, 4.311863, 1.382004),
+    float3(4.808643, 4.050728, 0.945284),
+    float3(0, 1, 0) ]
+
+m.scene.camera.animated = False
 m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
-m.scene.cameraSpeed = 5
+m.scene.cameraSpeed = 2
 m.scene.animated = False
 
-# Add some view points
-m.scene.addViewpoint()
-
-viewport1 = [
-    float3( -30.359646, 7.155272, -11.375874 ),
-    float3( -29.451384, 7.025773, -10.978018 ),
-    float3( 0.000000,   1.000000,  0.000000 ) ]
-m.scene.addViewpoint(viewport1[0], viewport1[1], viewport1[2])
-
-# viewport2 = [
-#     float3( -16.477287, 3.650037, 1.189330 ),
-#     float3( -15.491768, 3.507777, 1.097058 ),
-#     float3( 0.000000,   1.000000,  0.000000 ) ]

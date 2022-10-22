@@ -229,6 +229,8 @@ namespace Falcor
         */
         const GraphicsStateObject::Desc& getDesc() const { return mDesc; }
 
+        void setPrimType(GraphicsStateObject::PrimitiveType type) { mDesc.setPrimitiveType(type); }
+
     private:
         GraphicsState();
         Vao::SharedConstPtr mpVao;
