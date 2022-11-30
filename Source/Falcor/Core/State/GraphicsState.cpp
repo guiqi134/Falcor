@@ -42,8 +42,6 @@ namespace Falcor
         case Vao::Topology::TriangleList:
         case Vao::Topology::TriangleStrip:
             return GraphicsStateObject::PrimitiveType::Triangle;
-        case Vao::Topology::Patch:
-            return GraphicsStateObject::PrimitiveType::Patch;
         default:
             FALCOR_UNREACHABLE();
             return GraphicsStateObject::PrimitiveType::Undefined;
@@ -92,6 +90,7 @@ namespace Falcor
             mDesc.setProgramKernels(pProgramKernels);
             mDesc.setFboFormats(mpFbo ? mpFbo->getDesc() : Fbo::Desc());
             mDesc.setVertexLayout(mpVao->getVertexLayout());
+            if (mDesc.getPrimitiveType() != GraphicsStateObject::PrimitiveType::Patch)
             mDesc.setPrimitiveType(topology2Type(mpVao->getPrimitiveTopology()));
 
             StateGraph::CompareFunc cmpFunc = [&desc = mDesc](GraphicsStateObject::SharedPtr pGso) -> bool

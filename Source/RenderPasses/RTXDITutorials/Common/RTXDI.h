@@ -105,9 +105,6 @@ namespace rtxdi
         // Index of the first local light in the light buffer.
         uint32_t firstLocalLight = 0;
 
-        // Index of the first point light in local lights
-        uint32_t firstPointLight = 0;
-
         // Number of local lights available on this frame.
         uint32_t numLocalLights = 0;
 

@@ -2,6 +2,9 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="RTXDITutorials.cpp" />
+    <ClCompile Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\src\RTXDI.cpp">
+      <Filter>Common Code</Filter>
+    </ClCompile>
     <ClCompile Include="Tutorial 1\RTXDITutorial1.cpp">
       <Filter>Tutorials</Filter>
     </ClCompile>
@@ -26,11 +29,11 @@
     <ClCompile Include="Combined\RTXDICombinedTutorial.cpp">
       <Filter>Combined</Filter>
     </ClCompile>
-    <ClCompile Include="rtxdi\RTXDI.cpp">
-      <Filter>rtxdi</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\RTXDI.h">
+      <Filter>Common Code</Filter>
+    </ClInclude>
     <ClInclude Include="Tutorial 1\RTXDITutorial1.h">
       <Filter>Tutorials</Filter>
     </ClInclude>
@@ -55,19 +58,13 @@
     <ClInclude Include="Combined\RTXDICombinedTutorial.h">
       <Filter>Combined</Filter>
     </ClInclude>
-    <ClInclude Include="HostDeviceSharedDefinitions.h" />
+    <ClInclude Include="Common\RtxdiParameters.h">
+      <Filter>Common Code</Filter>
+    </ClInclude>
     <ClInclude Include="Common\RtxdiTypes.h">
-      <Filter>rtxdi</Filter>
+      <Filter>Common Code</Filter>
     </ClInclude>
-    <ClInclude Include="rtxdi\RTXDI.h">
-      <Filter>rtxdi</Filter>
-    </ClInclude>
-    <ClInclude Include="rtxdi\RtxdiParameters.h">
-      <Filter>rtxdi</Filter>
-    </ClInclude>
-    <ClInclude Include="rtxdi\RtxdiTypes.h">
-      <Filter>rtxdi</Filter>
-    </ClInclude>
+    <ClInclude Include="HostDeviceSharedDefinitions.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">
@@ -111,9 +108,6 @@
     </Filter>
     <Filter Include="Combined">
       <UniqueIdentifier>{ec0f89f0-558f-459b-9986-8241ab34022c}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="rtxdi">
-      <UniqueIdentifier>{f1aed28e-3a03-43a2-8471-8afc56eef3ef}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -183,6 +177,7 @@
     <ShaderSource Include="Shaders\RTXDI_TestCandidateVisibility.cs.slang">
       <Filter>Shaders\RTXDI\ForMultiplePipes</Filter>
     </ShaderSource>
+    <ShaderSource Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\ResamplingFunctions.hlsli" />
     <ShaderSource Include="Shaders\ResamplingFunctions.hlsli">
       <Filter>Shaders\RTXDI</Filter>
     </ShaderSource>

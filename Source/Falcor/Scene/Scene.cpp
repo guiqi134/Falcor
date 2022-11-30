@@ -281,12 +281,12 @@ namespace Falcor
         return mpLightCollection;
     }
 
-    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode, bool isTopologyPatch)
+    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode)
     {
-        rasterize(pContext, pState, pVars, mFrontClockwiseRS[cullMode], mFrontCounterClockwiseRS[cullMode], isTopologyPatch);
+        rasterize(pContext, pState, pVars, mFrontClockwiseRS[cullMode], mFrontCounterClockwiseRS[cullMode]);
     }
 
-    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, bool isTopologyPatch)
+    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW)
     {
         FALCOR_PROFILE("rasterizeScene");
 
@@ -295,17 +295,14 @@ namespace Falcor
         auto pCurrentRS = pState->getRasterizerState();
         bool isIndexed = hasIndexBuffer();
 
-        // mDrawArgs will have a total of 4 elements: 16-bit or 32-bit ib and cw or ccw winding order
         for (const auto& draw : mDrawArgs)
         {
             FALCOR_ASSERT(draw.count > 0); // draw.count = # of instance
 
+            //logInfo("draw.count = " + std::to_string(draw.count)); 
+
             // Set state.
-            if (!isTopologyPatch) pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
-            else pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16BitPatch : mpMeshVaoPatch);
-
-            //pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
-
+            pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
 
             if (draw.ccw) pState->setRasterizerState(pRasterizerStateCCW);
             else pState->setRasterizerState(pRasterizerStateCW);
@@ -352,12 +349,9 @@ namespace Falcor
         pContext->raytrace(pProgram, pVars.get(), dispatchDims.x, dispatchDims.y, dispatchDims.z);
     }
 
-    // All mesh data vertex data is stored in two vectors: one for vertex indices, another for vertex attributes (position, normal, ...)
     void Scene::createMeshVao(uint32_t drawCount, const std::vector<uint32_t>& indexData, const std::vector<PackedStaticVertexData>& staticData, const std::vector<SkinningVertexData>& skinningData)
     {
         if (drawCount == 0) return;
-
-        logInfo("drawCount = {}" + std::to_string(drawCount));
 
         // Create the index buffer.
         size_t ibSize = sizeof(uint32_t) * indexData.size();
@@ -385,13 +379,11 @@ namespace Falcor
         if (vertexCount > 0)
         {
             ResourceBindFlags vbBindFlags = ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::Vertex;
-            //pStaticBuffer = Buffer::createStructured(sizeof(PackedStaticVertexData), (uint32_t)vertexCount, vbBindFlags, Buffer::CpuAccess::None, nullptr, false);
-            pStaticBuffer = Buffer::createStructured(sizeof(PackedStaticVertexData), (uint32_t)vertexCount, vbBindFlags, Buffer::CpuAccess::None, staticData.data(), false);
+            pStaticBuffer = Buffer::createStructured(sizeof(PackedStaticVertexData), (uint32_t)vertexCount, vbBindFlags, Buffer::CpuAccess::None, nullptr, false);
         }
 
-        // Song: so number of vertex buffer is equal to draw count, but what is the relation between draw count and instance?
         Vao::BufferVec pVBs(kVertexBufferCount);
-        pVBs[kStaticDataBufferIndex] = pStaticBuffer; // static vertex buffer will always be the first one?
+        pVBs[kStaticDataBufferIndex] = pStaticBuffer;
 
         // Create the draw ID buffer.
         // This is only needed when rasterizing meshes in the scene.
@@ -438,10 +430,6 @@ namespace Falcor
         // For drawing the meshes we need separate VAOs for these cases.
         mpMeshVao = Vao::create(Vao::Topology::TriangleList, pLayout, pVBs, pIB, ResourceFormat::R32Uint);
         mpMeshVao16Bit = Vao::create(Vao::Topology::TriangleList, pLayout, pVBs, pIB, ResourceFormat::R16Uint);
-
-        // Add-on for tessellation shader to work
-        mpMeshVaoPatch = Vao::create(Vao::Topology::Patch, pLayout, pVBs, pIB, ResourceFormat::R32Uint);
-        mpMeshVao16BitPatch = Vao::create(Vao::Topology::Patch, pLayout, pVBs, pIB, ResourceFormat::R16Uint);
     }
 
     void Scene::createCurveVao(const std::vector<uint32_t>& indexData, const std::vector<StaticCurveVertexData>& staticData)

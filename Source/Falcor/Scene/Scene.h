@@ -888,7 +888,7 @@ namespace Falcor
             \param[in] pVars Graphics vars.
             \param[in] cullMode Optional rasterizer cull mode. The default is to cull back-facing primitives.
         */
-        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode = RasterizerState::CullMode::Back, bool isTopologyPatch = false);
+        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode = RasterizerState::CullMode::Back);
 
         /** Render the scene using the rasterizer.
             This overload uses the supplied rasterizer states.
@@ -898,7 +898,7 @@ namespace Falcor
             \param[in] pRasterizerStateCW Rasterizer state for meshes with clockwise triangle winding.
             \param[in] pRasterizerStateCCW Rasterizer state for meshes with counter-clockwise triangle winding. Can be the same as for clockwise.
         */
-        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, bool isTopologyPatch = false);
+        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW);
 
         /** Get the required raytracing maximum attribute size for this scene.
             Note: This depends on what types of geometry are used in the scene.
@@ -1161,10 +1161,6 @@ namespace Falcor
         bool mUseCompressedHitInfo = false;                         ///< True if scene should used compressed HitInfo (on scenes with triangles meshes only).
         bool mHas16BitIndices = false;                              ///< True if any meshes use 16-bit indices.
         bool mHas32BitIndices = false;                              ///< True if any meshes use 32-bit indices.
-
-        // Add-on for tessellation
-        Vao::SharedPtr mpMeshVaoPatch;
-        Vao::SharedPtr mpMeshVao16BitPatch;
 
         Vao::SharedPtr mpMeshVao;                                   ///< Vertex array object for the global mesh vertex/index buffers.
         Vao::SharedPtr mpMeshVao16Bit;                              ///< VAO for drawing meshes with 16-bit vertex indices.

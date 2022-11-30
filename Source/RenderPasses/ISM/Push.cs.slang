@@ -5,8 +5,7 @@ RWTexture2D<float> gOutput;
 
 cbuffer PushCB
 {
-    uint gPushMode;
-    float gDepthDiffThreshold;
+    uint gPushMode; 
 }
 
 static const uint2 offsets[4] = {
@@ -21,7 +20,6 @@ static const uint2 offsets[4] = {
 void main(uint3 threadID : SV_DispatchThreadID)
 {
     printSetPixel(threadID.xy);
-    print("gDepthDiffThreshold = ", gDepthDiffThreshold);
 
     uint2 currPixelCoarsePos = threadID.xy / 2;
     uint2 currPixelCoarseOffset = currPixelCoarsePos % 2;
@@ -32,15 +30,15 @@ void main(uint3 threadID : SV_DispatchThreadID)
     print("currPixelCoarsePos = ", currPixelCoarsePos);
     print("leftTopCoarsePos = ", leftTopCoarsePos);
     print("currPixelCoarseOffset = ", currPixelCoarseOffset);
-
+    
     // Brute-force method: Just copy the repective value in the coarser level to the pixel in the finer level
     if (gPushMode == 0)
     {
         computedDepth = gInput[currPixelCoarsePos];
     }
-
+    
     // Interpolation method: Get the left-most top-most pixel on the coarser level, and then get all the 4 pixels based on it. Do the interpolation using
-    // these four coarser pixels.
+    // these four coarser pixels. 
     // Each coarser level 2*2 region covers 4*4 region in the finer level
     if (gPushMode == 1)
     {
@@ -81,10 +79,9 @@ void main(uint3 threadID : SV_DispatchThreadID)
     }
 
     print("computedDepth = ", computedDepth);
-    print("currPixelDepth = ", currPixelDepth);
 
     // Check if the interpolated depth value is valid or occluded
-    if (computedDepth != 1.0f && computedDepth < currPixelDepth /*&& (currPixelDepth - computedDepth) <= gDepthDiffThreshold*/)
+    if (computedDepth != 1.0f && computedDepth < currPixelDepth)
     {
         gOutput[threadID.xy] = computedDepth;
     }

@@ -26,7 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
- /** A common shader used to shade the final, selected light sample for all
+ /** A common shader used to shade the final, selected light sample for all 
  *   of the RTXDI pipelines we demonstrate in our sample integration.
  */
 
@@ -45,7 +45,7 @@ Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 Texture2D<PackedHitInfo> gVbuffer;
 
-float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx,
+uint Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightTriIndex, uint2 launchIdx,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
@@ -55,10 +55,40 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     float3 origin = RAB_GetSurfaceWorldPos(surface);
 
     // Evaluate the visibility
-    int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
-    uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-
-    float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample);
+    float isVisible = 1.0f;
+    uint lightMeshIndex = gScene.lightCollection.getLightIdx(lightTriIndex);
+    if (gShadingVisibility)
+    {
+        if (gVisMode == 0)
+        {
+            isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+        }
+        else if (gVisMode == 1)
+        {
+            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+            gShadowOptionsBuffer[bufferIndex] = 1;
+    
+            // Get the data for the selected light
+            LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
+    
+            if (lightData.shadowMapCount > 0)
+            {
+                float3 posW = RAB_GetSurfaceWorldPos(surface);
+                float3 normalW = RAB_GetSurfaceNormal(surface);
+    
+                isVisible = (float)evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler, gDepthBias);
+                gShadowOptionsBuffer[bufferIndex] = 2;
+            }
+            else
+            {
+                if (gShadowRayForRestPixels)
+                {
+                    // isVisible = (float)traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+                    // gShadowOptionsBuffer[bufferIndex] = 3;
+                }
+            }
+        }
+    }
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -70,8 +100,8 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
         evalFresnelSchlick(surface.getSpecularColor(), float3(1), lightSample.LdotH());
 
     // Compute the specular and diffuse lobes of the BRDF separately.
-    float3 diffuseLobe = lightSample.NdotL() * (surface.getDiffuseColor() * M_1_PI);  // NdotL * albedo
-    float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model
+    float3 diffuseLobe = lightSample.NdotL() * (surface.getDiffuseColor() * M_1_PI);  // NdotL * albedo 
+    float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model 
 
     // Get the PDF of selecting this sample via RIS from the reservoir
     //  -> Multiplying the PDF by the light sample area accounts for the fact that RTXDI does not compute
@@ -79,12 +109,14 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     //     of the sum to here.
     float invPdf = RTXDI_GetReservoirInvPdf(reservoir) * lightSample.getInverseSampleArea();
 
+    print("invPdf = ", invPdf);
+
     // Return our result, separate in diffuse and specular channels:
     //   -> [ <shadow-ray> * L * BRDF * <geometry-term> ] / <pdf-of-ReSTIR-sampling>
     dif  = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * diffuseLobe);
     spec = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * specularLobe);
 
-    return isVisible;
+    return (uint)isVisible;
 }
 
 
@@ -104,7 +136,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // Load the reservoir with the light sample we need to shade
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex);
-    uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
+    uint lightTriIdx = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
@@ -112,28 +144,25 @@ void main(uint3 threadId : SV_DispatchThreadID)
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
     {
         // Lookup the selected light and the specific light sample on it.
-        RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
+        RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightTriIdx, false);
         RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
 
         // Load the RGB emissive color for this particular light sample
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        float visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, difColor, specColor);
+        uint visbility = Shade(reservoir, surface, lightSample, lightEmission, lightTriIdx, launchIdx, difColor, specColor);
 
-        // Do statistics on light sampling, but also count for the visibility
-        // if (true)
-        {
-            int lightID = -1;
+        // Do statistics on light sampling, but also count for the visibility 
+        // if (gVisMode == 1)
+        // {
+        //     int lightMeshID = -1;
+        //     uint triIdx = RTXDI_GetReservoirLightIndex(reservoir);
+        //     lightMeshID = (int)gScene.lightCollection.getLightIdx(triIdx);
 
-            uint idxInAllLight = RTXDI_GetReservoirLightIndex(reservoir);
-            lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
-
-            if (gSortingRules == 1 && visibility == 0.0f) lightID = -1;
-
-            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-            gPrevLightSelectionBuffer[bufferIndex] = lightID;
-        }
+        //     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+        //     gPrevLightMeshSelectionBuffer[bufferIndex] = int2(lightMeshID, (int)visbility);
+        // }
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
@@ -142,57 +171,29 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Visual debugging
     if (gDebugLight)
     {
-        int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
+        uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightMeshID].instanceID;
+        uint pixelLightMeshID = gScene.lightCollection.getLightIdx(lightTriIdx);
 
-        print("debug light center = ", gLightShadowDataBuffer[gDebugLight].centerPosW);
+        print("light Center = ", gLightMeshDataBuffer[gDebugLightMeshID].centerPosW);
 
-        // Debugging mesh lights
-        if (gDebugLightMeshID < gTotalLightMeshCount)
+        if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
         {
-            // For pixel has emissive surface
-            if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
+            HitInfo hit = HitInfo(gVbuffer[launchIdx]);
+            if (hit.isValid() && hit.getType() == HitType::Triangle)
             {
-                uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightMeshID].instanceID;
+                // Extract a triangle hit from the V-buffer
+                const TriangleHit triangleHit = hit.getTriangleHit();
 
-                HitInfo hit = HitInfo(gVbuffer[launchIdx]);
-                if (hit.isValid() && hit.getType() == HitType::Triangle)
-                {
-                    // Extract a triangle hit from the V-buffer
-                    const TriangleHit triangleHit = hit.getTriangleHit();
-
-                    print("triangle Hit instanceId = ", triangleHit.instanceID.index);
-
-                    // Turn off all other light's emission
-                    if (triangleHit.instanceID.index != debugLightMeshInstanceID) outColor = float3(0.0f);
-                }
-            }
-            else
-            {
-                if (localLightID != gDebugLightMeshID)
-                {
-                    outColor = float3(0.0f);
-                }
+                if (triangleHit.instanceID.index != debugLightMeshInstanceID) outColor = float3(0.0f);
             }
         }
-        // Debugging point lights
         else
         {
-            if (localLightID != gDebugLightMeshID)
+            if (pixelLightMeshID != gDebugLightMeshID)
             {
                 outColor = float3(0.0f);
             }
-            else
-            {
-                outColor = difColor + specColor;
-            }
         }
-
-        uint materialID = gScene.lightCollection.meshData[gDebugLightMeshID].materialID;
-        print("instanceID = ", gScene.lightCollection.meshData[gDebugLightMeshID].instanceID);
-        print("materialID = ", materialID);
-        print("isBasicMaterial = ", gScene.materials.isBasicMaterial(materialID));
-
-        BasicMaterialData materialData = gScene.materials.getBasicMaterialData(materialID);
     }
 
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);

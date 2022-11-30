@@ -31,11 +31,11 @@
 /** The key interface between Falcor and RTXDI shaders.  For integration into your engine,
     you need to rewrite this bridge to handle data from your application and pass them
     them to RTXDI via the required RAB_*() interface functions (see the RTXDI documentation).
-
+ 
     This file just #includes (or "imports" in Slang terminology) code from core Falcor
     shader headers and utilities and defines the data the RTXDI bridge needs to consume
     from our C++ code.
-
+ 
     The actual RAB_*() functions are defined in the separate headers:
        RAB_RandomSampler.hlsli, RAB_Surface.hlsli, RAB_LightInfo.hlsli, and RAB_LightSample.hlsli
 */
@@ -56,15 +56,14 @@ import Utils.Attributes;
 import Utils.Debug.PixelDebug;
 import Rendering.Materials.Microfacet;
 import Rendering.Materials.Fresnel;
-import Rendering.Lights.LightHelpers;
 #include "Utils/Math/MathConstants.slangh"
 
 // RTXDI parameters from the SDK
-#include "../rtxdi/RtxdiParameters.h"
+#include "rtxdi/RtxdiParameters.h"
 
 // Data used to interact and control the RTXDI bridge API (defined below)
 cbuffer BridgeCB
-{
+{  
     float  gEpsilon;                  // Our ray-epsilon.
     uint   gFrameIndex;               // For RNG initialization, to make sure we use different random numbers each frame
     uint2  gFrameSize;                // Size of our G-buffer
@@ -90,7 +89,7 @@ Buffer<float4> gLightGeometry;
 
 // Buffers for RTXDI (i.e., SDK requires these be application provided)
 RWBuffer<uint2>                           gRisBuffer;               // Presampled light tiles get inserted into and read from here, it stores the index and inverse pdf of each light sample
-RWBuffer<float4>                          gPackedPresampledLights;  // Technical optional, used for RAB_StoreCompactLightInfo()
+RWBuffer<float4>                          gPackedPresampledLights;  // Technical optional, used for RAB_StoreCompactLightInfo()  
 RWStructuredBuffer<RTXDI_PackedReservoir> gLightReservoirs;         // Intermediate reservoir data
 
 // Our buffer storing packed primary hit data (used by RAB_Surface.hlsli)
@@ -100,11 +99,21 @@ Buffer<float4>  gGBuf;
 Texture2D gLocalLightPdfTexture;    // "Local" lights, i.e., prims (tris, rects, cylinders, points, etc.)
 Texture2D gEnvMapPdfTexture;        // Our pdf texture for the environment map
 
+//Texture2D<float> gLocalLightPdfTexture;    // "Local" lights, i.e., prims (tris, rects, cylinders, points, etc.)
+//Texture2D<float> gEnvMapPdfTexture;        // Our pdf texture for the environment map
+
 // Our list of "randomized" neighbor offsets for finding spatial neighbors for reuse
 Buffer<float2> gNeighborBuffer;
 
 // Our motion vector texture from the G-buffer pass
 Texture2D<float4> gMotionVectorTexture;
+
+// Deubg textures
+RWTexture2D<float4> gHasSampleChangedInReusing;
+
+// Textures for doing statistics. TODO: remove
+RWTexture2D gSelectedLightSampleTextures;
+RWTexture2D gUnbiasedSampleResultTexture;
 
 // Define buffers for RTXDI to access data from.
 #define RTXDI_RIS_BUFFER gRisBuffer
@@ -122,7 +131,7 @@ Texture2D<float4> gMotionVectorTexture;
 #endif
 
 // Some (relatively) separate shader includes that define RTXDI bridge functions relative to
-//   the four different RAB bridge structures needed (RAB_RandomSamplerState, RAB_Surface,
+//   the four different RAB bridge structures needed (RAB_RandomSamplerState, RAB_Surface, 
 //   RAB_LightInfo, and RAB_LightSample).
 #include "RAB_RandomSampler.slangh"
 #include "RAB_Surface.slangh"
@@ -133,10 +142,8 @@ Texture2D<float4> gMotionVectorTexture;
 // #include "rtxdi/ResamplingFunctions.hlsli"
 #include "ResamplingFunctions.hlsli"
 
-
-__exported import EvaluateShadowMaps;
-
-#define TOTAL_LIGHTS 512
+// Stochastic shadow map part 
+import EvaluateShadowMaps;
 
 cbuffer SharedCB
 {
@@ -145,111 +152,14 @@ cbuffer SharedCB
     bool gCollectingData;
     bool gShadowRayForRestPixels;
     SamplerState gLinearSampler;
-    float gSmDepthBias;
-    float gIsmDepthBias;
+    float gDepthBias;
     uint2 gScreenSize;
-    uint gTotalLightMeshCount;
-    uint gSortingRules;
 }
 
-RWBuffer<int> gPrevLightSelectionBuffer;
-Buffer<uint2> gSortedLightsBuffer;
-StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
+// Texture2DArray<float> gCurrFrameShadowMaps;
 Texture2DArray<float> gReusingShadowMaps;
-Texture2DArray<float> gISMs;
+Buffer<uint2> gSortedLightMeshBuffer;
+StructuredBuffer<LightMeshData> gLightMeshDataBuffer;
 RWBuffer<uint> gShadowOptionsBuffer;
-RWBuffer<uint> gShadowMapSizeBuffer;
-
-// TODO: is it possible change all this to array of different textures?
-Texture2DArray<float> gSortedLightsShadowMaps[TOTAL_LIGHTS];
-
-Texture2DArray<float> gReusingShadowMaps32[2];
-Texture2DArray<float> gReusingShadowMaps64[2];
-Texture2DArray<float> gReusingShadowMaps128[2];
-Texture2DArray<float> gReusingShadowMaps256[2];
-Texture2DArray<float> gReusingShadowMaps512[2];
-Texture2DArray<float> gReusingShadowMaps1024[3];
 
 
-// Global evaluate visiblity functions for two stages in RTXDI
-bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample)
-{
-    bool isVisible = true;
-
-    LightShadowMapData lightData = gLightShadowDataBuffer[localLightID];
-
-    // Get surface data
-    float3 posW = RAB_GetSurfaceWorldPos(surface);
-    float3 normalW = RAB_GetSurfaceNormal(surface);
-
-    // Trace a shadow ray
-    if (gVisMode == (uint)Visibility::AllShadowRay)
-    {
-        isVisible = RAB_GetVisibility(surface, lightSample);
-        gShadowOptionsBuffer[bufferIndex] = 4;
-    }
-    // Evaulate shadow maps
-    else if (gVisMode == (uint)Visibility::ShadowMap_FullyLit || gVisMode == (uint)Visibility::ShadowMap_ISM)
-    {
-        gShadowOptionsBuffer[bufferIndex] = 1;
-
-        // light has shadow map? ...
-        if (lightData.shadowMapType == 1)
-        {
-            isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler, gSmDepthBias);
-            gShadowOptionsBuffer[bufferIndex] = 2;
-        }
-        else
-        {
-            // Use ISM? Or just fully lit
-            if (gVisMode == (uint)Visibility::ShadowMap_ISM && lightData.shadowMapType == 2)
-            {
-                isVisible = evaluateISM(posW, normalW, lightData, gISMs, gLinearSampler, gIsmDepthBias);
-                gShadowOptionsBuffer[bufferIndex] = 3;
-            }
-            // Use shadow ray?
-            else if (gShadowRayForRestPixels)
-            {
-                isVisible = RAB_GetVisibility(surface, lightSample);
-                gShadowOptionsBuffer[bufferIndex] = 4;
-            }
-        }
-    }
-    else if (gVisMode == (uint)Visibility::AllISM)
-    {
-        isVisible = evaluateISM(posW, normalW, lightData, gISMs, gLinearSampler, gIsmDepthBias);
-        gShadowOptionsBuffer[bufferIndex] = 3;
-    }
-    else if (gVisMode == (uint)Visibility::Experiment)
-    {
-        if (true || lightData.shadowMapType == 1)
-        {
-            if (lightData.shadowMapSize == 1024)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps1024[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 512)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps512[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 256)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps256[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 128)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps128[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 64)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps64[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 32)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps32[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-        }
-    }
-
-    return isVisible;
-}

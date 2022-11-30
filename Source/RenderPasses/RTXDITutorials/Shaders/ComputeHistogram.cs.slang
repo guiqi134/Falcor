@@ -5,10 +5,10 @@ import Utils.Debug.PixelDebug;
 
 cbuffer histogramCB
 {
-    uint gTotalLightsCount;
+    uint gTotalLightMeshCount;
 }
 
-Buffer<int> gPrevLightSelectionBuffer;
+Buffer<int> gPrevLightMeshSelectionBuffer;
 RWBuffer<uint> gFinalHistogramBuffer;
 
 groupshared uint sBlockHistogram[8192];
@@ -19,7 +19,7 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
 {
     // printSetPixel(threadId.xy);
 
-    uint nSections = (gTotalLightsCount - 1) / 1024 + 1;
+    uint nSections = (gTotalLightMeshCount - 1) / 1024 + 1;
     // print("nSections = ", nSections);
 
     // Initialize shared memory
@@ -31,15 +31,14 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
     GroupMemoryBarrierWithGroupSync();
 
     // Add to the shared memory. Only 1024 data will be loaded
-    int lightMeshIndex = gPrevLightSelectionBuffer[threadId.x];
-    if (lightMeshIndex != -1)
-        InterlockedAdd(sBlockHistogram[(uint)lightMeshIndex], 1);
+    uint lightMeshIndex = gPrevLightMeshSelectionBuffer[threadId.x];
+    InterlockedAdd(sBlockHistogram[lightMeshIndex], 1);
     GroupMemoryBarrierWithGroupSync();
 
     // Add to global memory
     if (nSections == 1)
     {
-        if (groupThreadId.x < gTotalLightsCount)
+        if (groupThreadId.x < gTotalLightMeshCount)
         {
             uint sum = sBlockHistogram[groupThreadId.x];
             if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[groupThreadId.x], sum);
@@ -50,7 +49,7 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
         for (uint i = 0; i < nSections; i++)
         {
             uint sharedIndex = groupThreadId.x + (i * 1024);
-            if (sharedIndex < gTotalLightsCount)
+            if (sharedIndex < gTotalLightMeshCount)
             {
                 uint sum = sBlockHistogram[sharedIndex];
                 if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[sharedIndex], sum);
@@ -60,13 +59,11 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
 }
 
 RWBuffer<uint2> gSortBuffer;
-RWBuffer<uint> gTotalValidPixels;
 
 [numthreads(256, 1, 1)]
 void createKeyValuePairs(uint3 threadID : SV_DispatchThreadID)
 {
     gSortBuffer[threadID.x] = uint2(threadID.x, gFinalHistogramBuffer[threadID.x]);
-    InterlockedAdd(gTotalValidPixels[0], gFinalHistogramBuffer[threadID.x]);
 }
 
 

@@ -16,8 +16,6 @@ cbuffer ShadingCB
     uint2 gScreenSize;
     float2 gLightNearFar;
     SamplerState gLinearSampler;
-    float gDepthBias;
-    uint gVisibilityMode;
 }
 
 Texture2D<PackedHitInfo> gVbuffer;
@@ -61,7 +59,7 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, uint lightID, float bias)
 [numthreads(16, 16, 1)]
 void main(uint3 threadID : SV_DispatchThreadID)
 {
-    // printSetPixel(threadID.xy);
+    printSetPixel(threadID.xy);
 
     uint2 pixelPos = threadID.xy;
     SampleGenerator sg = SampleGenerator(pixelPos, gFrameIndex + 2 * 13);
@@ -107,15 +105,8 @@ void main(uint3 threadID : SV_DispatchThreadID)
             if (sampleLight(posWOrigin, gScene.getLight(lightIndex), sg, als) && dot(sd.N, als.dir) >= kMinCosTheta)
             {
                 Ray ray = Ray(posWOrigin, als.dir, 0.001f, als.distance - 0.001f);
-                float visibility = 1.0f;
-                if (gVisibilityMode == 0)
-                {
-                    visibility = (float)traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
-                }
-                else
-                {
-                    visibility = (float)evaluateShadowMaps(posWOrigin, sd.N, lightIndex, gDepthBias);
-                }
+                // float visibility = (float)traceSceneVisibilityRay<1>(ray, RAY_FLAG_NONE, 0xff);
+                float visibility = (float)evaluateShadowMaps(posWOrigin, sd.N, lightIndex, 1e-6);
                 print("visibility = ", visibility);
                 float3 unshadowedContrib = als.Li * bsdf.eval(sd, als.dir, sg) * invPdf;
                 res += unshadowedContrib * visibility;

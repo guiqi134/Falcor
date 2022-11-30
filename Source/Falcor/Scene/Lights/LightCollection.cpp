@@ -190,7 +190,7 @@ namespace Falcor
             // Only mesh lights with basic materials are supported.
             auto pMaterial = scene.getMaterial(instanceData.materialID)->toBasicMaterial();
 
-            if (pMaterial && pMaterial->isEmissive() && pMaterial->getData().emissiveFactor != 0.0f)
+            if (pMaterial && pMaterial->isEmissive())
             {
                 // We've found a mesh instance with an emissive material => Setup mesh light data.
                 MeshLightData meshLight;

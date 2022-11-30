@@ -6,12 +6,11 @@ sceneName = 'CornellBox'
 if sceneName == 'CornellBox':
     scene = 'TestScenes/CornellBox.pyscene'
     exposureCompensation = 1.0
-    ismDepthBias = 0.003
 elif sceneName == 'Arcade':
     scene = 'Arcade/Arcade.pyscene'
     exposureCompensation = 2.5
 
-scene = 'ReSTIRShadowMap/testScenes.pyscene'
+# scene = 'ReSTIRShadowMap/testScenes.pyscene'
 
 currentTime = 0.0
 paused = True
@@ -32,8 +31,6 @@ def graph_ImportanceResampling():
         "envEmissiveScale" : 1.0,
         "triEmissiveScale" : 0.32,
         "useLowerShininess" : True,
-        "ismDepthBias" : ismDepthBias,
-        "baseTriangleSize" : 0.001,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -44,7 +41,7 @@ def graph_ImportanceResampling():
         'enabled': False,
     }
 
-    # Create a renderer (i.e., graph) containing a number of render passes
+    # Create a renderer (i.e., graph) containing a number of render passes 
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
     tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
     tracer.addPass(createPass("RTXDITutorial5", gResamplingParams), "RTXDI Tutorial 5")

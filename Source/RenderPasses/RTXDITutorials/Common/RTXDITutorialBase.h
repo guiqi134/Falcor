@@ -40,9 +40,8 @@
 */
 
 #include "Falcor.h"
-#include "../rtxdi/RTXDI.h"
+#include "rtxdi/RTXDI.h"
 #include <random>
-#include <numeric>
 #include "../HostDeviceSharedDefinitions.h"
 
 // For baseline method use
@@ -70,15 +69,6 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
-    // Which part in render pass has changed and needs update
-    enum class UpdateFlags
-    {
-        None = 0x0,
-        VisibilityChanged = 0x1,
-        ResourcesChanged = 0x2,
-        ShaderDefinesChanged = 0x4,
-        All = -1
-    };
 
 protected:
     RTXDITutorialBase(const Dictionary& dict, const RenderPass::Info& desc);
@@ -127,11 +117,6 @@ protected:
         bool             updateEnvironmentMapPdf = false;     // Do we need to update our environment map sampling texture?
         bool             clearReservoirs = false;             // Has the UI changed something such that it would be a good idea to clear reservoirs?
         LightCollection::SharedPtr       lights;              // A shortcut to the class that collects the lights in our scene.
-
-        // Below are for analytic lights
-        bool updateLightPosition = true;
-        bool updateLightIntensity = true;
-        bool updateLightOtherProperties = true;
     } mPassData;
 
     /** HLSL shaders used in our RTXDI integration
@@ -220,99 +205,46 @@ protected:
         uint32_t priorGBufferIndex = 1u;            // Which of the two G-buffers is the prior one?
     } mLightingParams;
 
-    ////////////////////////////////////////////////////////////////////////////////////////////
-    // ReSTIR shadow map parameters & resources
-    ////////////////////////////////////////////////////////////////////////////////////////////
-
-    /** All types, parameters and resources for this render pass
-    */ 
-    enum class SortingRules { AllPixels, OccludedPixels, ShadowEdgePixels};
-    enum class ISMSceneType { Triangle, ThreePoints, CenterPoint };
-    enum class ISMPushSamplingMode { Point, Interpolation };
-
-    Visibility mVisibility = Visibility::Experiment;
-    UpdateFlags mUpdates = UpdateFlags::None;
+    // ReSTIR Shadow Map part
+    enum class VisibilityMode { Origin, ReSTIRShadowMap, BaselineSM };
+    VisibilityMode mVisMode = VisibilityMode::ReSTIRShadowMap;
     GpuFence::SharedPtr mpFence;
     Sampler::SharedPtr mpPointSampler;
     Sampler::SharedPtr mpLinearSampler;
-    uint mSceneName = 0; // TODO: use pybind11 to register scene enum on python side 
 
-    // Below are parameters for rendering, scene or updating control
-    bool mEnableStatistics = false;
-    bool mShadowParamsChanged = false;
-    bool mTurnOffShadowRay = false;
-    bool mShadowRayForRestPixels = false;
-    bool mShadingVisibility = true;
-    bool mDrawWireframe = false;
-    bool mAdaptiveLightNearPlane = false;
-    bool mFullSizeShadowMaps = true; // Experiment part
-
-    // Below are the parameters for debugging
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
+    bool mEnableStatistics = false;
+    bool mVisModeChanged = false;
+    bool mShadowParamsChanged = false;
+    bool mTurnOffShadowRay = false;
     bool mDebugLight = false;
+    bool mShadowRayForRestPixels = false;
     bool mGetDataFromGPU = false;
-    uint mDebugLightMeshID = 0u;
-    uint mVisualizeMipLevel = 0;
-    uint mVisLightID = 0;
+    bool mShadingVisibility = true;
 
-    // Below are the light infos  
-    uint mTotalLightMeshCount = 0u;
-    uint mTotalPointLightsCount = 0u;
-    uint mTotalLightsCount = 0u;
-    std::vector<PointLight*> mPointLights;
-    float2 mLightNearFarPlane = float2(0.001f, 100.0f);
-
-    // Below are the parameters in our method
-    uint mLightTopN = 4u;
+    uint mTotalLightMeshCount = 1u;
+    uint mLightMeshTopN = 4u;
+    uint mShadowMapSize = 1 << 10; // max count = 1023
     uint mTemporalReusingLength = 5u;
+    uint mShadowMapsPerLight = 6u;
     uint mCurrFrameLightStartIdx = 0u;
-    uint mShadowMapSize = 1 << 10;
-    float mSmDepthBias = 1e-6f;
-    uint mUpdatingFrequency = 1u;
-    uint mSortingRules = (uint)SortingRules::AllPixels;
+    uint mDebugLightMeshID = 0u;
+    float2 mLightNearFarPlane = float2(0.001f, 100.0f);
+    float mDepthBias = 1e-6f;
 
-    // ISM parameters
-    uint mTotalIsmCount = 0u;
-    float mIsmDepthBias = 0.003f; 
-    uint mIsmPerLight = 2u;
-    uint mIsmVisTextureSize = 2048u; // max light: 2k*2k -> 128, 4k*4k -> 512 
-    uint mIsmSize = 128u;
-    uint mIsmMipLevels = 3;
-    float mSceneDepthThresholdScale = 0.01f;
-    float mDepthThreshold = 0.0f;
-    float mBaseTriSize = 0.01f;
-    uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
-    uint mIsmSceneType = (uint)ISMSceneType::ThreePoints;
-
-    Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights
-    Buffer::SharedPtr mpPrevLightSelectionBuffer;
-    Buffer::SharedPtr mpLightHistogramBuffer;
-    Buffer::SharedPtr mpSortedLightsBuffer;
-    Buffer::SharedPtr mpTotalValidPixels;
-
-    // Temporal resuing shadow map resources
+    Buffer::SharedPtr mpLightMeshDataBuffer;
+    Buffer::SharedPtr mpPrevLightMeshSelectionBuffer;
+    Buffer::SharedPtr mpLightMeshHistogramBuffer;
+    Buffer::SharedPtr mpSortedLightMeshBuffer;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
-    Texture::SharedPtr mpReusingShadowMapsTexture; // TODO: use vector to store multiple texture arrays to hold all lights SM (in Emerald Scene)
+    Buffer::SharedPtr mpShadowOptionsBuffer; // Each pixel's shadow option (two places)
 
-    // ISM resources
-    Texture::SharedPtr mpIsmTextureArray; // Max lights = 1024
-    Texture::SharedPtr mpIsmTexture;
-    Buffer::SharedPtr mpIsmLightIndexBuffer;
-    Buffer::SharedPtr mpPointsBuffer;
-    Buffer::SharedPtr mpCounterBuffer;
+    Texture::SharedPtr mpReusingShadowMapsTexture;
 
-    // Experiments with different shadow map resolutions
-    //std::vector<Texture::SharedPtr> mReusingSmTextureArrays; // 32, 64, 128, 256, 512, 1024 (max = 172 lights)
-    std::map<uint, std::vector<Texture::SharedPtr>> mReusingSmTextureArrays;
-
-    std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
-
-    /** Passes for computing and updating the top N lighs 
-    */
     struct
     {
-        ComputePass::SharedPtr computeLightHistogram;
+        ComputePass::SharedPtr computeLightMeshHistogram;
         ComputePass::SharedPtr createKeyValuePairs;
 
         struct
@@ -324,13 +256,7 @@ protected:
 
     } mComputeTopLightsPass;
 
-    // Pass for updating light shadow data buffer when light data changes in animation
-    ComputePass::SharedPtr mpUpdateLightShadowDataCenter;
 
-    ComputePass::SharedPtr mpUpdateLightMeshData;
-
-    /** Normal shadow map pass
-    */ 
     struct
     {
         GraphicsProgram::SharedPtr pProgram;
@@ -339,71 +265,40 @@ protected:
         Fbo::SharedPtr pFbo;
     } mShadowMapPass;
 
-    /** ISM passes
-    */
-    struct
-    {
-        GraphicsProgram::SharedPtr pProgram;
-        GraphicsState::SharedPtr pState;
-        //GraphicsStateObject::SharedPtr pGSO;
-        GraphicsVars::SharedPtr pVars;
-        Fbo::SharedPtr pFbo;
-    } mIsmPass;
+    ComputePass::SharedPtr mpUpdateLightMeshData;
+    ComputePass::SharedPtr mpShadowMapDebug;
 
-    // TODO: using CS to render ISMs
-    struct
-    {
-        ComputePass::SharedPtr generatePoints;
-        ComputePass::SharedPtr renderISMs;
-    } mCsIsmRenderPass;
-
-    ComputePass::SharedPtr mpIsmPullPass;
-    ComputePass::SharedPtr mpIsmPushPass;
-
-    RasterizerState::SharedPtr mpWireframeRS;
-    DepthStencilState::SharedPtr mpNoDepthDS;
-    DepthStencilState::SharedPtr mpDepthTestDS;
-
-    /** Baseline shadow map part
-    */
-    EmissiveLightSampler::SharedPtr mpEmissiveSampler;
-    Texture::SharedPtr mpHeroLightShadowMapsTexture;
-    ComputePass::SharedPtr mpBaselineShading;
-
-    /** Helpers to debug or visualize
-    */
     struct
     {
         std::vector<float> shadowOptionsCoverage1;
         std::vector<float> shadowOptionsCoverage2;
-        std::vector<uint> extraPointsCount;
-        uint totalExtraPoints;
-        std::string reusingLightIndexArray;
-        std::string ismLightIndexArray;
-        std::string shadowMapSizeCount;
-        uint4 memoryUsage;
-        uint64_t totalShadowTexSize;
     } mValuesToPrint;
 
-    // Recording data resources
-    Buffer::SharedPtr mpShadowOptionsBuffer; // Each pixel's shadow option (two places). Stores how each pixel's shadow is evalutated
-    Buffer::SharedPtr mpExtraPointsCountBuffer;
-    Buffer::SharedPtr mpShadowMapSizeBuffer;
+    // Baseline shadow map params/resources
+    SampleGenerator::SharedPtr mpSampleGenerator; // remove
+    EmissiveLightSampler::SharedPtr mpEmissiveSampler;
+    Texture::SharedPtr mpHeroLightShadowMapsTexture;
+    ComputePass::SharedPtr mpBaselineShading;
 
-    struct
+    // Statistics part. TODO: remove
+    struct UniqueLightData
     {
-        ComputePass::SharedPtr pVisualizeSingle;
-        ComputePass::SharedPtr pVisualizeAll;
-        ComputePass::SharedPtr pVisualizeAll2;
-    } mVisualizePass;
+        std::vector<uint8_t> selectedSampleInBytes;
+        std::unordered_map<uint, uint> lightMeshTotalCount;
+        std::unordered_map<uint, uint2> lightTriangTotalCount;
+        float3 uniqueMeshTriangleUvSums = float3(0.0f);
+    };
 
-    struct
+    struct 
     {
-        GraphicsProgram::SharedPtr pProgram;
-        GraphicsState::SharedPtr pState;
-        GraphicsVars::SharedPtr pVars;
-        Fbo::SharedPtr pFbo;
-    } mWireframePass;
+        Texture::SharedPtr selectedLightSampleTextures;
+        Texture::SharedPtr unbiasedSampleResultTexture;
+
+        std::array<UniqueLightData, 4> stages;
+
+        uint2 startEndFrame = uint2(100, 200);
+    } mStatistics;
+
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     // Various internal pass utilities, setup/allocation routines, and common routines for
@@ -451,42 +346,32 @@ protected:
     /** A function to simplify loading shaders throughout our tutorials.
     */
     ComputePass::SharedPtr createComputeShader(const std::string& file, const std::string& entryPoint = "main");
-    
+    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint, bool hasScene = false);
+
     /** Load and compile the common shaders needed for all tutorials; these are the first shaders whose
         purposes must be understood for a very crude RTXDI integration.
     */
     void loadCommonShaders(void);
 
+    // TODO: remove
+    void computeUniqueLightSamples(RenderContext* pRenderContext, const RenderData& data);
+
     ////////////////////////////////////////////////////////////////////////////////////////////
     // ReSTIR shadow map functions
     ////////////////////////////////////////////////////////////////////////////////////////////
 
-    /** Global functions 
-    */
-    void allocateShadowTextureArrays();
-    void prepareLightShadowMapData();
+    void prepareLightMeshData();
     void computeTopLightsPass(RenderContext* pRenderContext);
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
-    ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint = "main", bool hasScene = false);
-    void visualizeShadowMapTex(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel,
-        uint arrayIndex, const std::string& mode);
 
-    /** Some ISM functions
-    */
-    void loadIsmShaders();
-    void prepareIsms(RenderContext* pRenderContext, const RenderData& data);
-
-    /** Baseline shadow map function
-    */ 
+    // Baseline shadow map function
     void runBaselineShadowMap(RenderContext* pRenderContext, const RenderData& data);
 
-    /** Debug & Print helper functions
-    */ 
+    // Debug & Print helper functions
     void printDeviceResources(RenderContext* pRenderContext);
     void calcDiffShadowCoverage(const std::vector<uint32_t>& shadowOptionsList, uint offset);
 
-    /** This function only supports getting the typed buffer data or texture with the multiple of word(4 bytes) size data
-    */ 
+    // This function only supports getting the typed buffer data
     template <typename T>
     std::vector<T> getDeviceResourceData(RenderContext* pRenderContext, const Resource::SharedPtr& pResource)
     {
@@ -521,38 +406,12 @@ protected:
         {
             auto pTexture = pResource->asTexture();
             auto elementCount = pTexture->getWidth() * pTexture->getHeight();
-            deviceResult.reserve(elementCount);
 
-            // Texture has a built-in function to get data from GPU
+            // TODO: Texture has a built-in function to get data from GPU
             auto dataInBytes = pRenderContext->readTextureSubresource(pTexture.get(), 0);
 
-            // Loop over the texture
-            for (uint i = 0; i < elementCount; i++)
-            {
-                // Convert byte data to the target type
-                T targetTypeData;
-                uint nWord = sizeof(T) / 4;
-                for (uint j = 0; j < nWord; j++)
-                {
-                    int startIndex = i * sizeof(T) + j * nWord;
-                    uint8_t bytesToFloat[4] = {
-                        dataInBytes[startIndex], dataInBytes[startIndex + 1],
-                        dataInBytes[startIndex + 2], dataInBytes[startIndex + 3],
-                    };
-                    memcpy(&targetTypeData + j, &bytesToFloat, 4);
-                }
-                deviceResult[i] = targetTypeData;
-            }
         }
 
         return deviceResult;
     }
-    
 };
-
-// Operator overload for enum class type
-typedef RTXDITutorialBase::UpdateFlags e_;
-inline e_ operator& (e_ a, e_ b) { return static_cast<e_>(static_cast<int>(a) & static_cast<int>(b)); }
-inline e_& operator&= (e_& a, e_ b) { a = a & b; return a; };
-inline e_ operator| (e_ a, e_ b) { return static_cast<e_>(static_cast<int>(a) | static_cast<int>(b)); }
-inline e_& operator|= (e_& a, e_ b) { a = a | b; return a; }

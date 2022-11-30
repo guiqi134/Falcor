@@ -27,7 +27,7 @@
  **************************************************************************/
 
  // Define the size of our thread-groups.  Do this since we need to pass RTXDI
- // this value (as a #define) to configure the (optional) boiling filter
+ // this value (as a #define) to configure the (optional) boiling filter 
 #define CURRENT_GROUP_SIZE 16
 
 // Settings needed to use the boiling filter; define before #including the RTXDI shader
@@ -54,17 +54,19 @@ cbuffer ReuseCB
     bool gEnablePermutationSampling;
 }
 
+RWBuffer<int> gPrevLightMeshSelectionBuffer;
+
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    printSetPixel(threadId);
-
+    // printSetPixel(threadId);
+    
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
-    // Initialize our random number generator.
+    // Initialize our random number generator.  
     RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 2);
 
     // Grab the current pixel's surface from our G-bufer
@@ -112,19 +114,20 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     }
 #endif
 
-    // Do statistics after biased reusing
-    // if (false)
-    // {
-    //     int lightID = -1;
-    //     if (RTXDI_IsValidReservoir(restirResult))
-    //     {
-    //         uint idxInAllLight = RTXDI_GetReservoirLightIndex(restirResult);
-    //         lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
-    //     }
+    // Stage 3: Do statistics after biased reusing
+    // if (gVisMode == 1)
+    {
+        int lightMeshID = -1;
+        if (RTXDI_IsValidReservoir(restirResult))
+        {
+            uint triIdx = RTXDI_GetReservoirLightIndex(restirResult);
+            lightMeshID = (int)gScene.lightCollection.getLightIdx(triIdx);
+        }
+        // gPrevLightMeshSelectionTex[uint2(launchIdx)] = lightMeshID;
 
-    //     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-    //     gPrevLightSelectionBuffer[bufferIndex] = lightID;
-    // }
+        uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+        gPrevLightMeshSelectionBuffer[bufferIndex] = lightMeshID;
+    }
 
     // Store the reservoir after spatiotemporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(restirResult, params, launchIdx, gOutputReservoirIndex);

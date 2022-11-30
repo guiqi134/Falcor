@@ -36,9 +36,9 @@ uint SampleTrianglesUniformly(inout RAB_RandomSamplerState rng, int lightMeshID,
     {
         uint lightTriangleCount = gScene.lightCollection.meshData[lightMeshID].triangleCount;
         uint triangleIndexOffset = gScene.lightCollection.meshData[lightMeshID].triangleOffset;
-
+    
         invSourcePdf = (float)lightTriangleCount;
-
+    
         // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
         triangleIndex = triangleIndexOffset + min((uint)(uTriangle * lightTriangleCount), lightTriangleCount - 1);
     }
@@ -73,7 +73,7 @@ float3 unShadowedShading(const RAB_LightInfo triLightInfo, const RAB_LightSample
     print("geomTerm = ", geomTerm);
 
     // Return our unshadowed color result, separate in diffuse and specular channels:
-    //   -> [ L * BRDF * <geometry-term> ]
+    //   -> [ L * BRDF * <geometry-term> ] 
     float3 difColor = max(float3(0.0f), triLightEmission * diffuseLobe * geomTerm);
     float3 specColor = max(float3(0.0f), triLightEmission * specularLobe * geomTerm);
 
@@ -99,8 +99,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
     for (uint i = 0; i < gHeroLightsCount; i++)
     {
         float3 difColor = 0.0f, specColor = 0.0f;
-        uint lightMeshIndex = gSortedLightsBuffer[i].x;
-        LightShadowMapData lightData = gLightShadowDataBuffer[lightMeshIndex];
+        uint lightMeshIndex = gSortedLightMeshBuffer[i].x;
+        LightMeshData lightData = gLightMeshDataBuffer[lightMeshIndex];
 
         // Generate random sample from the lights
         // TODO: if we want to use pdf texture to sample, then one texture for each hero light should be created
@@ -117,7 +117,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         // for solid angle, so we need to add the Jacobian term (<geometry-term>) in Shade() function.
         invPdf = invPdf * triLightSample.getInverseSampleArea();
         triLightInfo.getLightArea();
-
+        
         // Visibility use light center to evaluate
         float isVisible = 1.0f;
         isVisible = (float)evaluateShadowMaps(shadingPosW, shadingN, lightData, gHeroLightShadowMaps, gLinearSampler, gDepthBias, 2, 6 * i);
@@ -137,7 +137,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         bool rejectSample = false;
         for (uint j = 0; j < gHeroLightsCount; j++)
         {
-            rejectSample = gSortedLightsBuffer[j].x == gScene.lightCollection.getLightIdx(rndTriangleLight) ? true : false;
+            rejectSample = gSortedLightMeshBuffer[j].x == gScene.lightCollection.getLightIdx(rndTriangleLight) ? true : false;
         }
         if (rejectSample) continue;
 
@@ -166,6 +166,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
 // we can use the light mesh center point to also approximate the unshadowed contribution
 // {
 //     float3 triLightEmission = gScene.materials.evalEmissive(gScene.lightCollection.meshData[lightMeshIndex].materialID, float2(0));
-//     float3 lightCenter = gLightShadowDataBuffer[lightMeshIndex].centerPosW;
-//     float invPdf = 1.0f; // we pick the light deterministically, the pdf is equal to 1.0
+//     float3 lightCenter = gLightMeshDataBuffer[lightMeshIndex].centerPosW;
+//     float invPdf = 1.0f; // we pick the light deterministically, the pdf is equal to 1.0 
 // }

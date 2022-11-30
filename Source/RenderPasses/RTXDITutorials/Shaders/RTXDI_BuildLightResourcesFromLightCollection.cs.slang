@@ -35,7 +35,7 @@ import Utils.Math.BitTricks;
 import Utils.Color.ColorHelpers;
 #include "Utils/Math/MathConstants.slangh"
 
-// We don't need all of RTXDI or the bridge for this shader, just
+// We don't need all of RTXDI or the bridge for this shader, just 
 // RTXDI_LinearIndexToZCurve(), which is in RTXDI's math header.
 #include "rtxdi/RtxdiMath.hlsli"
 
@@ -43,8 +43,7 @@ import Utils.Color.ColorHelpers;
 cbuffer CB
 {
     uint gLaunchWidth;
-    uint gTotalPrimitives;
-    uint gTotalTriPrimitives;
+    uint gNumPrimitives;
     bool gUpdatePrimitiveGeometry;
     bool gUpdatePrimitiveFlux;
 }
@@ -61,57 +60,41 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // What light primitive are we processing?  (i.e., get a linear ID).
     //   -> Falcor has "active" emissive lights (i.e., those that *actually* emit light
     //      as opposed to those that are textured with a black emissive texture)
-    uint lightID = threadId.y * gLaunchWidth + threadId.x;
+    uint activeTriId = threadId.y * gLaunchWidth + threadId.x;
 
     // Our launch may be too large; if that's not a valid primitive, stop
-    if (lightID >= gTotalPrimitives)
+    if (activeTriId >= gNumPrimitives)
         return;
 
-    if (lightID < gTotalTriPrimitives)
+    // Get our mapping from active emissive triangles into the full list of potential emissives.
+    uint triId = gScene.lightCollection.activeTriangles[activeTriId];
+
+    // Get the unpacked geometry info about that triangle
+    EmissiveTriangle triGeom = gScene.lightCollection.getTriangle(triId);
+    EmissiveFlux     triFlux = gScene.lightCollection.fluxData[triId];
+
+    // Light geometry may have moved, so update packed values representing positions / normals
+    if (gUpdatePrimitiveGeometry)
     {
-        uint activeTriId = lightID;
+        // Compute the triangle edges
+        float3 edge0 = triGeom.posW[1] - triGeom.posW[0];
+        float3 edge1 = triGeom.posW[2] - triGeom.posW[0];
 
-        // Get our mapping from active emissive triangles into the full list of potential emissives.
-        uint triId = gScene.lightCollection.activeTriangles[activeTriId];
-
-        // Get the unpacked geometry info about that triangle
-        EmissiveTriangle triGeom = gScene.lightCollection.getTriangle(triId);
-        EmissiveFlux     triFlux = gScene.lightCollection.fluxData[triId];
-
-        // Light geometry may have moved, so update packed values representing positions / normals
-        if (gUpdatePrimitiveGeometry)
-        {
-            // Compute the triangle edges
-            float3 edge0 = triGeom.posW[1] - triGeom.posW[0];
-            float3 edge1 = triGeom.posW[2] - triGeom.posW[0];
-
-            // Pack this data into the format used for our RTXDI bridge.
-            uint3  packedEdges = uint3((f32tof16(edge0) << 16u) | f32tof16(edge1));
-            // This buffer's size is 2 * total light count, so each light triangle needs two slots
-            // to store the packed geometry info
-            gPackedLightGeom[(activeTriId << 1u) + 0u] = float4(triGeom.posW[0], 0.0f);
-            gPackedLightGeom[(activeTriId << 1u) + 1u] = float4(asfloat(packedEdges.xyz), triFlux.flux);
-        }
-
-        // Triangle emission may have changed, so update values representing flux
-        if (gUpdatePrimitiveFlux)
-        {
-            // Find where in the pdf texture RTXDI expects to find this primitive.
-            uint2 pdfTexturePosition = RTXDI_LinearIndexToZCurve(activeTriId);
-
-            // Save a weight RTXDI uses to importance sample our emissives (i.e., proprtional to flux)
-            gPrimitivePDFTexture[pdfTexturePosition] = triFlux.flux;
-        }
+        // Pack this data into the format used for our RTXDI bridge.  
+        uint3  packedEdges = uint3((f32tof16(edge0) << 16u) | f32tof16(edge1));
+        // This buffer's size is 2 * total light count, so each light triangle needs two slots 
+        // to store the packed geometry info 
+        gPackedLightGeom[(activeTriId << 1u) + 0u] = float4(triGeom.posW[0], 0.0f); 
+        gPackedLightGeom[(activeTriId << 1u) + 1u] = float4(asfloat(packedEdges.xyz), triFlux.flux);
     }
-    else
+
+    // Triangle emission may have changed, so update values representing flux
+    if (gUpdatePrimitiveFlux)
     {
-        // Get the point light ID
-        uint pointLightID = lightID - gTotalTriPrimitives;
-
         // Find where in the pdf texture RTXDI expects to find this primitive.
-        uint2 pdfTexturePosition = RTXDI_LinearIndexToZCurve(lightID);
+        uint2 pdfTexturePosition = RTXDI_LinearIndexToZCurve(activeTriId);
 
-        // Take the point light flux as sampling weight
-        gPrimitivePDFTexture[pdfTexturePosition] = clamp(max(luminance(gScene.getLight(pointLightID).intensity), 0.0f), 0.0f, 65504.0f);
+        // Save a weight RTXDI uses to importance sample our emissives (i.e., proprtional to flux)
+        gPrimitivePDFTexture[pdfTexturePosition] = triFlux.flux;
     }
 }

@@ -3,7 +3,7 @@
 scene = "ZeroDay/ZeroDay.pyscene"
 currentTime = 0.0
 paused = False
-restirPassName = "RTXDITutorial5"
+restirPassName = "RTXDITutorial5" 
 
 # Initial camera.
 camera = [
@@ -26,12 +26,6 @@ def graph_ImportanceResampling():
         "envEmissiveScale" : 1.0,
         "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
-        "ismDepthBias" : 0.001,
-        "ismMipLevels" : 3,
-        "smDepthBias" : 0.000001,
-        "ismPushMode" : 1,
-        "baseTriangleSize" : 0.1,
-        "sceneName" : 1,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -42,7 +36,7 @@ def graph_ImportanceResampling():
         'enabled': False,
     }
 
-    # Create a renderer (i.e., graph) containing a number of render passes
+    # Create a renderer (i.e., graph) containing a number of render passes 
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
     tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
     tracer.addPass(createPass(restirPassName, gResamplingParams), "RTXDI Tutorials")

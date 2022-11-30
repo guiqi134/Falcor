@@ -8,11 +8,13 @@ cbuffer shadowMapCB
     uint gRanking;
     uint gCurrFrameLightStartIdx;
     uint gVisMode;
+    float gLightNear;
+    float gLightFar;
 }
 
 Buffer<uint> gReusingLightIndexBuffer;
-StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer; // 0, 1, ..., Max
-Buffer<uint2> gSortedLightsBuffer; // for baseline use
+StructuredBuffer<LightMeshData> gLightMeshDataBuffer; // 0, 1, ..., Max
+Buffer<uint2> gSortedLightMeshBuffer; // for baseline use
 
 struct GSOut
 {
@@ -35,30 +37,30 @@ VSOut vsMain(VSIn vIn)
     return vsOut;
 }
 
-// Must use built-in instance to represent each render target
+// Must use built-in instance to represent each render target 
 [instance(1)]
 [maxvertexcount(18)]
 void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout TriangleStream<GSOut> outStream)
 {
     // Get current light mesh's data
-    uint localLightIdx;
-    if (gVisMode == (uint)Visibility::BaselineSM)
+    uint lightMeshIndex;
+    if (gVisMode == 1)
     {
-        localLightIdx = gSortedLightsBuffer[gRanking].x;
+        lightMeshIndex = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking];        
     }
-    else
+    else if (gVisMode == 2)
     {
-        localLightIdx = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking];
+        lightMeshIndex = gSortedLightMeshBuffer[gRanking].x;
     }
     // uint face = 3;
-
+    
     GSOut gsOut;
 
     for (uint face = 0; face < 6; face++)
     {
         gsOut.rtIndex = face;
         gsOut.triangleIndex = face;
-        float4x4 lightViewProj = gLightShadowDataBuffer[localLightIdx].viewProjMat[face];
+        float4x4 lightViewProj = gLightMeshDataBuffer[lightMeshIndex].viewProjMat[face];
 
         for (uint v = 0; v < 3; v++)
         {

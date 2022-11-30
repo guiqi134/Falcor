@@ -33,23 +33,14 @@
 // Obviously, this can be implemented without Slang's object-oriented, C++-style classes
 struct RAB_LightInfo
 {
-    float3 mBase; // the base vertex point in world space for two edges
+    float3 mBase; // the base vertex point in world space for two edges 
     float  mFlux;
     uint3  mEdges;
     uint   mLocalIdx;
-    uint mLightID;
-
-    // for point light
-    float3 mNormal;
-    float mOpeningAngle;
-    float mCosOpeningAngle;
-    float mPenumbraAngle;
-
 
     bool isValid()        { return (mFlux > 0.0f); }
     bool isInvalid()      { return (mFlux <= 0.0f); }
-    bool isTriangle()     { return (mLocalIdx < gRtxdiParams.firstPointLight); }
-    bool isPoint()        { return (mLocalIdx >= gRtxdiParams.firstPointLight && mLocalIdx < gRtxdiParams.environmentLightIndex); }
+    bool isTriangle()     { return (mLocalIdx != gRtxdiParams.environmentLightIndex); }
     bool isEnvironment()  { return (mLocalIdx == gRtxdiParams.environmentLightIndex); }
     float3 getEdge0()     { return f16tof32(mEdges >> 16); }
     float3 getEdge1()     { return f16tof32(mEdges & 0xFFFFu); }
@@ -61,11 +52,6 @@ struct RAB_LightInfo
             float sumUV = uv.x + uv.y;
             float2 foldUV = (sumUV <= 1.0f) ? uv : 1.0f - uv;
             return mBase.xyz + getEdge0() * foldUV.x + getEdge1() * foldUV.y;
-        }
-
-        if (isPoint())
-        {
-            return mBase;
         }
 
         // Environment map / default -> return direction light direction
@@ -86,12 +72,6 @@ struct RAB_LightInfo
             return mBase.xyz + edge0 * foldUV.x + edge1 * foldUV.y;
         }
 
-        if (isPoint())
-        {
-            norm = mNormal;
-            return mBase;
-        }
-
         // Environment map / default -> return direction light direction
         norm = float3(0.0f);
         float3 localVec = latlong_map_to_world(uv);  // Invert the direction -> uv mapping
@@ -100,22 +80,16 @@ struct RAB_LightInfo
 
     float3 getLightNormal()
     {
-        return isTriangle() ? normalize(cross(getEdge0(), getEdge1())) :
-            isPoint() ? mNormal :
-            float3(0.0f);
+        return isTriangle() ? normalize(cross(getEdge0(), getEdge1())) : float3(0.0f);
     }
 
     float getLightArea()
     {
-        return isTriangle() ? 0.5f * length(cross(getEdge0(), getEdge1())) :
-            isPoint() ? 1.0f :
-            4.0f * M_PI;
+        return isTriangle() ? 0.5f * length(cross(getEdge0(), getEdge1())) : 4.0f * M_PI;
     }
 
     float3 getBarycenter()
     {
-        if (isPoint()) return mBase;
-
         return (3.0 * mBase.xyz + getEdge0() + getEdge1()) / 3.0f;
     }
 
@@ -129,13 +103,8 @@ struct RAB_LightInfo
             return gRelativeTrianglePower * mFlux;
         }
 
-        if (isPoint())
-        {
-            return mFlux;
-        }
-
         // For our env map, we can look up an RGB color from the original texture, or use our PDF texture,
-        // which already is scalarized.  But this includes a relative solid angle premultimplied, which we
+        // which already is scalarized.  But this includes a relative solid angle premultimplied, which we 
         // need to divide out here.  The computed value here should match RTXDI_BuildEnvMapPDFTexture.cs.slang
         float theta = (uv.y + (0.5f / gEnvMapRes.y) - 0.5f) * M_PI;
         float relativeSolidAngle = cos(theta);
@@ -162,7 +131,7 @@ struct RAB_LightInfo
             EmissiveFlux     triFlux = gScene.lightCollection.fluxData[sceneTriId];
 
             // Compute our flux, assuming diffuse emitters, averaged over the entire triangle.
-            emission = gRelativeTrianglePower * getLightArea() * M_PI * triFlux.averageRadiance.rgb;
+            emission = gRelativeTrianglePower * getLightArea() * M_PI * triFlux.averageRadiance.rgb;  
 
             // If we instead want to look up a unique, per-sample emissivity from our emission texture...
             if (gUseEmissiveTextures)
@@ -175,21 +144,16 @@ struct RAB_LightInfo
 
                 // Compute the texture UV coordinate from the [0..1] barycentric.
                 float2 texUV = triGeom.texCoords[0] * (1.0 - foldUV.x - foldUV.y)
-                    + triGeom.texCoords[1] * foldUV.x + triGeom.texCoords[2] + foldUV.y;
+                    + triGeom.texCoords[1] * foldUV.x + triGeom.texCoords[2] + foldUV.y;  
 
                 // Look up the emissve texture color at the selected UV, convert to match our units of flux
                 float3 emitTexColor = gScene.materials.evalEmissive(triGeom.materialID, texUV);
-                emission = (gRelativeTrianglePower * triGeom.area * M_PI) * emitTexColor;
+                emission = (gRelativeTrianglePower * triGeom.area * M_PI) * emitTexColor;  
             }
             return emission;
         }
 
-        if (isPoint())
-        {
-            return gScene.getLight(mLocalIdx - gRtxdiParams.firstPointLight).intensity;
-        }
-
-        // Environment map / default
+        // Environment map / default 
         return gRelativeEnvironmentPower * gScene.envMap.getIntensity() *
             gScene.envMap.envMap.SampleLevel(gScene.envMap.envSampler, uv, 0).rgb;
     }
@@ -206,54 +170,36 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame)
     // Currently triangle lights only.
     RAB_LightInfo l;
 
-    // Check if it's a local light (aka emissive triangle or other primtive)
+    // Check if it's a local light (aka emissive triangle or other primtive) 
     uint localIdx = clamp(index, gRtxdiParams.firstLocalLight, gRtxdiParams.firstLocalLight + gRtxdiParams.numLocalLights - 1);
-    if (localIdx == index)
+    if (localIdx == index) 
     {
         // if it's inside the local light range, then it's a local light
         localIdx -= gRtxdiParams.firstLocalLight;
         l.mLocalIdx = localIdx;
 
-        if (localIdx < gRtxdiParams.firstPointLight)
-        {
-            /* Note: Rather than loading from the compressed gLightGeometry[] buffer here, you could load directly
-            from Falcor's gScene.lightCollection, e.g., as in RTXDI_BuildLightResourcesFromLightCollection.cs.slang.
-            However, this has memory indirections and multiple incoherent lookups per triangle.  As RAB_LoadLightInfo()
-            is called many times during initial sampling, it is important to keep this load as fast as possible.
+        /* Note: Rather than loading from the compressed gLightGeometry[] buffer here, you could load directly
+           from Falcor's gScene.lightCollection, e.g., as in RTXDI_BuildLightResourcesFromLightCollection.cs.slang.
+           However, this has memory indirections and multiple incoherent lookups per triangle.  As RAB_LoadLightInfo()
+           is called many times during initial sampling, it is important to keep this load as fast as possible.
 
-            Experiments show naive lookups add 0.5 - 12 ms/frame, depending on scene and other settinngs, using a RTX 3090
-            */
+           Experiments show naive lookups add 0.5 - 12 ms/frame, depending on scene and other settinngs, using a RTX 3090
+        */
 
-            // Load the triangle vertex0 position (and w-component packed normal)
-            l.mBase = gLightGeometry[(localIdx << 1u) + 0].xyz;
+        // Load the triangle vertex0 position (and w-component packed normal)
+        l.mBase = gLightGeometry[(localIdx << 1u) + 0].xyz;
 
-            // Load the packed edges & preintegrated emissivity
-            float4 edges = gLightGeometry[(localIdx << 1u) + 1];
+        // Load the packed edges & preintegrated emissivity
+        float4 edges = gLightGeometry[(localIdx << 1u) + 1];
 
-            // Grab our packed edges.  We'll unpack them lazily
-            l.mEdges = asuint(edges.xyz);
+        // Grab our packed edges.  We'll unpack them lazily
+        l.mEdges = asuint(edges.xyz);
 
-            // Remmeber our intensity times area
-            l.mFlux = edges.w;
-        }
-        else
-        {
-            l.mLightID = localIdx - gRtxdiParams.firstPointLight;
-            LightData pointLight = gScene.getLight(l.mLightID);
-
-            // For point light, it is the point world position
-            l.mBase = pointLight.posW;
-
-            l.mFlux = luminance(pointLight.intensity);
-            l.mNormal = pointLight.dirW;
-            // l.mOpeningAngle = pointLight.openingAngle;
-            // l.mCosOpeningAngle = pointLight.cosOpeningAngle;
-            // l.mPenumbraAngle = pointLight.penumbraAngle;
-        }
-
+        // Remmeber our intensity times area
+        l.mFlux = edges.w;
     }
     // Nope...  Maybe it's an environment map?
-    else if (index == gRtxdiParams.environmentLightIndex) // The first light outside the local light range will be the environment light
+    else if (index == gRtxdiParams.environmentLightIndex) // The first light outside the local light range will be the environment light 
     {
         // Store our index; that's how we remember what light type we are
         l.mLocalIdx = gRtxdiParams.environmentLightIndex;
@@ -267,7 +213,7 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame)
 // Pack our full tiled light geometry data into a coherent per-tile dataset
 bool RAB_StoreCompactLightInfo(uint linearIndex, RAB_LightInfo lightInfo)
 {
-    if (!gStoreCompactedLightInfo || lightInfo.isPoint()) return false;
+    if (!gStoreCompactedLightInfo) return false;
 
     float4 val0 = float4(lightInfo.mBase.xyz, asfloat(lightInfo.mLocalIdx));
     float4 val1 = float4(asfloat(lightInfo.mEdges), lightInfo.mFlux);
