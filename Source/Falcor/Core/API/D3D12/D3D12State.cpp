@@ -391,6 +391,7 @@ namespace Falcor
     void initD3D12GraphicsStateDesc(const GraphicsStateObject::Desc& gsoDesc, D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, InputLayoutDesc& layoutDesc)
     {
         desc = {};
+        layoutDesc = {};
         FALCOR_ASSERT(gsoDesc.getProgramKernels());
 #define GET_SHADER_BYTE_CODE(_type) gsoDesc.getProgramKernels()->getShader(_type) ? gsoDesc.getProgramKernels()->getShader(_type)->getD3D12ShaderByteCode() : D3D12_SHADER_BYTECODE{}
         desc.VS = GET_SHADER_BYTE_CODE(ShaderType::Vertex);

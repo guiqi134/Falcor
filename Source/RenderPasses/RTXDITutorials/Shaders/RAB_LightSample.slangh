@@ -42,6 +42,7 @@ struct RAB_LightSample
     float  mNdotH;
     float  mLdotH;
     float  mJacobian;          // <sample area> * <cosine at the light> / <distance sqr> (for tris), or 1 (env maps)
+    bool mIsAnalytic;
 
     // Accessors.  Right now, these are trivial, but may become more complex if the
     //   data above gets compressed / de-duped.
@@ -70,7 +71,7 @@ RAB_LightSample RAB_EmptyLightSample()
 bool RAB_IsAnalyticLightSample(RAB_LightSample lightSample)
 {
     // This tutorial doesn't have analytic lights (e.g., spherical or capsule)
-    return false;
+    return lightSample.mIsAnalytic;
 }
 
 void RAB_GetLightDirDistance(RAB_Surface surface, RAB_LightSample lightSample,
@@ -88,27 +89,66 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
     RAB_LightSample s = {};
 
     // Get data about this specific light sample by querying our light
-    float3 norm; 
+    float3 norm;
     float3 pos = lightInfo.getPosAndNorm(uv, norm);
 
     // Grab a precomputed scalar flux from this emitter for use in PDF computations
     s.mScalarFlux = lightInfo.getScalarLightEmission(uv);
 
-    // Computed and store specific data we need for shading, depending on the light type.  We could do this
-    // in a case statement / series of if's, but with just 2 light times, let's do a bunch of conditional moves.
-    bool isTriangle = lightInfo.isTriangle();
+    float3 toLight;
+    if (lightInfo.isTriangle())
+    {
+        toLight = pos - RAB_GetSurfaceWorldPos(surface);  // getPosAndNorm() returns a direction to the light for environment maps
+        s.mDistToLight = length(toLight);                      // Put in a large value for infinite lights
+        toLight = normalize(toLight);
 
-    float3 toLight = isTriangle ? (pos - RAB_GetSurfaceWorldPos(surface)) : pos;  // getPosAndNorm() returns a direction to the light for environment maps
-    s.mDistToLight = isTriangle ? length(toLight) : 1.0e30f;                      // Put in a large value for infinite lights
-    toLight = normalize(toLight);
+        // Why it is the area? Because norm is the cross product of triangle's two edges
+        // and the length of cross product is the area of parallelogram, thus we need also * 0.5f
+        s.mInvSampleArea = 0.5f * length(norm);        // Inverse per-sample area (or solid angle)
 
-    // Why it is the area? Because norm is the cross product of triangle's two edges
-    // and the length of cross product is the area of parallelogram, thus we need also * 0.5f
-    s.mInvSampleArea = isTriangle ? (0.5f * length(norm)) : (4.0f * M_PI);        // Inverse per-sample area (or solid angle)
+        // Compute a Jacobian to transform from area measure to solid angle measure; env maps is already in solid angle measure.
+        float lightCosine = saturate(dot(normalize(norm), -toLight));
+        s.mJacobian = lightCosine / (s.mInvSampleArea * s.mDistToLight * s.mDistToLight);
+        s.mIsAnalytic = false;
+    }
+    else if (lightInfo.isPoint())
+    {
+        // Copy from Falcor built-in point light sampler
+        const LightData light = gScene.getLight(lightInfo.mLightID);
 
-    // Compute a Jacobian to transform from area measure to solid angle measure; env maps is already in solid angle measure.
-    float lightCosine = saturate(dot(normalize(norm), -toLight));
-    s.mJacobian = isTriangle ? lightCosine / (s.mInvSampleArea * s.mDistToLight * s.mDistToLight) : 1.0f;
+        // Compute direction and distance to light.
+        // The distance is clamped to a small epsilon to avoid div-by-zero below.
+        toLight = pos - RAB_GetSurfaceWorldPos(surface);
+        float distSqr = max(dot(toLight, toLight), kMinLightDistSqr);
+        s.mDistToLight = sqrt(distSqr);
+        toLight = normalize(toLight);
+
+        // Calculate the falloff for spot-lights.
+        float cosTheta = -dot(toLight, light.dirW);
+        float falloff = 1.f;
+        if (cosTheta < light.cosOpeningAngle)
+        {
+            falloff = 0.f;
+        }
+        else if (light.penumbraAngle > 0.f)
+        {
+            float deltaAngle = light.openingAngle - acos(cosTheta);
+            falloff = smoothstep(0.f, light.penumbraAngle, deltaAngle);
+        }
+
+        s.mInvSampleArea = 1.0f;
+        s.mJacobian = falloff / distSqr;
+        s.mIsAnalytic = true;
+    }
+    else
+    {
+        toLight = pos;
+        s.mDistToLight = 1.0e30f;
+        toLight = normalize(toLight);
+        s.mInvSampleArea = 4.0f * M_PI;
+        s.mJacobian = 1.0f;
+        s.mIsAnalytic = false;
+    }
 
     // We do need to send a ray to the light, so we need the direction to the light.  Pack it into an oct mapping.
     s.mPackedLightVector = encodeNormal2x16(toLight);
@@ -129,6 +169,14 @@ bool RAB_GetConservativeVisibility(RAB_Surface surface, RAB_LightSample lightSam
 {
     float3 origin = RAB_GetSurfaceWorldPos(surface);
     return conservativeShadowRay(origin, lightSample.getDirectionAndDistance());
+}
+
+bool RAB_GetVisibility(RAB_Surface surface, RAB_LightSample lightSample)
+{
+    float3 origin = RAB_GetSurfaceWorldPos(surface);
+    float4 rayDirLen = lightSample.getDirectionAndDistance();
+    Ray ray = Ray( origin, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    return traceShadowRay(ray);
 }
 
 
@@ -196,7 +244,7 @@ float RAB_GetLightSampleTargetPdfForSurface(RAB_LightSample lightSample, RAB_Sur
     //float F = spec < 1e-8f ? 0.0f : evalFresnelSchlick(spec, 1.0f, lightSample.LdotH());
 
     // Gives much less noisy results.  We can change the target PDF however we want, so use this.
-    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec); 
+    float F = spec < 1e-8f ? 0.0f : (evalFresnelSchlick(spec, 1.0f, lightSample.LdotH()) / spec);
 
     // Get the probability of sampling in the diffuse lobe (i.e., relative weight of diffuse vs
     //    specular lobes) and then linearly interpolate between the lobes.

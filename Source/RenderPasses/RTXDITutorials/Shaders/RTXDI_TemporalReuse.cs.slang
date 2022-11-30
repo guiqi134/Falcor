@@ -27,7 +27,7 @@
  **************************************************************************/
 
  // Define the size of our thread-groups.  Do this since we need to pass RTXDI
- // this value (as a #define) to configure the (optional) boiling filter 
+ // this value (as a #define) to configure the (optional) boiling filter
 #define CURRENT_GROUP_SIZE 16
 
 // Settings needed to use the boiling filter; define before #including the RTXDI shader
@@ -57,13 +57,13 @@ cbuffer ReuseCB
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
     printSetPixel(threadId);
-    
+
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
-    // Initialize our random number generator.  
+    // Initialize our random number generator.
     RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 2);
 
     // Grab the current pixel's surface from our G-bufer
@@ -83,7 +83,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         // ... with the results of our temporal resampling.  Set parameters here...
         RTXDI_TemporalResamplingParameters tparams;
         tparams.screenSpaceMotion = gMotionVectorTexture[pixelPosition].xyz * float3(gFrameSize, 1.0f);
-        tparams.sourceBufferIndex = gPrevFrameInputReservoirIndex; 
+        tparams.sourceBufferIndex = gPrevFrameInputReservoirIndex;
         tparams.maxHistoryLength = gMaxHistory;
         tparams.biasCorrectionMode = gBiasCorrectionMode;
         tparams.depthThreshold = gDepthThreshold;
@@ -105,10 +105,6 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         RTXDI_BoilingFilter(groupIndex, gBoilingFilterStrength, params, temporalResult);
     }
 #endif
-
-    // Check if current pixel's sample has been replaced in reusing
-    if (currentLightIndex != RTXDI_GetReservoirLightIndex(temporalResult)) 
-        gHasSampleChangedInReusing[launchIdx] = float4(1.0f);
 
     // Store the reservoir after temporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(temporalResult, params, launchIdx, gOutputReservoirIndex);

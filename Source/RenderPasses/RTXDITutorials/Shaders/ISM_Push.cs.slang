@@ -20,7 +20,7 @@ static const uint2 offsets[4] = {
 [numthreads(16, 16, 1)]
 void main(uint3 threadID : SV_DispatchThreadID)
 {
-    printSetPixel(threadID.xy);
+    // printSetPixel(threadID.xy);
     print("gDepthDiffThreshold = ", gDepthDiffThreshold);
 
     uint2 currPixelCoarsePos = threadID.xy / 2;

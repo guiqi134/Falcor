@@ -58,11 +58,11 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     if (!mShader.shade) loadShaders();
 
     // Add emissive sampler define to baseline shading
-    if (mpEmissiveSampler)
-    {
-        mpEmissiveSampler->update(pRenderContext);
-        mpBaselineShading->getProgram()->addDefines(mpEmissiveSampler->getDefines());
-    }
+    //if (mpEmissiveSampler)
+    //{
+    //    mpEmissiveSampler->update(pRenderContext);
+    //    mpBaselineShading->getProgram()->addDefines(mpEmissiveSampler->getDefines());
+    //}
 
     // If needed, allocate an RTXDI context & resources so we can run our lighting code
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
@@ -78,26 +78,27 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // data passed to RTXDI.  This queries our Falcor scene to update flags that track changes.
     checkForSceneUpdates();
 
-    // Pre-compute the center of all light meshes and their transformation matrix 
-    if (mPassData.updateEmissiveTriangleGeom) prepareLightMeshData();
+    // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
+    prepareSurfaceData(pRenderContext, renderData);
 
-    // Update some common params
+    // Update the data in this render pass
     RTXDITutorialBase::execute(pRenderContext, renderData);
+
+    // Pre-compute the center of all light meshes and their transformation matrix
+    if (mpLightShadowDataBuffer == nullptr) prepareLightShadowMapData();
 
     // Wait until ReSTIR is stable. This should happen after updating the params
     mTurnOffShadowRay = mRtxdiFrameParams.frameIndex >= mLightingParams.maxHistoryLength ? true : false;
 
-    // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
-    prepareSurfaceData(pRenderContext, renderData);
-
     // Toggle between different visibility algorithms
-    if (mVisMode == VisibilityMode::ReSTIRShadowMap && mTurnOffShadowRay)
+    if ((mVisibility != Visibility::BaselineSM || mVisibility != Visibility::AllShadowRay)
+        && mTurnOffShadowRay)
     {
-        // Do stochastic shadow map passes using last frame ReSTIR sample data 
+        // Do stochastic shadow map passes using last frame ReSTIR sample data
         prepareStochasticShadowMaps(pRenderContext, renderData);
         runSpatioTemporalReuse(pRenderContext, renderData);
     }
-    else if (mVisMode == VisibilityMode::BaselineSM && mTurnOffShadowRay)
+    else if (mVisibility == Visibility::BaselineSM && mTurnOffShadowRay)
     {
         runBaselineShadowMap(pRenderContext, renderData);
     }
@@ -116,6 +117,9 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // two G-buffer indicies (0 and 1), ping-pong back and forth between them each frame.
     mLightingParams.currentGBufferIndex = 1u - mLightingParams.currentGBufferIndex;
     mLightingParams.priorGBufferIndex = 1u - mLightingParams.priorGBufferIndex;
+
+    mPassData.updateLightPosition = false;
+    mPassData.updateLightIntensity = false;
 
     mpPixelDebug->endFrame(pRenderContext);
 }
@@ -182,11 +186,13 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         reuseVars["ReuseCB"]["gSamplesInDisocclusions"] = uint(mLightingParams.spatialSamples);
         reuseVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         reuseVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
-        reuseVars["gPrevLightMeshSelectionBuffer"] = mpPrevLightMeshSelectionBuffer;
         setupRTXDIBridgeVars(reuseVars, renderData);
         mpPixelDebug->prepareProgram(mShader.spatiotemporalReuse->getProgram(), reuseVars);
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
+
+    const auto& pOutColor = renderData["color"]->asTexture();
+    pRenderContext->clearUAV(pOutColor->getUAV().get(), float4(float3(0.0f), 1.0f));
 
     // Step 4: Do final shading
     {
@@ -221,7 +227,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
 void RTXDITutorial5::renderUI(Gui::Widgets& widget)
 {
     // Provide controls for the number of samples on each light type (largely consistent options between tutorials)
-    Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", true);
+    Gui::Group candidateOptions(widget.gui(), "Per-pixel light sampling", false);
     candidateOptions.text("Number of per-pixel light candidates on:");
     candidateOptions.tooltip(kSampleCountToolTip);
     candidateOptions.var("Triangles", mLightingParams.primLightSamples, 0u, 256u);
@@ -235,7 +241,7 @@ void RTXDITutorial5::renderUI(Gui::Widgets& widget)
     candidateOptions.release();
 
     // Provide controllable options for each different rendering mode (e.g., each different tutorial)
-    Gui::Group pipeOptions(widget.gui(), "Renderer Options", true);
+    Gui::Group pipeOptions(widget.gui(), "Renderer Options", false);
     pipeOptions.dropdown("Bias correction", kBiasCorrection, mLightingParams.biasCorrectionMode);
     pipeOptions.var("Reuse radius", mLightingParams.spatialRadius, 0.0f, 50.0f, 0.1f);
     pipeOptions.var("Samples", mLightingParams.spatialSamples, 0u, 25u);
@@ -243,7 +249,7 @@ void RTXDITutorial5::renderUI(Gui::Widgets& widget)
         mLightingParams.useBoilFilter);
     if (mLightingParams.useBoilFilter)
     {
-        pipeOptions.var("##Boil Filter Stength", mLightingParams.boilFilterStrength, 0.0f, 1.0f, 0.001f, true);
+        pipeOptions.var("##Boil Filter Stength", mLightingParams.boilFilterStrength, 0.0f, 1.0f, 0.001f, false);
     }
     pipeOptions.var("Depth Threshold", mLightingParams.depthThreshold, 0.0f, 1.0f, 0.001f);
     pipeOptions.var("Normal Threshold", mLightingParams.normalThreshold, 0.0f, 1.0f, 0.001f);
