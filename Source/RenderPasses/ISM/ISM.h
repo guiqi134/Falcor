@@ -52,13 +52,14 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene);
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { mpPixelDebug->onMouseEvent(mouseEvent); return false; };
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 private:
     ISM(const Dictionary& dict);
 
     enum class ISMSceneType { Triangle, ThreePoints, CenterPoint };
     enum class ISMPushSamplingMode { Point, Interpolation };
+    enum class VisibilityMode { ShadowRay, ISM };
 
     Scene::SharedPtr mpScene;
     SampleGenerator::SharedPtr mpSampleGenerator;
@@ -74,23 +75,25 @@ private:
     Buffer::SharedPtr mpCounterBuffer;
 
     std::vector<PointLight*> mPointLights;
-    std::vector<Texture::SharedPtr> mIsmTextureArrayMips;
 
     uint mTotalLightsCount = 0;
     uint mFrameIndex = 0;
     uint2 mScreenSize;
     float2 mLightNearFarPlane = float2(0.001f, 50.0f);
+    float mDepthBias = 0.003f;
+    VisibilityMode mVisibilityMode = VisibilityMode::ISM;
     bool mDrawWireframe = false;
     bool mUpdateResources = false;
     bool mUpdateDefines = false;
 
     // ISM pass parameters
-    uint mIsmTextureSize = 2048u; // max light = 16 * 8
+    uint mIsmTextureSize = 1024u; // max light = 16 * 8
     uint mIsmSize = 128u;
     uint mIsmPerLight = 2u;
-    uint mIsmMipLevels = 2;
+    uint mIsmMipLevels = 3;
+    float mSceneDepthThreasholdScale = 0.01f;
     uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
-    uint mIsmSceneType = (uint)ISMSceneType::Triangle;
+    uint mIsmSceneType = (uint)ISMSceneType::ThreePoints;
 
     // Visualize pass parameters
     uint mVisualizeMipLevel = 0;
@@ -103,6 +106,7 @@ private:
         GraphicsProgram::SharedPtr pProgram;
         GraphicsState::SharedPtr pState;
         GraphicsVars::SharedPtr pVars;
+        Fbo::SharedPtr pFbo;
     } mWireframePass;
 
     // ISM pass
@@ -118,7 +122,12 @@ private:
     ComputePass::SharedPtr mpIsmPullPass;
     ComputePass::SharedPtr mpIsmPushPass;
     ComputePass::SharedPtr mpShadingPass;
-    ComputePass::SharedPtr mpIsmVisualizePass;
+
+    struct
+    {
+        ComputePass::SharedPtr pVisualizeSingle;
+        ComputePass::SharedPtr pVisualizeAll;
+    } mIsmVisualizePass;
 
     RasterizerState::SharedPtr mpWireframeRS;
     DepthStencilState::SharedPtr mpNoDepthDS;
@@ -127,7 +136,8 @@ private:
 
     ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint = "main", bool hasScene = false);
     void prepareLightShadowMapData();
-    void visualizeIsmTexture(Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel, uint arrayIndex);
+    void visualizeIsmTexture(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel,
+        uint arrayIndex, const std::string& mode);
 
     // This function only supports getting the typed buffer data
     template <typename T>

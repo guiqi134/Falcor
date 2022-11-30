@@ -113,6 +113,7 @@ struct RTXDI_ReGIROnionParameters
 struct RTXDI_ResamplingRuntimeParameters
 {
     uint32_t firstLocalLight;
+    uint32_t firstPointLight;
     uint32_t numLocalLights;
     uint32_t firstInfiniteLight;
     uint32_t numInfiniteLights;

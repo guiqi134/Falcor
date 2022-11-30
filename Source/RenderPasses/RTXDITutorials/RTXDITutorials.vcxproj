@@ -25,13 +25,13 @@
     <Import Project="..\..\Falcor\Falcor.props" />
   </ImportGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\src\RTXDI.cpp" />
     <ClCompile Include="Combined\RTXDICombinedTutorial.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Common\RTXDITutorialBase.cpp" />
     <ClCompile Include="Common\RTXDITutorialConstants.cpp" />
     <ClCompile Include="RTXDITutorials.cpp" />
+    <ClCompile Include="rtxdi\RTXDI.cpp" />
     <ClCompile Include="Tutorial 1\RTXDITutorial1.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>
@@ -50,11 +50,13 @@
     <ClInclude Include="Combined\RTXDICombinedTutorial.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="Common\RtxdiParameters.h" />
     <ClInclude Include="Common\RTXDITutorialBase.h" />
     <ClInclude Include="Common\RTXDITutorialConstants.h" />
     <ClInclude Include="Common\RtxdiTypes.h" />
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
+    <ClInclude Include="rtxdi\RTXDI.h" />
+    <ClInclude Include="rtxdi\RtxdiParameters.h" />
+    <ClInclude Include="rtxdi\RtxdiTypes.h" />
     <ClInclude Include="Tutorial 1\RTXDITutorial1.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClInclude>
@@ -68,11 +70,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="Tutorial 5\RTXDITutorial5.h" />
-    <ShaderSource Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\ResamplingFunctions.hlsli">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
-    </ShaderSource>
     <ShaderSource Include="Shaders\BaselineSampling.slangh" />
-    <ClInclude Include="..\..\Externals\.packman\rtxdi\rtxdi-sdk\include\rtxdi\RTXDI.h" />
     <ShaderSource Include="Shaders\InlineShadowRay.slangh" />
     <ShaderSource Include="Shaders\RAB_LightInfo.slangh" />
     <ShaderSource Include="Shaders\RAB_LightSample.slangh" />

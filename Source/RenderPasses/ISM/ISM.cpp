@@ -74,6 +74,7 @@ ISM::ISM(const Dictionary& dict)
 
 ISM::SharedPtr ISM::create(RenderContext* pRenderContext, const Dictionary& dict)
 {
+    // Create a new pointer to manage an object
     SharedPtr pPass = SharedPtr(new ISM(dict));
     return pPass;
 }
@@ -90,12 +91,13 @@ RenderPassReflection ISM::reflect(const CompileData& compileData)
     reflector.addInput("vbuffer", "");
     reflector.addInput("mvec", "");
 
-    reflector.addOutput("color", "").format(ResourceFormat::RGBA32Float);;
+    reflector.addOutput("color", "").format(ResourceFormat::RGBA32Float);
+    reflector.addOutput("wireframe", "").format(ResourceFormat::RGBA32Float);
     // debug the ISM texture
-    reflector.addOutput("ism after push", "").texture2D(mIsmSize, mIsmSize).format(ResourceFormat::RGBA32Float);;
-    reflector.addOutput("ism after pull", "").texture2D(mIsmSize, mIsmSize).format(ResourceFormat::RGBA32Float);;
+    reflector.addOutput("ism after push", "").texture2D(mIsmSize, mIsmSize).format(ResourceFormat::RGBA32Float);
+    reflector.addOutput("ism after pull", "").texture2D(mIsmSize, mIsmSize).format(ResourceFormat::RGBA32Float);
 
-    reflector.addOutput("entireIsmTex", "").texture2D(mIsmTextureSize, mIsmTextureSize).format(ResourceFormat::RGBA32Float);;
+    reflector.addOutput("all ism", "").texture2D(mIsmTextureSize, mIsmSize * 1u).format(ResourceFormat::RGBA32Float);
     return reflector;
 }
 
@@ -123,27 +125,32 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
     }
 
     //auto clearColor = float4(float3(mpScene->getCamera()->getFarPlane()), 1.0f);
-    ismPass.pFbo->attachColorTarget(mpIsmTextureArray, 0, 0, 0, mIsmPerLight * mTotalLightsCount);
-    pRenderContext->clearTexture(mpIsmTextureArray.get(), float4(1.0f));
 
-    if (mDrawWireframe && mTotalLightsCount == 1)
+
+    // Use to debug tessellation
+    if (mDrawWireframe)
     {
-        mWireframePass.pState->setFbo(ismPass.pFbo);
+        mWireframePass.pFbo->attachColorTarget(renderData["wireframe"]->asTexture(), 0);
+        mWireframePass.pState->setFbo(mWireframePass.pFbo);
         mWireframePass.pState->setDepthStencilState(mpNoDepthDS);
         auto wireframeVars = mWireframePass.pVars->getRootVar();
         wireframeVars["PerFrameCB"]["gColor"] = float4(0, 1, 0, 1);
         wireframeVars["PerFrameCB"]["gLightID"] = uint(0);
         wireframeVars["PerFrameCB"]["gNearFarPlane"] = mLightNearFarPlane;
         wireframeVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
-        mpScene->rasterize(pRenderContext, mWireframePass.pState.get(), mWireframePass.pVars.get(), mpWireframeRS, mpWireframeRS);
+        mpScene->rasterize(pRenderContext, mWireframePass.pState.get(), mWireframePass.pVars.get(), mpWireframeRS, mpWireframeRS, false);
     }
 
-    pRenderContext->clearUAV(mpCounterBuffer->getUAV().get(), uint4(0));
+
 
     // This rasterization stage simplifies the scene into point representation (vs + hs + ds + gs)
     {
         GraphicsState::Viewport viewport(0.0f, 0.0f, (float)mIsmSize, (float)mIsmSize, 0.0f, 1.0f);
         ismPass.pState->setViewport(0, viewport);
+
+        pRenderContext->clearUAV(mpCounterBuffer->getUAV().get(), uint4(0));
+        ismPass.pFbo->attachColorTarget(mpIsmTextureArray, 0, 0, 0, mIsmPerLight * mTotalLightsCount);
+        pRenderContext->clearTexture(mpIsmTextureArray.get(), float4(1.0f));
 
         ismPass.pState->setFbo(ismPass.pFbo);
         auto pStagingDepthTexture = Texture::create2D(mIsmSize, mIsmSize, ResourceFormat::D32Float, mIsmPerLight * mTotalLightsCount, 1, nullptr, kDepthTexFlags);
@@ -173,7 +180,7 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
     // Get the max extend of the scene
     float3 sceneExtend = mpScene->getSceneBounds().extent();
     float maxExtend = std::max(std::max(sceneExtend.x, sceneExtend.y), sceneExtend.z);
-    float depthThreshold = 0.025f * (maxExtend - mLightNearFarPlane.x) / (mLightNearFarPlane.y - mLightNearFarPlane.x);
+    float depthThreshold = mSceneDepthThreasholdScale * (maxExtend - mLightNearFarPlane.x) / (mLightNearFarPlane.y - mLightNearFarPlane.x);
     if (mFrameIndex == 50) logInfo(std::format("Scene extend = ({}, {}, {}), depth threshold = {}", sceneExtend.x, sceneExtend.y, sceneExtend.z, depthThreshold));
 
     // Do pull pass on ISMs
@@ -215,7 +222,8 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
     }
 
     {
-        visualizeIsmTexture(mpIsmTextureArray, renderData["ism after pull"]->asTexture(), pRenderContext, mVisualizeMipLevel, mVisLightID);
+        visualizeIsmTexture(mIsmVisualizePass.pVisualizeSingle, mpIsmTextureArray, renderData["ism after pull"]->asTexture(), pRenderContext, mVisualizeMipLevel,
+            mVisLightID, "single");
     }
 
     // Do push pass on ISMs
@@ -234,6 +242,7 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
 
                 auto pushVars = mpIsmPushPass->getRootVar();
                 pushVars["PushCB"]["gPushMode"] = mIsmPushMode;
+                pushVars["PushCB"]["gDepthDiffThreshold"] = depthThreshold;
                 mpIsmPushPass->getVars()->setSrv(srcTexBindLoc, pSrc);
                 mpIsmPushPass->getVars()->setUav(dstTexBindLoc, pDst);
                 mpPixelDebug->prepareProgram(mpIsmPushPass->getProgram(), pushVars);
@@ -244,7 +253,10 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
 
     // Visualize ISM pass
     {
-        visualizeIsmTexture(mpIsmTextureArray, renderData["ism after push"]->asTexture(), pRenderContext, mVisualizeMipLevel, mVisLightID);
+        visualizeIsmTexture(mIsmVisualizePass.pVisualizeSingle, mpIsmTextureArray, renderData["ism after push"]->asTexture(), pRenderContext, mVisualizeMipLevel,
+            mVisLightID, "single");
+        visualizeIsmTexture(mIsmVisualizePass.pVisualizeAll, mpIsmTextureArray, renderData["all ism"]->asTexture(), pRenderContext, mVisualizeMipLevel,
+            mVisLightID, "all");
     }
 
     // Final shading
@@ -254,6 +266,8 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
         shadingVars["ShadingCB"]["gScreenSize"] = mScreenSize;
         shadingVars["ShadingCB"]["gLightNearFar"] = mLightNearFarPlane;
         shadingVars["ShadingCB"]["gLinearSampler"] = mpLinearSampler;
+        shadingVars["ShadingCB"]["gDepthBias"] = mDepthBias;
+        shadingVars["ShadingCB"]["gVisibilityMode"] = (uint)mVisibilityMode;
         shadingVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
         shadingVars["gIsmTextureArray"] = mpIsmTextureArray;
         shadingVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
@@ -262,8 +276,6 @@ void ISM::execute(RenderContext* pRenderContext, const RenderData& renderData)
         mpPixelDebug->prepareProgram(mpShadingPass->getProgram(), shadingVars);
         mpShadingPass->execute(pRenderContext, mScreenSize.x, mScreenSize.y);
     }
-
-
 
     // Print to debug
     if (false && mFrameIndex == 50)
@@ -293,18 +305,42 @@ void ISM::renderUI(Gui::Widgets& widget)
     mUpdateResources = widget.var("ISM Pull&Push Mip Levels", mIsmMipLevels);
     widget.var("ISM Push Mode", mIsmPushMode);
     mUpdateDefines = widget.var("ISM Scene Type", mIsmSceneType);
+    widget.var("Scene depth threshold scale", mSceneDepthThreasholdScale);
+    widget.var("Depth bias", mDepthBias);
     widget.var("Mip level to visualize", mVisualizeMipLevel);
     widget.var("Light's ISM to visualize", mVisLightID);
 
     mpPixelDebug->renderUI(widget);
 }
 
+bool ISM::onKeyEvent(const KeyboardEvent& keyEvent)
+{
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key1)
+    {
+        mVisibilityMode = VisibilityMode::ShadowRay;
+        return true;
+    }
+
+    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key2)
+    {
+        mVisibilityMode = VisibilityMode::ISM;
+        return true;
+    }
+
+    return false;
+}
+
 void ISM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     mpScene = pScene;
 
+    {
+        auto meshVao = mpScene->getMeshVao();
+        logInfo(std::format("index buffer format = {}, topology = {}, vb count = {}",
+            (uint)meshVao->getIndexBufferFormat(), (uint)meshVao->getPrimitiveTopology(), meshVao->getVertexBuffersCount()));
+    }
+
     auto pLightCollection = mpScene->getLightCollection(pRenderContext);
-    //mTotalLightsCount = (uint)pLightCollection->getMeshLights().size();
     mScreenSize = uint2(gpFramework->getTargetFbo()->getWidth(), gpFramework->getTargetFbo()->getHeight());
 
     // Get and count all the point lights
@@ -325,6 +361,7 @@ void ISM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene
     // Load wireframe pass shader
     {
         Program::Desc desc;
+        //desc.addShaderLibrary(kShaderDirectory + "Wireframe.3d.slang").vsEntry("vsMain").hsEntry("hsMain").dsEntry("dsMain").psEntry("psMain");
         desc.addShaderLibrary(kShaderDirectory + "Wireframe.3d.slang").vsEntry("vsMain").psEntry("psMain");
         mWireframePass.pProgram = GraphicsProgram::create(desc);
         mWireframePass.pProgram->addDefines(mpScene->getSceneDefines());
@@ -332,6 +369,7 @@ void ISM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene
         mWireframePass.pState = GraphicsState::create();
         mWireframePass.pState->setProgram(mWireframePass.pProgram);
         mWireframePass.pVars = GraphicsVars::create(mWireframePass.pProgram->getReflector());
+        mWireframePass.pFbo = Fbo::create();
     }
 
     // Load ISM shaders
@@ -339,7 +377,6 @@ void ISM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene
         Program::Desc desc;
         //desc.addShaderLibrary(kShaderDirectory + "ISM.3d.slang").vsEntry("vsMain").hsEntry("hsMain").dsEntry("dsMain").psEntry("psMain");
         desc.addShaderLibrary(kShaderDirectory + "ISM.3d.slang").vsEntry("vsMain").gsEntry("gsMain").psEntry("psMain");
-        //desc.addShaderLibrary(kShaderDirectory + "ISM.3d.slang").vsEntry("vsMain").psEntry("psMain");
         ismPass.pProgram = GraphicsProgram::create(desc);
         ismPass.pProgram->addDefines(mpScene->getSceneDefines());
         ismPass.pProgram->addDefine("GS_OUT_STREAM", std::to_string(mIsmSceneType));
@@ -376,7 +413,8 @@ void ISM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene
     Program::DefineList defines;
     mpIsmPullPass = createComputeShader("Pull.cs.slang", defines);
     mpIsmPushPass = createComputeShader("Push.cs.slang", defines);
-    mpIsmVisualizePass = createComputeShader("ISM_Visualize.cs.slang", defines);
+    mIsmVisualizePass.pVisualizeSingle = createComputeShader("ISM_Visualize.cs.slang", defines, "singleIsmCS");
+    mIsmVisualizePass.pVisualizeAll = createComputeShader("ISM_Visualize.cs.slang", defines, "allIsmCS");
     mpShadingPass = createComputeShader("Shading.cs.slang", defines, "main", true);
 
     // Create resources
@@ -450,26 +488,34 @@ void ISM::prepareLightShadowMapData()
         Buffer::CpuAccess::None, lightShadowDataList.data());
 }
 
-void ISM::visualizeIsmTexture(Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel, uint arrayIndex)
+void ISM::visualizeIsmTexture(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext,
+    uint mipLevel, uint arrayIndex, const std::string& mode)
 {
-    //auto pStagingTexIn = Texture::create2D(pSrcTexture->getWidth(), pSrcTexture->getHeight(), pSrcTexture->getFormat(), 1, 1, nullptr, kAutoMipBindFlags);
-    //pRenderContext->copySubresource(pStagingTexIn.get(), 0, pSrcTexture.get(), arrayIndex);
-
-    // Visualize single ISM
     uint2 nThreads = uint2(pSrcTexture->getWidth(), pSrcTexture->getHeight());
-    auto visualizeVars = mpIsmVisualizePass->getRootVar();
+
+    // Bind common shader variables
+    auto visualizeVars = pPass->getRootVar();
     visualizeVars["VisCB"]["gLightNear"] = mLightNearFarPlane.x;
     visualizeVars["VisCB"]["gLightFar"] = mLightNearFarPlane.y;
     visualizeVars["VisCB"]["gPointSampler"] = mpPointSampler;
-    visualizeVars["VisCB"]["gMipLevel"] = (float)mipLevel;
-    visualizeVars["VisCB"]["gArrayIndex"] = (float)arrayIndex;
-    visualizeVars["VisCB"]["gThreadDim"] = nThreads;
-    visualizeVars["VisCB"]["gPointSampler"] = mpPointSampler;
     visualizeVars["VisCB"]["gLinearSampler"] = mpLinearSampler;
+    visualizeVars["VisCB"]["gInputSize"] = nThreads;
     visualizeVars["gIsmInput"] = pSrcTexture;
-    visualizeVars["gSingleIsmOutput"] = pDstTexture;
-    mpPixelDebug->prepareProgram(mpIsmVisualizePass->getProgram(), visualizeVars);
-    mpIsmVisualizePass->execute(pRenderContext, nThreads.x, nThreads.y);
+    visualizeVars["gIsmOutput"] = pDstTexture;
 
-    // Combine all ISMs into one texture and visualize it
+    if (mode == "single")
+    {
+        visualizeVars["VisCB"]["gMipLevel"] = (float)mipLevel;
+        visualizeVars["VisCB"]["gArrayIndex"] = (float)arrayIndex;
+
+        mpPixelDebug->prepareProgram(mIsmVisualizePass.pVisualizeSingle->getProgram(), visualizeVars);
+        mIsmVisualizePass.pVisualizeSingle->execute(pRenderContext, nThreads.x, nThreads.y);
+    }
+    else
+    {
+        visualizeVars["VisCB"]["gOutputSize"] = uint2(pDstTexture->getWidth(), pDstTexture->getHeight());
+        mpPixelDebug->prepareProgram(mIsmVisualizePass.pVisualizeAll->getProgram(), visualizeVars);
+        mIsmVisualizePass.pVisualizeAll->execute(pRenderContext, nThreads.x, nThreads.y, pSrcTexture->getArraySize());
+    }
+
 }

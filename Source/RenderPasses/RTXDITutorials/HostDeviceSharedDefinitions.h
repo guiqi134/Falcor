@@ -6,19 +6,32 @@ BEGIN_NAMESPACE_FALCOR
 #include "Falcor.h"
 #endif
 
-struct LightMeshData
+struct LightShadowMapData
 {
     float3 centerPosW;
-    float4x4 viewProjMat[6]; // for point light
+    float2 nearFarPlane;
+    uint texArrayIndex;
     int startIndex;
     int shadowMapCount;
+    uint shadowMapType;
+    uint shadowMapSize;
+    bool isNewShadowMapLight;
+
+    float4x4 viewProjMat[6]; // for prespective projection
+    float4x4 viewMats[2]; // for paraboloid projection
 };
 
-enum class ShadowEvaluateOption : uint
+// How each pixel's visibility is evaluted? 
+enum class Visibility : uint
 {
-    ShadowMap = 0,
-    FullyLit = 1,
-    ShadowRay = 2,
+    AllShadowRay = 0,
+    ShadowMap_FullyLit = 1,
+    ShadowMap_ISM = 2,
+    AllISM = 3,
+
+    BaselineSM = 4,
+
+    Experiment = 5
 };
 
 END_NAMESPACE_FALCOR

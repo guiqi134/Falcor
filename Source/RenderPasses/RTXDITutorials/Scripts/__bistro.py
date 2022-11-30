@@ -4,8 +4,8 @@ scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 # scene = 'Arcade/Arcade.pyscene'
 
 currentTime = 0.0
-paused = True
-animateCamera = False
+paused = False
+animateCamera = True
 
 restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
 
@@ -31,6 +31,12 @@ def graph_ImportanceResampling():
         "envEmissiveScale" : 1.0,
         "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
+        "ismDepthBias" : 0.01,
+        "ismMipLevels" : 3,
+        "ismPushMode" : 1,
+        "smDepthBias" : 0.000050,
+        "baseTriangleSize" : 0.1,
+        "adaptiveLightNear" : True,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -41,7 +47,7 @@ def graph_ImportanceResampling():
         'enabled': False,
     }
 
-    # Create a renderer (i.e., graph) containing a number of render passes 
+    # Create a renderer (i.e., graph) containing a number of render passes
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
     tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
     tracer.addPass(createPass(restirPassName, gResamplingParams), "RTXDI Tutorials")
@@ -72,6 +78,7 @@ m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
 m.scene.cameraSpeed = 5
+m.scene.camera.focalLength = 35.0
 m.scene.animated = False
 
 # Add some view points

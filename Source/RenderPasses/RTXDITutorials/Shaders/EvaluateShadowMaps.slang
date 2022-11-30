@@ -1,6 +1,8 @@
-import Utils.Debug.PixelDebug;
-
 #include "../HostDeviceSharedDefinitions.h"
+
+import Scene.Scene;
+import Utils.Debug.PixelDebug;
+import ISMHelpers;
 
 // Reference: https://github.com/TheRealMJP/BakingLab/blob/1a043117506ac5b5bcade5c86d808485f3c70b12/SampleFramework11/v1.02/Graphics/Textures.h#L124
 uint getFaceIndex(float3 direction)
@@ -46,7 +48,7 @@ uint getFaceIndex(float3 direction)
     return faceIdx;
 }
 
-bool evaluateShadowMaps(float3 posW, float3 normalW, LightMeshData lightData, const Texture2DArray<float> shadowMaps, SamplerState linearSampler, float bias,
+bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> shadowMaps, SamplerState linearSampler, float bias,
     uint visMode = 1, uint offset = 0)
 {
     // Check the shading is in which face
@@ -71,3 +73,56 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightMeshData lightData, co
 
     return shadowMapDepth < projCoord.z ? false : true;
 }
+
+bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> ismTextureArray, SamplerState linearSampler, float bias)
+{
+    float2 lightNearFar = lightData.nearFarPlane;
+
+    // Check the shading is in which hemisphere
+    float3 lightPosW = lightData.centerPosW;
+    int direction = sign(lightPosW.y - posW.y);
+    uint ismOffset = direction == 1 ? 0 : 1;
+
+    // Compute depth bias
+    float3 L = normalize(lightPosW - posW);
+    float NdotL = dot(normalW, L);
+    float depthBias = bias * saturate(1.0 - NdotL) + bias;
+
+    // Paraboloid project shading point
+    float4x4 viewMat = lightData.viewMats[ismOffset];
+    float3 shadingPosLightView = mul(float4(posW, 1.0f), viewMat).xyz;
+    float3 shadingPosLightNdc = paraboloidProjection(shadingPosLightView, lightNearFar.x, lightNearFar.y);
+    float3 projCoord = float3(shadingPosLightNdc.xy * float2(0.5f, -0.5f) + 0.5f, shadingPosLightNdc.z - depthBias);
+
+    print("ismOffset = ", ismOffset);
+    print("projCoord = ", projCoord);
+
+    // Sample the target face's shadow map
+    float shadowMapDepth = ismTextureArray.SampleLevel(linearSampler, float3(projCoord.xy, lightData.startIndex + ismOffset), 0);
+
+    return shadowMapDepth < projCoord.z ? false : true;
+}
+
+
+// Help functions for our method
+
+// Given the reservoir's (triangle) light index, map it to mesh light or point light index
+int toLocalLightIndex(uint reservoirLightIdx, uint totalLigthMeshCount, uint firstPointLight, uint environmentLightIndex)
+{
+    int lightID = -1;
+    if (reservoirLightIdx < firstPointLight)
+    {
+        // Get the light mesh ID based on triangle index
+        uint triIndex = reservoirLightIdx;
+        lightID = (int)gScene.lightCollection.getLightIdx(triIndex);
+    }
+    else if (reservoirLightIdx < environmentLightIndex)
+    {
+        uint pointLightIndex = reservoirLightIdx - firstPointLight;
+        lightID = int(totalLigthMeshCount + pointLightIndex);
+    }
+
+    return lightID;
+}
+
+

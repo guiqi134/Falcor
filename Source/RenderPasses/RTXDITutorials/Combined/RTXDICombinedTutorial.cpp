@@ -103,7 +103,7 @@ void RTXDICombinedTutorial::execute(RenderContext* pRenderContext, const RenderD
     }
 
     // Output unique light statistics
-    computeUniqueLightSamples(pRenderContext, renderData);
+    //computeUniqueLightSamples(pRenderContext, renderData);
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
