@@ -141,7 +141,6 @@ __exported import EvaluateShadowMaps;
 cbuffer SharedCB
 {
     uint gLightMeshTopN;
-    uint gVisMode;
     bool gCollectingData;
     bool gShadowRayForRestPixels;
     SamplerState gLinearSampler;
@@ -150,33 +149,31 @@ cbuffer SharedCB
     uint2 gScreenSize;
     uint gTotalLightMeshCount;
     uint gSortingRules;
+    uint gDepthBiasMode;
+    float gConstEpsilon;
+
+    uint gDebugLightMeshID;
+    bool gDebugLight;
 }
 
 RWBuffer<int> gPrevLightSelectionBuffer;
 Buffer<uint2> gSortedLightsBuffer;
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
-Texture2DArray<float> gReusingShadowMaps;
 Texture2DArray<float> gISMs;
 RWBuffer<uint> gShadowOptionsBuffer;
 RWBuffer<uint> gShadowMapSizeBuffer;
 
-// TODO: is it possible change all this to array of different textures?
+// All lights' shadow maps
 Texture2DArray<float> gSortedLightsShadowMaps[TOTAL_LIGHTS];
-
-Texture2DArray<float> gReusingShadowMaps32[2];
-Texture2DArray<float> gReusingShadowMaps64[2];
-Texture2DArray<float> gReusingShadowMaps128[2];
-Texture2DArray<float> gReusingShadowMaps256[2];
-Texture2DArray<float> gReusingShadowMaps512[2];
-Texture2DArray<float> gReusingShadowMaps1024[3];
 
 
 // Global evaluate visiblity functions for two stages in RTXDI
-bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample)
+bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode)
 {
     bool isVisible = true;
 
     LightShadowMapData lightData = gLightShadowDataBuffer[localLightID];
+    // lightData = gLightShadowDataBuffer[115];
 
     // Get surface data
     float3 posW = RAB_GetSurfaceWorldPos(surface);
@@ -196,7 +193,7 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
         // light has shadow map? ...
         if (lightData.shadowMapType == 1)
         {
-            isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps, gLinearSampler, gSmDepthBias);
+            isVisible = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightData.ranking], gLinearSampler, gSmDepthBias, gDepthBiasMode, gConstEpsilon);
             gShadowOptionsBuffer[bufferIndex] = 2;
         }
         else
@@ -219,36 +216,6 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
     {
         isVisible = evaluateISM(posW, normalW, lightData, gISMs, gLinearSampler, gIsmDepthBias);
         gShadowOptionsBuffer[bufferIndex] = 3;
-    }
-    else if (gVisMode == (uint)Visibility::Experiment)
-    {
-        if (true || lightData.shadowMapType == 1)
-        {
-            if (lightData.shadowMapSize == 1024)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps1024[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 512)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps512[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 256)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps256[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 128)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps128[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 64)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps64[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-            else if (lightData.shadowMapSize == 32)
-            {
-                isVisible = evaluateShadowMaps(posW, normalW, lightData, gReusingShadowMaps32[lightData.texArrayIndex], gLinearSampler, gSmDepthBias);
-            }
-        }
     }
 
     return isVisible;

@@ -230,7 +230,7 @@ protected:
     enum class ISMSceneType { Triangle, ThreePoints, CenterPoint };
     enum class ISMPushSamplingMode { Point, Interpolation };
 
-    Visibility mVisibility = Visibility::Experiment;
+    Visibility mVisibility = Visibility::ShadowMap_ISM;
     UpdateFlags mUpdates = UpdateFlags::None;
     GpuFence::SharedPtr mpFence;
     Sampler::SharedPtr mpPointSampler;
@@ -245,16 +245,25 @@ protected:
     bool mShadingVisibility = true;
     bool mDrawWireframe = false;
     bool mAdaptiveLightNearPlane = false;
-    bool mFullSizeShadowMaps = true; // Experiment part
+    bool mFullSizeShadowMaps = true;
+    bool mAdaptiveISM = false;
+    bool mOnlyUseIsmForTesting = false;
 
     // Below are the parameters for debugging
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
     bool mDebugLight = false;
-    bool mGetDataFromGPU = false;
     uint mDebugLightMeshID = 0u;
     uint mVisualizeMipLevel = 0;
-    uint mVisLightID = 0;
+    uint2 mVisLightFaceID = uint2(0);
+
+    struct 
+    {
+        bool getShadowMapSizeData = false;
+        bool getSortingData = false;
+        bool getIsmData = false;
+        bool getConverageData = false;
+    } mGpuDataToGet;
 
     // Below are the light infos  
     uint mTotalLightMeshCount = 0u;
@@ -269,8 +278,10 @@ protected:
     uint mCurrFrameLightStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
     float mSmDepthBias = 1e-6f;
+    float mConstEpsilonForAdaptiveDepthBias = 0;
     uint mUpdatingFrequency = 1u;
     uint mSortingRules = (uint)SortingRules::AllPixels;
+    uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;
@@ -282,18 +293,22 @@ protected:
     float mSceneDepthThresholdScale = 0.01f;
     float mDepthThreshold = 0.0f;
     float mBaseTriSize = 0.01f;
+    uint mIsmLightSamplingMode = 0u;
     uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
     uint mIsmSceneType = (uint)ISMSceneType::ThreePoints;
 
+    // Global resources
     Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights
     Buffer::SharedPtr mpPrevLightSelectionBuffer;
     Buffer::SharedPtr mpLightHistogramBuffer;
     Buffer::SharedPtr mpSortedLightsBuffer;
     Buffer::SharedPtr mpTotalValidPixels;
+    Buffer::SharedPtr mpLightPdfBuffer;
+    Buffer::SharedPtr mpLightCdfBuffer;
 
     // Temporal resuing shadow map resources
     Buffer::SharedPtr mpReusingLightIndexBuffer;
-    Texture::SharedPtr mpReusingShadowMapsTexture; // TODO: use vector to store multiple texture arrays to hold all lights SM (in Emerald Scene)
+    //Texture::SharedPtr mpReusingShadowMapsTexture; // TODO: use vector to store multiple texture arrays to hold all lights SM (in Emerald Scene)
 
     // ISM resources
     Texture::SharedPtr mpIsmTextureArray; // Max lights = 1024
@@ -304,7 +319,7 @@ protected:
 
     // Experiments with different shadow map resolutions
     //std::vector<Texture::SharedPtr> mReusingSmTextureArrays; // 32, 64, 128, 256, 512, 1024 (max = 172 lights)
-    std::map<uint, std::vector<Texture::SharedPtr>> mReusingSmTextureArrays;
+    //std::map<uint, std::vector<Texture::SharedPtr>> mReusingSmTextureArrays;
 
     std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
 
@@ -341,6 +356,9 @@ protected:
 
     /** ISM passes
     */
+    ComputePass::SharedPtr mpBuildPDF;
+    ComputePass::SharedPtr mpBuildCDF;
+
     struct
     {
         GraphicsProgram::SharedPtr pProgram;
@@ -348,7 +366,7 @@ protected:
         //GraphicsStateObject::SharedPtr pGSO;
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
-    } mIsmPass;
+    } mIsmRenderPass;
 
     // TODO: using CS to render ISMs
     struct
@@ -376,12 +394,15 @@ protected:
     {
         std::vector<float> shadowOptionsCoverage1;
         std::vector<float> shadowOptionsCoverage2;
+
         std::vector<uint> extraPointsCount;
         uint totalExtraPoints;
+
+        std::string sortedLightIndexArray;
         std::string reusingLightIndexArray;
         std::string ismLightIndexArray;
+
         std::string shadowMapSizeCount;
-        uint4 memoryUsage;
         uint64_t totalShadowTexSize;
     } mValuesToPrint;
 
@@ -469,7 +490,7 @@ protected:
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
     ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint = "main", bool hasScene = false);
     void visualizeShadowMapTex(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel,
-        uint arrayIndex, const std::string& mode);
+        uint2 lightFaceIdx, const std::string& mode);
 
     /** Some ISM functions
     */

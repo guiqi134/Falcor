@@ -35,6 +35,7 @@
 cbuffer SampleCB
 {
     uint gReservoirIndex; // Which of our reservoirs should we use for output?
+    uint gVisMode;
 }
 
 
@@ -70,7 +71,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
         int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex); // mesh light + point light
         uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
 
-        bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample);
+        if (gDebugLight) localLightID = (int)gDebugLightMeshID;
+
+        bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
 
         if (!isVisible)
         {

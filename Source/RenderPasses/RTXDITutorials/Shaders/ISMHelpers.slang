@@ -17,6 +17,9 @@ float3 paraboloidProjection(float3 pointLightView, float near, float far)
     return pos;
 }
 
+
+// TODO: remove all codes below
+
 float3 paraboloidProjection2(float3 pointLightView, float zFar, bool preserveSign)
 {
     float3 v = pointLightView;

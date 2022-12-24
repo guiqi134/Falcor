@@ -63,9 +63,9 @@ namespace
     const uint kShadowMapsPerLight = 6u;
 
     // These should be evenly divisble by mLightTopN.
-    const uint kMaxLightsPerTexArray = 340u;
-    const uint kMaxLightsPerTexArray1024 = 168u;
-    const uint kMaxSupportedLights1024 = 336;
+    //const uint kMaxLightsPerTexArray = 340u;
+    //const uint kMaxLightsPerTexArray1024 = 168u;
+    //const uint kMaxSupportedLights1024 = 336;
 
     const uint kMaxIsmCount = 1024;
 
@@ -181,26 +181,16 @@ void RTXDITutorialBase::execute(RenderContext* pRenderContext, const RenderData&
         dict[Falcor::kRenderPassRefreshFlags] = flags;
 
         // Update parameters
-        uint totalIsmLights = mVisibility == Visibility::ShadowMap_ISM ? mTotalLightsCount - (mLightTopN * mTemporalReusingLength) : mTotalLightsCount;
-        mTotalIsmCount = std::min(kMaxIsmCount, mIsmPerLight * totalIsmLights);
-        mTotalIsmCount += 1; // a dummy ism to hold points go to non-ism lights
-
+        //uint totalIsmLights = mVisibility == Visibility::ShadowMap_ISM ? mTotalLightsCount - (mLightTopN * mTemporalReusingLength) : mTotalLightsCount;
+        mTotalIsmCount = std::min(kMaxIsmCount, mTotalLightsCount * mIsmPerLight);
         mCurrFrameLightStartIdx = 0;
         mRtxdiFrameParams.frameIndex = 0;
 
         // Update all resources
-        if (mVisibility != Visibility::Experiment)
-        {
-            mpReusingShadowMapsTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::R32Float, kShadowMapsPerLight * mLightTopN * mTemporalReusingLength,
-                1, nullptr, kAutoMipBindFlags);
-            mpReusingLightIndexBuffer = Buffer::createTyped<uint>(mLightTopN * mTemporalReusingLength, kBufferBindFlags, Buffer::CpuAccess::Read);
-            mpIsmTextureArray = Texture::create2D(mIsmSize, mIsmSize, ResourceFormat::R32Float, mTotalIsmCount, mIsmMipLevels, nullptr, kAutoMipBindFlags);
-            pRenderContext->clearUAV(mpReusingLightIndexBuffer->getUAV().get(), uint4(-1));
-        }
-        else
-        {
-            allocateShadowTextureArrays();
-        }
+        mpReusingLightIndexBuffer = Buffer::createTyped<uint>(mLightTopN * mTemporalReusingLength, kBufferBindFlags, Buffer::CpuAccess::Read);
+        pRenderContext->clearUAV(mpReusingLightIndexBuffer->getUAV().get(), uint4(-1));
+        mpIsmTextureArray = Texture::create2D(mIsmSize, mIsmSize, ResourceFormat::R32Float, mTotalIsmCount, mIsmMipLevels, nullptr, kAutoMipBindFlags);
+        allocateShadowTextureArrays();
 
         // Clear light mesh data buffer. TODO: use computer shader to clear
         prepareLightShadowMapData();
@@ -217,7 +207,7 @@ void RTXDITutorialBase::execute(RenderContext* pRenderContext, const RenderData&
 
     if (bool(mUpdates & UpdateFlags::ShaderDefinesChanged))
     {
-        mIsmPass.pProgram->addDefine("GS_OUT_STREAM", std::to_string(mIsmSceneType));
+        mIsmRenderPass.pProgram->addDefine("GS_OUT_STREAM", std::to_string(mIsmSceneType));
     }
 
     mUpdates = UpdateFlags::None;
@@ -240,18 +230,23 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     Gui::DropdownList sortingRules = {
         {0, "All Pixels"}, {1, "Occluded Pixels"}, {2, "Shadow Edge Pixels"}
     };
+    Gui::DropdownList depthBiasMode = {
+        {0, "Constant"}, {1, "Slope Scale"}, {2, "Dou2014"}
+    };
 
     // Global parameters
     widget.dropdown("Adaptive Shadow Map Size Heuristic", sortingRules, mSortingRules);
+    widget.dropdown("Shadow Depth Bias Mode", depthBiasMode, mShadowDepthBias);
     resourcesChanged |= widget.var("Number of Top N light meshes", mLightTopN);
     resourcesChanged |= widget.var("Temporal Reusing Length", mTemporalReusingLength);
     widget.var("Updating Frequency (in frames)", mUpdatingFrequency);
     widget.var("Cubic Shadow Map Depth Bias", mSmDepthBias);
     widget.var("Debug Light Mesh ID", mDebugLightMeshID);
+    widget.checkbox("Adaptive ISM", mAdaptiveISM);
+    widget.checkbox("Only Use ISM for Testing Candidates?", mOnlyUseIsmForTesting);
     widget.checkbox("Enable Debug Light?", mDebugLight);
-    widget.checkbox("Full Size Shadow Maps?", mFullSizeShadowMaps);
-    widget.checkbox("Get GPU Data?", mGetDataFromGPU);
 
+    widget.checkbox("Full Size Shadow Maps?", mFullSizeShadowMaps);
     resourcesChanged |= widget.var("Light Near and Far Plane", mLightNearFarPlane);
     widget.checkbox("Enable Shadow Ray?", mShadowRayForRestPixels);
     widget.checkbox("Final Shading Visibility?", mShadingVisibility);
@@ -260,6 +255,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
 
     // ISM parameters
     Gui::Group ismParams(widget.gui(), "ISM Parameters", true);
+    ismParams.var("ISM Light Sampling Mode", mIsmLightSamplingMode);
     ismParams.var("ISM Depth Bias", mIsmDepthBias);
     resourcesChanged |= ismParams.var("ISM Pull&Push Mip Levels", mIsmMipLevels);
     ismParams.dropdown("ISM Push Mode", ismPushModes, mIsmPushMode);
@@ -269,8 +265,16 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     ismParams.var("Base Triangle Size", mBaseTriSize);
 
     ismParams.var("Mip level to visualize", mVisualizeMipLevel);
-    ismParams.var("Light's ISM to visualize", mVisLightID);
+    ismParams.var("Light's ISM to visualize", mVisLightFaceID);
     ismParams.release();
+
+    // GPU data
+    Gui::Group gpuData(widget.gui(), "Print GPU Data", true);
+    gpuData.checkbox("Get Shadow Map Size Data?", mGpuDataToGet.getShadowMapSizeData);
+    gpuData.checkbox("Get Light Sorting Data?", mGpuDataToGet.getSortingData);
+    gpuData.checkbox("Get ISM Data?", mGpuDataToGet.getIsmData);
+    gpuData.checkbox("Get Converage Data?", mGpuDataToGet.getConverageData);
+    gpuData.release();
 
 
     // TODO: use string stream to output
@@ -281,30 +285,31 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     printValues.text(std::format("Total mesh lights: {}, Total point lights: {}", mTotalLightMeshCount, mTotalPointLightsCount));
     printValues.text(std::format("Total ISM Count: {}", mTotalIsmCount));
     printValues.text(std::format("Reusing shadow maps count: {}", mLightTopN * mTemporalReusingLength * kShadowMapsPerLight));
-    if (mVisibility != Visibility::Experiment)
-        printValues.text(std::format("Reusing texture array memory: {}", formatByteSize(mpReusingShadowMapsTexture->getTextureSizeInBytes())));
+    printValues.text(std::format("Total shadow map textures size: {}", formatByteSize(mValuesToPrint.totalShadowTexSize)));
     printValues.text(std::format("ISM texture array memory: {}", formatByteSize(mpIsmTextureArray->getTextureSizeInBytes())));
 
-    if (mVisibility == Visibility::Experiment)
+    if (mGpuDataToGet.getShadowMapSizeData)
     {
         printValues.text("");
-        printValues.text(std::format("Total shadow map textures size: {}", formatByteSize(mValuesToPrint.totalShadowTexSize)));
-        printValues.text(std::format("Total size using 1024 size shadow maps: {}", formatByteSize(mValuesToPrint.memoryUsage.x)));
-        printValues.text(std::format("Total size in our method (1024 + 128): {}", formatByteSize(mValuesToPrint.memoryUsage.y)));
-        printValues.text(std::format("Total size using adaptive size shadow maps: {}", formatByteSize(mValuesToPrint.memoryUsage.z)));
         printValues.text(mValuesToPrint.shadowMapSizeCount);
     }
 
-
-    if (mGetDataFromGPU)
+    if (mGpuDataToGet.getIsmData)
     {
         printValues.text("");
         printValues.text(std::format("Total Extra points generated for ISM: {}", mValuesToPrint.totalExtraPoints));
+    }
 
+    if (mGpuDataToGet.getSortingData)
+    {
         printValues.text("");
+        printValues.text(std::format("Sorted light index buffer each frame: \n[{}]", mValuesToPrint.sortedLightIndexArray));
         printValues.text(std::format("Reusing light index buffer: \n[{}]", mValuesToPrint.reusingLightIndexArray));
         printValues.text(std::format("ISM light index buffer: \n[{}]", mValuesToPrint.ismLightIndexArray));
+    }
 
+    if (mGpuDataToGet.getConverageData)
+    {
         printValues.text("");
         printValues.text("In test candidate visiblity pass");
         printValues.text(std::format("Invalid pixel coverage: {:.3f}", mValuesToPrint.shadowOptionsCoverage1[0]));
@@ -321,6 +326,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
         printValues.text(std::format("ISM pixel coverage: {:.3f}", mValuesToPrint.shadowOptionsCoverage2[3]));
         printValues.text(std::format("Shadow ray pixel coverage: {:.3f}", mValuesToPrint.shadowOptionsCoverage2[4]));
     }
+
     printValues.release();
 
     mpPixelDebug->renderUI(widget);
@@ -390,9 +396,7 @@ void RTXDITutorialBase::setScene(RenderContext* pContext, const Scene::SharedPtr
         mLightTopN = std::min(mLightTopN, mTotalLightsCount);
 
         // Compute the total ISMs
-        uint totalIsmLights = mVisibility == Visibility::ShadowMap_ISM ? mTotalLightsCount - (mLightTopN * mTemporalReusingLength) : mTotalLightsCount;
-        mTotalIsmCount = std::min(kMaxIsmCount, mIsmPerLight * totalIsmLights);
-        mTotalIsmCount += 1; // a dummy ism to hold points go to non-ism lights
+        mTotalIsmCount = std::min(kMaxIsmCount, mIsmPerLight * mTotalLightsCount);
 
         // Create emissive light sampler
         //mpEmissiveSampler = EmissivePowerSampler::create(pContext, pScene);
@@ -403,13 +407,11 @@ void RTXDITutorialBase::setScene(RenderContext* pContext, const Scene::SharedPtr
         float maxExtend = std::max(std::max(sceneExtend.x, sceneExtend.y), sceneExtend.z);
         mLightNearFarPlane.y = std::min(mLightNearFarPlane.y, maxExtend);
         mDepthThreshold = mSceneDepthThresholdScale * (maxExtend - mLightNearFarPlane.x) / (mLightNearFarPlane.y - mLightNearFarPlane.x);
+        mConstEpsilonForAdaptiveDepthBias = glm::length(sceneExtend) * 0.0001f;
         //if (mRtxdiFrameParams.frameIndex == 50)
         //    logInfo(std::format("Scene extend = ({}, {}, {}), depth threshold = {}", sceneExtend.x, sceneExtend.y, sceneExtend.z, depthThreshold));
 
-        mLightTopN = mVisibility == Visibility::Experiment ? 2 : mLightTopN;
-        mTemporalReusingLength = mVisibility == Visibility::Experiment ? mTotalLightsCount / mLightTopN : mTemporalReusingLength;
-
-        mSortedLightsShadowMaps.resize(mTotalLightsCount);
+        mSortedLightsShadowMaps.resize(mLightTopN * mTemporalReusingLength);
 
 
         if (mPassData.scene->getMeshCount() <= 1 << 16)
@@ -448,13 +450,6 @@ bool RTXDITutorialBase::onKeyEvent(const KeyboardEvent& keyEvent)
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key4)
     {
         mVisibility = Visibility::AllISM;
-        mUpdates |= UpdateFlags::VisibilityChanged;
-        return true;
-    }
-
-    if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::Key5)
-    {
-        mVisibility = Visibility::Experiment;
         mUpdates |= UpdateFlags::VisibilityChanged;
         return true;
     }
@@ -675,7 +670,6 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
 
     // Shared shader parameters. TODO: separate this into another function
     vars["SharedCB"]["gLightMeshTopN"] = mLightTopN;
-    vars["SharedCB"]["gVisMode"] = mTurnOffShadowRay == false ? 0 : uint(mVisibility);
     vars["SharedCB"]["gCollectingData"] = mEnableStatistics;
     vars["SharedCB"]["gLinearSampler"] = mpLinearSampler;
     vars["SharedCB"]["gSmDepthBias"] = mSmDepthBias;
@@ -684,64 +678,36 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     vars["SharedCB"]["gScreenSize"] = mPassData.screenSize;
     vars["SharedCB"]["gTotalLightMeshCount"] = mTotalLightMeshCount;
     vars["SharedCB"]["gSortingRules"] = mSortingRules;
+    vars["SharedCB"]["gDepthBiasMode"] = mShadowDepthBias;
+    vars["SharedCB"]["gConstEpsilon"] = mConstEpsilonForAdaptiveDepthBias;
+    vars["SharedCB"]["gDebugLightMeshID"] = mDebugLightMeshID;
+    vars["SharedCB"]["gDebugLight"] = mDebugLight;
 
     vars["gPrevLightSelectionBuffer"] = mpPrevLightSelectionBuffer;
     vars["gSortedLightsBuffer"] = mpSortedLightsBuffer;
     vars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
-    vars["gReusingShadowMaps"] = mpReusingShadowMapsTexture;
     vars["gISMs"] = mpIsmTextureArray;
     vars["gShadowOptionsBuffer"] = mpShadowOptionsBuffer;
 
-    for (auto it = mReusingSmTextureArrays.begin(); it != mReusingSmTextureArrays.end(); it++)
+    for (uint i = 0; i < mLightTopN * mTemporalReusingLength; i++)
     {
-        for (uint i = 0; i < it->second.size(); i++)
-        {
-            std::string shaderVarName = std::format("gReusingShadowMaps{}", it->first);
-            vars[shaderVarName][i] = it->second[i];
-        }
+        vars["gSortedLightsShadowMaps"][i] = mSortedLightsShadowMaps[i];
     }
 }
 
 void RTXDITutorialBase::allocateShadowTextureArrays()
 {
-    mValuesToPrint.totalShadowTexSize = 0;
+    // Create shadow map texture array for each light.
+    uint totalShadowMapLights = mLightTopN * mTemporalReusingLength;
+    uint maxSupportedLights1024 = std::min(totalShadowMapLights, kMaxSupportedLights1024);
+    mSortedLightsShadowMaps.resize(totalShadowMapLights);
 
-    // TODO: Create shadow map texture array for each light.
-    uint maxSupportedLights1024 = mFullSizeShadowMaps ? kMaxSupportedLights1024 : 16;
-    for (uint i = 0; i < mTotalLightsCount; i++)
+    for (uint i = 0; i < totalShadowMapLights; i++)
     {
         uint shadowMapSize = i < maxSupportedLights1024 ? 1024 : 512;
         uint mipLevels = (uint)log2(shadowMapSize / 32) + 1u;
         auto pTextureArray = Texture::create2D(shadowMapSize, shadowMapSize, ResourceFormat::R32Float, kShadowMapsPerLight, mipLevels, nullptr, kAutoMipBindFlags);
         mSortedLightsShadowMaps[i] = pTextureArray;
-    }
-
-    // Compute the number of texture arrays for each shadow map size
-    for (uint i = 0; i < 6; i++)
-    {
-        uint shadowMapSize = (uint)pow(2, 5 + i);
-        uint maxLightsPerTexArray = shadowMapSize != 1024 ? kMaxLightsPerTexArray : kMaxLightsPerTexArray1024;
-        uint numTextureArrays = mTotalLightsCount / (maxLightsPerTexArray + 1) + 1;
-        uint lastArrayLights = mTotalLightsCount % (maxLightsPerTexArray + 1) + 1;
-
-        if (mSceneName == 2 && shadowMapSize == 1024)
-        {
-            numTextureArrays = 2;
-            lastArrayLights = kMaxLightsPerTexArray1024;
-        }
-
-        logInfo(std::format("Shadow Map size = {}, number of texture arrays = {}, lastArrayLights = {}", shadowMapSize, numTextureArrays, lastArrayLights));
-
-        for (uint j = 0; j < numTextureArrays; j++)
-        {
-            uint arraySize = j != numTextureArrays - 1 ? maxLightsPerTexArray * kShadowMapsPerLight : lastArrayLights * kShadowMapsPerLight;
-
-            auto pTextureArray = Texture::create2D(shadowMapSize, shadowMapSize, ResourceFormat::R32Float, arraySize, 1, nullptr, kAutoMipBindFlags);
-            mReusingSmTextureArrays[shadowMapSize].push_back(pTextureArray);
-
-            mValuesToPrint.totalShadowTexSize += pTextureArray->getTextureSizeInBytes();
-            logInfo(std::format("Memory size for now = {}", formatByteSize(mValuesToPrint.totalShadowTexSize)));
-        }
     }
 }
 
@@ -830,33 +796,29 @@ bool RTXDITutorialBase::allocateRtxdiResrouces(RenderContext* pContext, const Re
     mpPrevLightSelectionBuffer = Buffer::createTyped<int>(mPassData.screenSize.x * mPassData.screenSize.y, kBufferBindFlags);
     mpLightHistogramBuffer = Buffer::createTyped<uint>(mTotalLightsCount, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpSortedLightsBuffer = Buffer::createTyped<uint2>(mTotalLightsCount, kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpTotalValidPixels = Buffer::createTyped<uint>(1, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpTotalValidPixels = Buffer::createTyped<uint>(4, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpReusingLightIndexBuffer = Buffer::createTyped<uint>(mLightTopN * mTemporalReusingLength, kBufferBindFlags, Buffer::CpuAccess::Read);
     pContext->clearUAV(mpReusingLightIndexBuffer->getUAV().get(), uint4(-1));
 
-    if (mVisibility != Visibility::Experiment)
-    {
-        uint reusingArraySize = std::min(kMaxLightsPerTexArray1024 * kShadowMapsPerLight, kShadowMapsPerLight * mLightTopN * mTemporalReusingLength);
-        mpReusingShadowMapsTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::R32Float, reusingArraySize, 1, nullptr, kAutoMipBindFlags);
-    }
+    mpLightPdfBuffer = Buffer::createTyped<float>(mTotalLightsCount, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpLightCdfBuffer = Buffer::createTyped<float>(mTotalLightsCount + 1, kBufferBindFlags, Buffer::CpuAccess::Read);
 
     // ISM resources
     auto totalTriangleCount = mPassData.scene->getSceneStats().instancedTriangleCount;
     mpIsmTextureArray = Texture::create2D(mIsmSize, mIsmSize, ResourceFormat::R32Float, mTotalIsmCount, mIsmMipLevels, nullptr, kAutoMipBindFlags);
     mpIsmTexture = Texture::create2D(mIsmVisTextureSize, mIsmVisTextureSize, ResourceFormat::R32Float, 1, 1, nullptr, kAutoMipBindFlags);
     mpPointsBuffer = Buffer::createTyped<float4>((uint32_t)std::min((uint64_t)Buffer::kMaxPossible, totalTriangleCount), kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpCounterBuffer = Buffer::createTyped<uint>(1, kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpIsmLightIndexBuffer = Buffer::createTyped<uint>((mTotalIsmCount - 1) / mIsmPerLight, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpCounterBuffer = Buffer::createTyped<uint>(mTotalLightsCount, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpIsmLightIndexBuffer = Buffer::createTyped<uint>(mTotalIsmCount / mIsmPerLight, kBufferBindFlags, Buffer::CpuAccess::Read);
 
     logInfo(std::format("totalTriangleCount = {}, totalVertexCount = {}", totalTriangleCount, mPassData.scene->getSceneStats().instancedVertexCount));
 
     // Different shadow map size from 32 - 512
-    if (mVisibility == Visibility::Experiment)
-        allocateShadowTextureArrays();
+    allocateShadowTextureArrays();
 
     // Recording data resources
     mpShadowOptionsBuffer = Buffer::createTyped<uint>(mPassData.screenSize.x * mPassData.screenSize.y, kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpExtraPointsCountBuffer = Buffer::createTyped<uint>(33, kBufferBindFlags, Buffer::CpuAccess::Read);
+    mpExtraPointsCountBuffer = Buffer::createTyped<uint>(100, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpShadowMapSizeBuffer = Buffer::createTyped<uint>(6, kBufferBindFlags, Buffer::CpuAccess::Read);
 
     // Baseline resource
@@ -932,15 +894,21 @@ void RTXDITutorialBase::loadCommonShaders(void)
 
 void RTXDITutorialBase::loadIsmShaders()
 {
+    Program::DefineList defines;
+
+    // Load CDF building passes
+    mpBuildPDF = createComputeShader("BuildReSTIRcdf.cs.slang", defines, "buildPDF");
+    mpBuildCDF = createComputeShader("BuildReSTIRcdf.cs.slang", defines, "buildCDF");
+
     // Load ISM render pass
     {
         Program::Desc desc;
         desc.addShaderLibrary(kShaderDirectory + "ISM_Render.3d.slang").vsEntry("vsMain").gsEntry("gsMain").psEntry("psMain");
         desc.setShaderModel("6_5");
-        mIsmPass.pProgram = GraphicsProgram::create(desc);
-        mIsmPass.pProgram->addDefines(mPassData.scene->getSceneDefines());
-        mIsmPass.pProgram->addDefine("GS_OUT_STREAM", std::to_string(mIsmSceneType));
-        mIsmPass.pProgram->setTypeConformances(mPassData.scene->getTypeConformances());
+        mIsmRenderPass.pProgram = GraphicsProgram::create(desc);
+        mIsmRenderPass.pProgram->addDefines(mPassData.scene->getSceneDefines());
+        mIsmRenderPass.pProgram->addDefine("GS_OUT_STREAM", std::to_string(mIsmSceneType));
+        mIsmRenderPass.pProgram->setTypeConformances(mPassData.scene->getTypeConformances());
 
         // Debug tessellation stage
         RasterizerState::Desc wireframeDesc;
@@ -955,21 +923,20 @@ void RTXDITutorialBase::loadIsmShaders()
         dsDesc.setDepthFunc(ComparisonFunc::Less).setDepthEnabled(true);
         mpDepthTestDS = DepthStencilState::create(dsDesc);
 
-        mIsmPass.pState = GraphicsState::create();
-        mIsmPass.pState->setProgram(mIsmPass.pProgram);
+        mIsmRenderPass.pState = GraphicsState::create();
+        mIsmRenderPass.pState->setProgram(mIsmRenderPass.pProgram);
 
-        mIsmPass.pVars = GraphicsVars::create(mIsmPass.pProgram->getReflector());
+        mIsmRenderPass.pVars = GraphicsVars::create(mIsmRenderPass.pProgram->getReflector());
 
-        mIsmPass.pFbo = Fbo::create();
+        mIsmRenderPass.pFbo = Fbo::create();
     }
 
     // Load ISM pull and push pass
-    Program::DefineList defines;
     mpIsmPullPass = createComputeShader("ISM_Pull.cs.slang", defines);
     mpIsmPushPass = createComputeShader("ISM_Push.cs.slang", defines);
 
-    mCsIsmRenderPass.generatePoints = createComputeShader("ISM_Render.cs.slang", defines, "generatePointsCS", true);
-    mCsIsmRenderPass.renderISMs = createComputeShader("ISM_Render.cs.slang", defines, "renderIsmCS", true);
+    //mCsIsmRenderPass.generatePoints = createComputeShader("ISM_Render.cs.slang", defines, "generatePointsCS", true);
+    //mCsIsmRenderPass.renderISMs = createComputeShader("ISM_Render.cs.slang", defines, "renderIsmCS", true);
 }
 
 void RTXDITutorialBase::loadShaders()
@@ -1079,10 +1046,13 @@ void RTXDITutorialBase::prepareLightShadowMapData()
     for (uint i = 0; i < mTotalLightsCount; i++)
     {
         LightShadowMapData data;
-        data.startIndex = -1;
+        data.ismArrayStartIndex = -1;
         data.shadowMapCount = 0;
         data.shadowMapType = 0;
         data.nearFarPlane = mLightNearFarPlane;
+        data.shadowMapSize = 1;
+        data.age = 0;
+        data.reusingArrayIndex = -1;
 
         // Get the light center for mesh light or point light
         float3 center;
@@ -1140,22 +1110,25 @@ void RTXDITutorialBase::prepareLightShadowMapData()
         data.centerPosW = center;
 
         // Compute the light space matrix for six faces. Order: +X, -X, +Y, -Y, +Z, -Z
-        auto lightProj = glm::perspective(glm::radians(90.0f), 1.0f, data.nearFarPlane.x, data.nearFarPlane.y);
+        data.persProjMat = glm::perspective(glm::radians(90.0f), 1.0f, data.nearFarPlane.x, data.nearFarPlane.y);
         for (uint j = 0; j < kShadowMapsPerLight; j++)
         {
-            data.viewProjMat[0] = lightProj * glm::lookAt(center, center + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            data.viewProjMat[1] = lightProj * glm::lookAt(center, center + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            data.viewProjMat[2] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            data.viewProjMat[3] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
-            data.viewProjMat[4] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
-            data.viewProjMat[5] = lightProj * glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewMats[0] = glm::lookAt(center, center + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            data.viewMats[1] = glm::lookAt(center, center + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            data.viewMats[2] = glm::lookAt(center, center + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            data.viewMats[3] = glm::lookAt(center, center + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+            data.viewMats[4] = glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewMats[5] = glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+            data.viewProjMats[0] = data.persProjMat * data.viewMats[0];
+            data.viewProjMats[1] = data.persProjMat * data.viewMats[1];
+            data.viewProjMats[2] = data.persProjMat * data.viewMats[2];
+            data.viewProjMats[3] = data.persProjMat * data.viewMats[3];
+            data.viewProjMats[4] = data.persProjMat * data.viewMats[4];
+            data.viewProjMats[5] = data.persProjMat * data.viewMats[5];
         }
 
-        // TODO: if it is a spot light, we only need one view matrix
-
-        // Compute the two view matrix for ISM render
-        data.viewMats[0] = glm::lookAt(center, center + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
-        data.viewMats[1] = glm::lookAt(center, center + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        // Compute light frustum size
+        data.lightFrustumSize = 2.0f * data.nearFarPlane.x * glm::tan(glm::radians(0.5f * 90.0f));
 
         lightMeshData[i] = data;
     }
@@ -1235,43 +1208,66 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
 {
     FALCOR_PROFILE("Prepare ISMs");
 
-    // This rasterization stage simplifies the scene into point representation (vs + hs + ds + gs)
+    // Build CDF buffer on ReSTIR distribution  
+    if (mAdaptiveISM)
+    {
+        FALCOR_PROFILE("Build CDF");
+
+        auto pdfVars = mpBuildPDF->getRootVar();
+        pdfVars["gLightHistogramBuffer"] = mpLightHistogramBuffer;
+        pdfVars["gTotalValidPixels"] = mpTotalValidPixels;
+        pdfVars["gLightPdfBuffer"] = mpLightPdfBuffer;
+        pdfVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
+        //mpPixelDebug->prepareProgram(mpBuildPDF->getProgram(), pdfVars);
+        mpBuildPDF->execute(pRenderContext, mTotalLightsCount, 1);
+
+        auto cdfVars = mpBuildCDF->getRootVar();
+        cdfVars["gLightPdfBuffer"] = mpLightPdfBuffer;
+        cdfVars["gLightCdfBuffer"] = mpLightCdfBuffer;
+        //mpPixelDebug->prepareProgram(mpBuildCDF->getProgram(), cdfVars);
+        mpBuildCDF->execute(pRenderContext, mTotalLightsCount, 1);
+    }
+
+    // This rasterization stage simplifies the scene into point representation (vs + (hs + ds) + gs)
     {
         FALCOR_PROFILE("ISM Render");
 
         GraphicsState::Viewport viewport(0.0f, 0.0f, (float)mIsmSize, (float)mIsmSize, 0.0f, 1.0f);
-        mIsmPass.pState->setViewport(0, viewport);
+        mIsmRenderPass.pState->setViewport(0, viewport);
 
         // Clear all counting buffer for each frame
         pRenderContext->clearUAV(mpCounterBuffer->getUAV().get(), uint4(0));
         pRenderContext->clearUAV(mpExtraPointsCountBuffer->getUAV().get(), uint4(0));
 
-        mIsmPass.pFbo->attachColorTarget(mpIsmTextureArray, 0, 0, 0, mTotalIsmCount);
+        mIsmRenderPass.pFbo->attachColorTarget(mpIsmTextureArray, 0, 0, 0, mTotalIsmCount);
         pRenderContext->clearTexture(mpIsmTextureArray.get(), float4(1.0f));
 
-        mIsmPass.pState->setFbo(mIsmPass.pFbo);
+        mIsmRenderPass.pState->setFbo(mIsmRenderPass.pFbo);
         auto pStagingDepthTexture = Texture::create2D(mIsmSize, mIsmSize, ResourceFormat::D32Float, mTotalIsmCount, 1, nullptr, kShadowMapFlags);
         pRenderContext->clearTexture(pStagingDepthTexture.get(), float4(1.0f));
-        mIsmPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, mTotalIsmCount); // Depth test needs this
-        mIsmPass.pState->setDepthStencilState(mpDepthTestDS);
+        mIsmRenderPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, mTotalIsmCount); // Depth test needs this
+        mIsmRenderPass.pState->setDepthStencilState(mpDepthTestDS);
 
 
-        auto ismVars = mIsmPass.pVars->getRootVar();
+        auto ismVars = mIsmRenderPass.pVars->getRootVar();
         ismVars["ismCB"]["gTotalLightsCount"] = mTotalLightsCount;
         ismVars["ismCB"]["gTotalIsmCount"] = mTotalIsmCount;
         ismVars["ismCB"]["gIsmPerLight"] = mIsmPerLight;
         ismVars["ismCB"]["gScreenSize"] = mPassData.screenSize;
         ismVars["ismCB"]["gBaseTriSize"] = mBaseTriSize;
+        ismVars["ismCB"]["gAdaptiveISM"] = mAdaptiveISM;
+        ismVars["ismCB"]["gIsmLightSamplingMode"] = mIsmLightSamplingMode;
         ismVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
         ismVars["gExtraPointsCountBuffer"] = mpExtraPointsCountBuffer;
-        ismVars["gIsmLightIndexBuffer"] = mpIsmLightIndexBuffer; // remove
+        ismVars["gLightPdfBuffer"] = mpLightPdfBuffer;
+        ismVars["gLightCdfBuffer"] = mpLightCdfBuffer;
         //ismVars["gPointsBuffer"] = mpPointsBuffer;
-        //ismVars["gCounterBuffer"] = mpCounterBuffer;
+        ismVars["gCounterBuffer"] = mpCounterBuffer;
 
-        //mpPixelDebug->prepareProgram(mIsmPass.pProgram, ismVars);
+        mpPixelDebug->prepareProgram(mIsmRenderPass.pProgram, ismVars);
 
         // Since we are rendering points, it doesn't matter if we cull back or not
-        mPassData.scene->rasterize(pRenderContext, mIsmPass.pState.get(), mIsmPass.pVars.get(), RasterizerState::CullMode::None); 
+        mPassData.scene->rasterize(pRenderContext, mIsmRenderPass.pState.get(), mIsmRenderPass.pVars.get(), RasterizerState::CullMode::None); 
     }
 
     // TODO: if the light (array index) already has shadow map, return in the shader side.
@@ -1280,6 +1276,7 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
         FALCOR_PROFILE("ISM Pull");
         for (uint m = 0; m < mpIsmTextureArray->getMipCount() - 1; m++)
         {
+            // TODO: parallelize this loop 
             for (uint a = 0; a < mpIsmTextureArray->getArraySize(); a++)
             {
                 const auto& pDefaultBlockReflection = mpIsmPullPass->getProgram()->getReflector()->getDefaultParameterBlock();
@@ -1306,7 +1303,7 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
 
     {
         visualizeShadowMapTex(mVisualizePass.pVisualizeSingle, mpIsmTextureArray, renderData["ism after pull"]->asTexture(), pRenderContext, mVisualizeMipLevel,
-            mVisLightID, "single");
+            mVisLightFaceID, "single");
     }
 
     // Do push pass on ISMs
@@ -1327,7 +1324,7 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
                 pushVars["PushCB"]["gDepthDiffThreshold"] = mDepthThreshold;
                 mpIsmPushPass->getVars()->setSrv(srcTexBindLoc, pSrc);
                 mpIsmPushPass->getVars()->setUav(dstTexBindLoc, pDst);
-                mpPixelDebug->prepareProgram(mpIsmPushPass->getProgram(), pushVars);
+                //mpPixelDebug->prepareProgram(mpIsmPushPass->getProgram(), pushVars);
                 mpIsmPushPass->execute(pRenderContext, mpIsmTextureArray->getWidth(m - 1), mpIsmTextureArray->getHeight(m - 1));
             }
         }
@@ -1336,10 +1333,10 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
     // Visualize ISM pass
     {
         visualizeShadowMapTex(mVisualizePass.pVisualizeSingle, mpIsmTextureArray, renderData["ism after push"]->asTexture(), pRenderContext, mVisualizeMipLevel,
-            mVisLightID, "single");
+            mVisLightFaceID, "single");
 
         // Get the proper texture to display
-        uint resolution = mIsmSize * mIsmSize * mTotalLightsCount * mIsmPerLight; // change to (mTotalIsmCount - 1) if visualizing out of order
+        uint resolution = mIsmSize * mIsmSize * mTotalLightsCount * mIsmPerLight; 
         std::string texName;
         if (resolution <= uint(1 << 22))
         {
@@ -1362,11 +1359,11 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
         //visualizeShadowMapTex(mVisualizePass.pVisualizeAll, mpIsmTextureArray, pOutputTex, pRenderContext, mVisualizeMipLevel,
         //    mVisLightID, "all");
         visualizeShadowMapTex(mVisualizePass.pVisualizeAll2, mpIsmTextureArray, pOutputTex, pRenderContext, mVisualizeMipLevel,
-            mVisLightID, "all in order");
+            mVisLightFaceID, "all in order");
     }
 
     // Print resource data
-    if (mGetDataFromGPU)
+    if (mGpuDataToGet.getIsmData)
     {
         mValuesToPrint.extraPointsCount = getDeviceResourceData<uint>(pRenderContext, mpExtraPointsCountBuffer);
 
@@ -1397,7 +1394,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
         mPassData.scene->rasterize(pRenderContext, mWireframePass.pState.get(), mWireframePass.pVars.get(), mpWireframeRS, mpWireframeRS);
     }
 
-    // Animation updates
+    // Animation updates if light center changes
     if (mPassData.updateEmissiveTriangleGeom || mPassData.updateLightPosition)
     {
         // Get light mesh data from scene
@@ -1466,6 +1463,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
         vars["CB"]["gTotalLightsCount"] = mTotalLightsCount;
         vars["CB"]["gMaxReusingCount"] = mLightTopN * mTemporalReusingLength;
         vars["CB"]["gLightTopN"] = mLightTopN;
+        vars["CB"]["gTemporalReusingLength"] = mTemporalReusingLength;
         vars["CB"]["gShadowMapsPerLight"] = kShadowMapsPerLight;
         vars["CB"]["gCurrFrameLightStartIdx"] = mCurrFrameLightStartIdx;
         vars["CB"]["gIsmPerLight"] = mIsmPerLight;
@@ -1485,70 +1483,49 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
 
     // Cubic shadow maps. TODO: we don't need to render the same light if it is still in the shadow map list
     //  -> create an array only to store the unique light added into reusing list
-    if (mVisibility == Visibility::ShadowMap_FullyLit || mVisibility == Visibility::ShadowMap_ISM || mVisibility == Visibility::Experiment)
+    if (mVisibility == Visibility::ShadowMap_FullyLit || mVisibility == Visibility::ShadowMap_ISM)
     {
         FALCOR_PROFILE("Cubic Shadow Maps");
 
         auto shadowVars = mShadowMapPass.pVars->getRootVar();
         shadowVars["shadowMapCB"]["gVisMode"] = (uint)mVisibility;
         shadowVars["shadowMapCB"]["gCurrFrameLightStartIdx"] = mCurrFrameLightStartIdx;
+        shadowVars["shadowMapCB"]["gDepthBias"] = mSmDepthBias;
         shadowVars["gReusingLightIndexBuffer"] = mpReusingLightIndexBuffer;
         shadowVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
 
-        // Render different size shadow maps for all lights
-        if (mVisibility == Visibility::Experiment)
+        // Loop over top N light mesh index from sorted list and generate a shadow map for each one
+        for (uint i = 0; i < mLightTopN; i++)
         {
-            for (auto it = mReusingSmTextureArrays.begin(); it != mReusingSmTextureArrays.end(); it++)
-            {
-                uint shadowMapSize = it->first;
-                uint maxLightsPerTexArray = shadowMapSize != 1024 ? kMaxLightsPerTexArray : kMaxLightsPerTexArray1024;
-                auto smTextureArrays = it->second;
+            // Get current light's texture array to be rendered
+            uint shadowMapArrayIndex = mCurrFrameLightStartIdx + i;
+            const auto& pShadowMapTextureArray = mSortedLightsShadowMaps[shadowMapArrayIndex];
+            uint shadowMapSize = pShadowMapTextureArray->getWidth();
 
-                // Loop over top N light mesh index from sorted list and generate a shadow map for each one
-                auto pStagingDepthTexture = Texture::create2D(shadowMapSize, shadowMapSize, ResourceFormat::D32Float, kShadowMapsPerLight, 1, nullptr, kShadowMapFlags);
-                mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, kShadowMapsPerLight); // Depth test needs this
-                for (uint i = 0; i < mLightTopN; i++)
-                {
-                    // Compute which texture array should we render
-                    uint arrayIndex = (mCurrFrameLightStartIdx + i) / (maxLightsPerTexArray);
+            // Depth test needs this
+            auto pStagingDepthTexture = Texture::create2D(shadowMapSize, shadowMapSize, ResourceFormat::D32Float, kShadowMapsPerLight, 1, nullptr, kShadowMapFlags);
+            mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, kShadowMapsPerLight); 
 
-                    // Check if current light ranking is inside texture array range
-                    if (mSceneName == 2 && shadowMapSize == 1024 && mCurrFrameLightStartIdx + i >= kMaxSupportedLights1024)
-                        break;
+            // Render the six faces
+            mShadowMapPass.pFbo->attachColorTarget(mSortedLightsShadowMaps[shadowMapArrayIndex], 0, 0, 0, kShadowMapsPerLight);
+            mShadowMapPass.pState->setFbo(mShadowMapPass.pFbo);
 
-                    // Render the six faces
-                    uint sliceOffset = kShadowMapsPerLight * ((mCurrFrameLightStartIdx + i) % maxLightsPerTexArray);
-                    mShadowMapPass.pFbo->attachColorTarget(smTextureArrays[arrayIndex], 0, 0, sliceOffset, kShadowMapsPerLight);
-                    mShadowMapPass.pState->setFbo(mShadowMapPass.pFbo);
+            // Clear the texture for each light mesh shadow map
+            pRenderContext->clearFbo(mShadowMapPass.pFbo.get(), float4(1.0f), 1.0f, 0);
 
-                    // Clear the texture for each light mesh shadow map
-                    pRenderContext->clearFbo(mShadowMapPass.pFbo.get(), float4(1.0f), 1.0f, 0);
-
-                    shadowVars["shadowMapCB"]["gRanking"] = i;
-                    mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, shadowVars);
-                    mPassData.scene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::Back);
-                }
-            }
+            shadowVars["shadowMapCB"]["gRanking"] = i;
+            mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, shadowVars);
+            mPassData.scene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::Back);
         }
-        else
+    }
+
+    {
+        FALCOR_PROFILE("Generate Shadow Mipmaps");
+        for (uint i = 0; i < mLightTopN; i++)
         {
-            // Loop over top N light mesh index from sorted list and generate a shadow map for each one
-            auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, kShadowMapsPerLight, 1, nullptr, kShadowMapFlags);
-            mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, kShadowMapsPerLight); // Depth test needs this
-            for (uint i = 0; i < mLightTopN; i++)
-            {
-                // Render the six faces
-                uint sliceOffset = kShadowMapsPerLight * (mCurrFrameLightStartIdx + i);
-                mShadowMapPass.pFbo->attachColorTarget(mpReusingShadowMapsTexture, 0, 0, sliceOffset, kShadowMapsPerLight);
-                mShadowMapPass.pState->setFbo(mShadowMapPass.pFbo);
-
-                // Clear the texture for each light mesh shadow map
-                pRenderContext->clearFbo(mShadowMapPass.pFbo.get(), float4(1.0f), 1.0f, 0);
-
-                shadowVars["shadowMapCB"]["gRanking"] = i;
-                mpPixelDebug->prepareProgram(mShadowMapPass.pProgram, shadowVars);
-                mPassData.scene->rasterize(pRenderContext, mShadowMapPass.pState.get(), mShadowMapPass.pVars.get(), RasterizerState::CullMode::Back);
-            }
+            uint shadowMapArrayIndex = mCurrFrameLightStartIdx + i;
+            auto& pShadowMapTextureArray = mSortedLightsShadowMaps[shadowMapArrayIndex];
+            pShadowMapTextureArray->generateMips(pRenderContext);
         }
     }
 
@@ -1567,19 +1544,65 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
     mCurrFrameLightStartIdx = (mCurrFrameLightStartIdx + mLightTopN) % totalReusingLightCount;
 
     // TODO: use the member function
-    if (true && mRtxdiFrameParams.frameIndex >= 250 && mRtxdiFrameParams.frameIndex <= 250)
+    if (mRtxdiFrameParams.frameIndex >= 100 && mRtxdiFrameParams.frameIndex <= 100)
     {
         printDeviceResources(pRenderContext);
 
         auto totalValidPixels = getDeviceResourceData<uint>(pRenderContext, mpTotalValidPixels);
         logInfo(std::format("Total Valid Pixels = {}", totalValidPixels[0]));
+
+        // Compute all shadow maps memory size
+        mValuesToPrint.totalShadowTexSize = 0;
+        for (uint i = 0; i < mLightTopN * mTemporalReusingLength; i++)
+        {
+            mValuesToPrint.totalShadowTexSize += mSortedLightsShadowMaps[i]->getTextureSizeInBytes();
+        }
+
+        // PDF and CDF
+        auto pdfArray = getDeviceResourceData<float>(pRenderContext, mpLightPdfBuffer);
+        auto cdfArray = getDeviceResourceData<float>(pRenderContext, mpLightCdfBuffer);
+        std::string pdfOutput = "";
+        std::string cdfOutput = "";
+        for (uint i = 0; i < cdfArray.size(); i++)
+        {
+            pdfOutput += std::to_string(pdfArray[i]) + ", ";
+            pdfOutput += (i + 1) % 10 == 0 ? "\n" : "";
+
+            cdfOutput += std::to_string(cdfArray[i]) + ", ";
+            cdfOutput += (i + 1) % 10 == 0 ? "\n" : "";
+        }
+        logInfo(std::format("PDF Array = [\n{}\n]", pdfOutput));
+        logInfo(std::format("CDF Array = [\n{}\n]", cdfOutput));
+
+        // Light primitive distribution
+        auto primCounterArray = getDeviceResourceData<uint>(pRenderContext, mpCounterBuffer);
+        std::string output = "";
+        for (uint i = 0; i < primCounterArray.size(); i++)
+        {
+            output += std::to_string(primCounterArray[i]) + " ";
+            output += (i + 1) % 10 == 0 ? "\n" : "";
+        }
+        logInfo(std::format("Light point distribution = [\n{}\n]", output));
+
     }
 
-    if (mGetDataFromGPU)
+    if (mGpuDataToGet.getSortingData)
     {
+        std::string output;
+
+        // Sorted lights array in each frame
+        auto sortedLightIndexArray = getDeviceResourceData<uint2>(pRenderContext, mpSortedLightsBuffer);
+        output = "";
+        for (uint i = 0; i < sortedLightIndexArray.size(); i++)
+        {
+            output += std::to_string(sortedLightIndexArray[i].x) + " ";
+            output += (i + 1) % 10 == 0 ? "\n" : "";
+        }
+        mValuesToPrint.sortedLightIndexArray = output;
+
         // Shadow map and ISM corresponding light indexes
         auto reusingLightIndexArray = getDeviceResourceData<uint>(pRenderContext, mpReusingLightIndexBuffer);
-        std::string output;
+        output = "";
         for (uint i = 0; i < reusingLightIndexArray.size(); i++)
         {
             output += std::to_string(reusingLightIndexArray[i]) + " ";
@@ -1597,7 +1620,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
         mValuesToPrint.ismLightIndexArray = output;
     }
 
-    if (mVisibility == Visibility::Experiment)
+    if (mGpuDataToGet.getShadowMapSizeData)
     {
         // Shadow map size statistics
         auto shadowMapSizeCount = getDeviceResourceData<uint>(pRenderContext, mpShadowMapSizeBuffer);
@@ -1607,15 +1630,8 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
         {
             output += std::format("Shadow Map Size {}: {}", pow(2, 5 + i), shadowMapSizeCount[i]);
             output += i != shadowMapSizeCount.size() - 1 ? "\n" : "";
-            totalMemorySizeInByte += shadowMapSizeCount[i] * (uint)pow(2, 5 + i) * (uint)pow(2, 5 + i) * 4;
         }
-
         mValuesToPrint.shadowMapSizeCount = output;
-
-        // Assume each light has only one shadow map texture
-        mValuesToPrint.memoryUsage[0] = mTotalLightsCount * 1024 * 1024 * 4;
-        mValuesToPrint.memoryUsage[1] = 4 * (20 * 1024 * 1024 + (mTotalLightsCount - 20) * 128 * 128);
-        mValuesToPrint.memoryUsage[2] = totalMemorySizeInByte;
     }
 }
 
@@ -1679,7 +1695,7 @@ void RTXDITutorialBase::runBaselineShadowMap(RenderContext* pRenderContext, cons
 }
 
 void RTXDITutorialBase::visualizeShadowMapTex(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext,
-    uint mipLevel, uint arrayIndex, const std::string& mode)
+    uint mipLevel, uint2 lightFaceIndex, const std::string& mode)
 {
     uint2 nThreads = uint2(pSrcTexture->getWidth(), pSrcTexture->getHeight());
 
@@ -1696,7 +1712,7 @@ void RTXDITutorialBase::visualizeShadowMapTex(ComputePass::SharedPtr pPass, Text
     if (mode == "single")
     {
         visualizeVars["VisCB"]["gMipLevel"] = (float)mipLevel;
-        visualizeVars["VisCB"]["gArrayIndex"] = arrayIndex;
+        visualizeVars["VisCB"]["gLightFaceIndex"] = lightFaceIndex;
 
         mpPixelDebug->prepareProgram(mVisualizePass.pVisualizeSingle->getProgram(), visualizeVars);
         pPass->execute(pRenderContext, nThreads.x, nThreads.y);

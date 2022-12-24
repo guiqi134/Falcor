@@ -4,7 +4,7 @@ scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 # scene = 'Arcade/Arcade.pyscene'
 
 currentTime = 0.0
-paused = False
+paused = True
 animateCamera = True
 
 restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
@@ -31,7 +31,7 @@ def graph_ImportanceResampling():
         "envEmissiveScale" : 1.0,
         "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
-        "ismDepthBias" : 0.01,
+        "ismDepthBias" : 0.001,
         "ismMipLevels" : 3,
         "ismPushMode" : 1,
         "smDepthBias" : 0.000050,

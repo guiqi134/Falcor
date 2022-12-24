@@ -57,7 +57,7 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    printSetPixel(threadId);
+    // printSetPixel(threadId);
 
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;

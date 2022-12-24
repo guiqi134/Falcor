@@ -35,10 +35,8 @@
 cbuffer ShadeCB
 {
     uint gInputReservoirIndex; // Which reservoir contains the samples we should shade
-
-    uint gDebugLightMeshID;
-    bool gDebugLight;
     bool gShadingVisibility;
+    uint gVisMode;
 }
 
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
@@ -58,7 +56,8 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
 
-    float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample);
+    // float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM);
+    float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -91,7 +90,7 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
 
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
@@ -186,13 +185,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 outColor = difColor + specColor;
             }
         }
-
-        uint materialID = gScene.lightCollection.meshData[gDebugLightMeshID].materialID;
-        print("instanceID = ", gScene.lightCollection.meshData[gDebugLightMeshID].instanceID);
-        print("materialID = ", materialID);
-        print("isBasicMaterial = ", gScene.materials.isBasicMaterial(materialID));
-
-        BasicMaterialData materialData = gScene.materials.getBasicMaterialData(materialID);
     }
 
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);

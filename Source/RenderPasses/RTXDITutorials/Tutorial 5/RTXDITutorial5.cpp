@@ -153,15 +153,19 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
     if (mLightingParams.traceInitialShadowRay)
     {
         FALCOR_PROFILE("Candidate Visibility");
+        uint checkCandiateVisMode = mTurnOffShadowRay == false ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        checkCandiateVisMode = mOnlyUseIsmForTesting == true ? uint(Visibility::AllISM) : checkCandiateVisMode;
+
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
+        visVars["SampleCB"]["gVisMode"] = checkCandiateVisMode;
         setupRTXDIBridgeVars(visVars, renderData);
         mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
     // How pixels' visibility is evaluated in previous pass
-    if (mGetDataFromGPU)
+    if (mGpuDataToGet.getConverageData)
     {
         auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
         calcDiffShadowCoverage(shadowOptionsResult, 0);
@@ -199,9 +203,8 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         FALCOR_PROFILE("Final shading");
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
-        shadeVars["ShadeCB"]["gDebugLightMeshID"] = mDebugLightMeshID;
-        shadeVars["ShadeCB"]["gDebugLight"] = mDebugLight;
         shadeVars["ShadeCB"]["gShadingVisibility"] = mShadingVisibility;
+        shadeVars["ShadeCB"]["gVisMode"] = mTurnOffShadowRay == false ? uint(Visibility::AllShadowRay) : uint(mVisibility);
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
@@ -215,7 +218,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
     }
 
     // How pixels' visibility is evaluated in previous pass
-    if (mGetDataFromGPU)
+    if (mGpuDataToGet.getConverageData)
     {
         auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
         calcDiffShadowCoverage(shadowOptionsResult, 1);

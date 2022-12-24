@@ -8,6 +8,7 @@ cbuffer shadowMapCB
     uint gRanking;
     uint gCurrFrameLightStartIdx;
     uint gVisMode;
+    float gDepthBias;
 }
 
 Buffer<uint> gReusingLightIndexBuffer;
@@ -17,6 +18,7 @@ Buffer<uint2> gSortedLightsBuffer; // for baseline use
 struct GSOut
 {
     VSOut vsOut;
+    float3 lightCenter : LightCenter;
     uint rtIndex : SV_RenderTargetArrayIndex;
     uint triangleIndex : SV_PrimitiveID;
 }
@@ -58,7 +60,8 @@ void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout Tri
     {
         gsOut.rtIndex = face;
         gsOut.triangleIndex = face;
-        float4x4 lightViewProj = gLightShadowDataBuffer[localLightIdx].viewProjMat[face];
+        gsOut.lightCenter = gLightShadowDataBuffer[localLightIdx].centerPosW;
+        float4x4 lightViewProj = gLightShadowDataBuffer[localLightIdx].viewProjMats[face];
 
         for (uint v = 0; v < 3; v++)
         {
@@ -71,7 +74,7 @@ void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout Tri
 
 }
 
-/** D3DXMatrixPerspectiveFovRH (be care, it is row major!!!):
+/** D3DXMatrixPerspectiveFovRH (be care, it is row major, so it is multiplied in right!!!):
     xScale     0          0              0
     0        yScale       0              0
     0          0      zf/(zn-zf)        -1
@@ -93,15 +96,21 @@ PSOut psMain(GSOut psIn)
     let lod = ExplicitLodTextureSampler(0.f);
     if (alphaTest(psIn.vsOut, psIn.triangleIndex, lod)) discard;
 
-    print("posH = ", psIn.vsOut.posH);
-    print("psIn.vsOut.instanceID = ", psIn.vsOut.instanceID.index);
-    print("psIn.triangleIndex = ", psIn.triangleIndex);
-
     // Ignore the emissive surface's fragment
     float3 viewDir = normalize(gScene.camera.getPosition() - psIn.vsOut.posW);
     ShadingData sd = prepareShadingData(psIn.vsOut, psIn.triangleIndex, viewDir, lod);
-    print("isEmissive = ", sd.mtl.isEmissive());
+    // print("isEmissive = ", sd.mtl.isEmissive());
     if (sd.mtl.isEmissive()) discard;
+
+    // Compute the depth bias
+    //  -> better do it in the shading part using NdotL
+    float NdotL = dot(psIn.vsOut.normalW, psIn.lightCenter - psIn.vsOut.posW);
+    // float bias = max(5.0 * gDepthBias * (1.0 - NdotL), gDepthBias);
+    float bias = gDepthBias + 5.0 * gDepthBias * max(ddx(psIn.vsOut.posH.z), ddy(psIn.vsOut.posH.z));
+
+    print("bias = ", bias);
+    print("ddx(psIn.vsOut.posH.z) = ", ddx(psIn.vsOut.posH.z));
+    print("ddy(psIn.vsOut.posH.z) = ", ddy(psIn.vsOut.posH.z));
 
     float depth = saturate(psIn.vsOut.posH.z);
     psOut.color = depth;

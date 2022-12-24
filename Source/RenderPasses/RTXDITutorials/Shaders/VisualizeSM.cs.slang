@@ -10,7 +10,7 @@ RWTexture2D<float4> gIsmOutput;
 cbuffer VisCB
 {
     float gMipLevel;
-    uint gArrayIndex;
+    uint2 gLightFaceIndex;
     uint2 gInputSize;
     uint2 gOutputSize;
     SamplerState gPointSampler;
@@ -26,12 +26,11 @@ float paraboloidProjToView(float depth, float near, float far)
 [numthreads(16, 16, 1)]
 void singleIsmCS(uint3 threadID : SV_DispatchThreadID)
 {
-    printSetPixel(threadID.xy);
+    // printSetPixel(threadID.xy);
 
-    uint lightID = gIsmLightIndexBuffer[gArrayIndex / 2];
-    LightShadowMapData lightShadowData = gLightShadowDataBuffer[lightID];
+    LightShadowMapData lightShadowData = gLightShadowDataBuffer[gLightFaceIndex.x];
 
-    float3 location = float3(float2(threadID.xy) / float2(gInputSize), (float)gArrayIndex);
+    float3 location = float3(float2(threadID.xy) / float2(gInputSize), float(lightShadowData.ismArrayStartIndex + gLightFaceIndex.y));
     float sampleDepth = gIsmInput.SampleLevel(gPointSampler, location, gMipLevel);
     float depthView = paraboloidProjToView(sampleDepth, lightShadowData.nearFarPlane.x, lightShadowData.nearFarPlane.y);
     gIsmOutput[threadID.xy] = float4(float3(abs(depthView) / lightShadowData.nearFarPlane.y), 1.0f);
@@ -91,7 +90,7 @@ void allIsmCS2(uint3 threadID: SV_DispatchThreadID)
     // Get the depth value from input ISM texture
     if (lightShadowData.shadowMapType == 2)
     {
-        float3 location = float3(posInIsm / float2(gInputSize), lightShadowData.startIndex + lightIsmIndex % 2);
+        float3 location = float3(posInIsm / float2(gInputSize), lightShadowData.ismArrayStartIndex + lightIsmIndex % 2);
         float sampleDepth = gIsmInput.SampleLevel(gPointSampler, location, 0);
         float depthView = paraboloidProjToView(sampleDepth, lightShadowData.nearFarPlane.x, lightShadowData.nearFarPlane.y);
         gIsmOutput[posInOutputTex] = float4(float3(abs(depthView) / lightShadowData.nearFarPlane.y), 1.0f);
