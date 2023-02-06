@@ -2,6 +2,12 @@
 
 import Utils.Debug.PixelDebug;
 
+cbuffer pdfCB
+{
+    uint gSortingRules;
+    uint gIsmPerLight;
+}
+
 Buffer<uint> gLightHistogramBuffer;
 Buffer<uint> gTotalValidPixels;
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
@@ -10,13 +16,15 @@ RWBuffer<float> gLightPdfBuffer;
 [numthreads(256, 1, 1)]
 void buildPDF(uint3 threadID : SV_DispatchThreadID)
 {
-    uint lightID = threadID.x;
+    uint lightOrIsmIdx = threadID.x;
+    uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrIsmIdx / gIsmPerLight : lightOrIsmIdx;
+    uint ismIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrIsmIdx % gIsmPerLight : 0u;
 
     // Sum of pixels belong to ISM lights
     float sum = gTotalValidPixels[1];
 
     // Only compute the PDF for ISM lights. SM lights set to 0.0
-    gLightPdfBuffer[lightID] = gLightShadowDataBuffer[lightID].shadowMapType == 2 ? float(gLightHistogramBuffer[lightID]) / sum : 0.0f;
+    gLightPdfBuffer[lightOrIsmIdx] = gLightShadowDataBuffer[localLightIdx].lightFaceData[ismIdx].shadowMapType == 2 ? float(gLightHistogramBuffer[lightOrIsmIdx]) / sum : 0.0f;
     // gLightPdfBuffer[lightID] = float(gLightHistogramBuffer[lightID]) / sum;
 }
 

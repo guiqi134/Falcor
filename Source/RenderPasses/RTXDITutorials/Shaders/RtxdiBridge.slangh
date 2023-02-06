@@ -136,36 +136,45 @@ Texture2D<float4> gMotionVectorTexture;
 
 __exported import EvaluateShadowMaps;
 
-#define TOTAL_LIGHTS 512
+// TODO: move these defines to CPU side
+#ifndef NUM_PSM_TEXTURE_ARRAYS
+#define NUM_PSM_TEXTURE_ARRAYS 3
+#endif
+
+#ifndef NUM_ISM_TEXTURE_ARRAYS
+#define NUM_ISM_TEXTURE_ARRAYS 3
+#endif
 
 cbuffer SharedCB
 {
-    uint gLightMeshTopN;
     bool gCollectingData;
     bool gShadowRayForRestPixels;
     SamplerState gLinearSampler;
     float gSmDepthBias;
-    float gIsmDepthBias;
+    float2 gIsmDepthBias;
     uint2 gScreenSize;
     uint gTotalLightMeshCount;
-    uint gSortingRules;
     uint gDepthBiasMode;
     float gConstEpsilon;
+    bool gIsmLinearProjection;
+    uint gShadowMapsPerLight;
+    uint gSortingRules;
 
     uint gDebugLightMeshID;
     bool gDebugLight;
 }
 
-RWBuffer<int> gPrevLightSelectionBuffer;
+RWBuffer<int2> gPrevLightSelectionBuffer; // light ID + light face index
 Buffer<uint2> gSortedLightsBuffer;
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
-Texture2DArray<float> gISMs;
 RWBuffer<uint> gShadowOptionsBuffer;
 RWBuffer<uint> gShadowMapSizeBuffer;
 
-// All lights' shadow maps
-Texture2DArray<float> gSortedLightsShadowMaps[TOTAL_LIGHTS];
+// This is only used for rendering all light's shadow maps. Normally this would be the actual resuing shadow map lights
+Texture2DArray<float> gSortedLightsShadowMaps[NUM_PSM_TEXTURE_ARRAYS]; // Order is based on SM resuing buffer
 
+// All light's ISMs in light ranking order
+Texture2DArray<float> gSortedLightsISMs[NUM_ISM_TEXTURE_ARRAYS];
 
 // Global evaluate visiblity functions for two stages in RTXDI
 bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode)
@@ -173,11 +182,17 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
     bool isVisible = true;
 
     LightShadowMapData lightData = gLightShadowDataBuffer[localLightID];
-    // lightData = gLightShadowDataBuffer[115];
+    // lightData = gLightShadowDataBuffer[389];
 
     // Get surface data
     float3 posW = RAB_GetSurfaceWorldPos(surface);
     float3 normalW = RAB_GetSurfaceNormal(surface);
+
+    // Compute which face the shading point is in
+    float3 lightToShadingW = posW - lightData.centerPosW;
+    uint faceIdx = getFaceIndex(normalize(lightToShadingW));
+    LightFaceData lightFaceData = lightData.lightFaceData[faceIdx];
+    uint lightShadowMapType = lightData.lightFaceData[gSortingRules == (uint)SortingRules::LightFaces ? faceIdx : 0].shadowMapType;
 
     // Trace a shadow ray
     if (gVisMode == (uint)Visibility::AllShadowRay)
@@ -191,17 +206,24 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
         gShadowOptionsBuffer[bufferIndex] = 1;
 
         // light has shadow map? ...
-        if (lightData.shadowMapType == 1)
+        if (lightShadowMapType == 1)
         {
-            isVisible = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightData.ranking], gLinearSampler, gSmDepthBias, gDepthBiasMode, gConstEpsilon);
+            isVisible = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightFaceData.whichPsmTexArray], gLinearSampler, gSmDepthBias, faceIdx, gSortingRules,
+                gDepthBiasMode, gConstEpsilon);
             gShadowOptionsBuffer[bufferIndex] = 2;
         }
         else
         {
             // Use ISM? Or just fully lit
-            if (gVisMode == (uint)Visibility::ShadowMap_ISM && lightData.shadowMapType == 2)
+            if (gVisMode == (uint)Visibility::ShadowMap_ISM && lightShadowMapType == 2)
             {
-                isVisible = evaluateISM(posW, normalW, lightData, gISMs, gLinearSampler, gIsmDepthBias);
+                if (gSortingRules != (uint)SortingRules::LightFaces && !gIsmLinearProjection)
+                {
+                    faceIdx = sign(lightData.centerPosW.y - posW.y) == 1 ? 0 : 1;
+                    lightFaceData = lightData.lightFaceData[faceIdx];
+                }
+
+                isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx, gIsmLinearProjection);
                 gShadowOptionsBuffer[bufferIndex] = 3;
             }
             // Use shadow ray?
@@ -214,7 +236,13 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
     }
     else if (gVisMode == (uint)Visibility::AllISM)
     {
-        isVisible = evaluateISM(posW, normalW, lightData, gISMs, gLinearSampler, gIsmDepthBias);
+        if (gSortingRules != (uint)SortingRules::LightFaces && !gIsmLinearProjection)
+        {
+            faceIdx = sign(lightData.centerPosW.y - posW.y) == 1 ? 0 : 1;
+            lightFaceData = lightData.lightFaceData[faceIdx];
+        }
+
+        isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx, gIsmLinearProjection);
         gShadowOptionsBuffer[bufferIndex] = 3;
     }
 

@@ -1,4 +1,5 @@
 #pragma once
+
 #include "Utils/HostDeviceShared.slangh"
 BEGIN_NAMESPACE_FALCOR
 
@@ -6,32 +7,41 @@ BEGIN_NAMESPACE_FALCOR
 #include "Falcor.h"
 #endif
 
-static const uint kMaxSupportedLights1024 = 256;
+static const uint kMaxSupportedLights1024 = 256; // TODO: better can be divided by top N light in each frame
+
+struct LightFaceData
+{
+    uint shadowMapType; // 0: None, 1: PSM, 2: ISM
+    uint shadowMapSize;
+
+    // View matrices. (Paraboloid projection will only use -Y (index 3) and +Y (index 2) as front and back)
+    float4x4 viewMat;
+
+    // Variable for indexing into two sorted texture array. (For per-light base, these variables should also be set for each face)
+    uint whichPsmTexArray;
+    int psmTexArrayIdx; // for per-light base, it is the start index (true index should also add face idx in the evaluating part)
+    uint whichIsmTexArray;
+    int ismTexArrayIdx;
+
+    // Temporal related information. 
+    uint accumulatedFrames;
+    uint prevRanking; // update frequency depends on temporal resuing length
+    uint currRanking; // updating each frame
+
+    uint2 rankingFreqInFrame;
+};
 
 struct LightShadowMapData
 {
+    bool isLightValid;
     float3 centerPosW;
     float2 nearFarPlane;
-    int shadowMapCount;
-    uint shadowMapType;
-    uint shadowMapSize;
     float lightFrustumSize;
 
-    // TODO: these two indexes can be combined into one
-    uint ranking; // -> shadow map array start index
-    int ismArrayStartIndex;
-
-    // Perspective projection will use all of them. Paraboloid projection will only use -Y (index 3) and +Y (index 2) as front and back.
-    float4x4 viewMats[6];
-
-    // Composed matrix for perspective projection
-    float4x4 viewProjMats[6];
+    // Projection matrix
     float4x4 persProjMat;
 
-    // Temporal related information
-    int reusingArrayIndex;
-    uint age;
-    //bool isNewShadowMapLight;
+    LightFaceData lightFaceData[6];
 };
 
 // How each pixel's visibility is evaluted? 
@@ -53,6 +63,14 @@ enum class ShadowDepthBias : uint
     SlopeScale = 1,
     Dou2014 = 2
 };
+
+enum class SortingRules : uint
+{
+    AllPixels = 0,
+    OccludedPixels = 1,
+    LightFaces = 2
+};
+
 
 
 END_NAMESPACE_FALCOR

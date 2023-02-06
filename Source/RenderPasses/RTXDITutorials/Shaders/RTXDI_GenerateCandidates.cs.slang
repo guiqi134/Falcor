@@ -43,7 +43,9 @@ cbuffer SampleCB
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    // printSetPixel(threadId.xy);
+    printSetPixel(threadId.xy);
+
+    print("0000000000000", 0);
 
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;

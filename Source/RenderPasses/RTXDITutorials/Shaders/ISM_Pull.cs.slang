@@ -5,8 +5,8 @@ cbuffer PullCB
     float gDepthDiffThreshold;
 }
 
-Texture2D<float> gIsmInput;
-RWTexture2D<float> gIsmOutput;
+Texture2DArray<float> gIsmInput;
+RWTexture2DArray<float> gIsmOutput;
 
 static const uint2 offset[4] = {
     uint2(0, 0), uint2(0, 1),
@@ -21,22 +21,23 @@ void main(uint3 threadID : SV_DispatchThreadID)
 {
     // printSetPixel(threadID.xy);
 
+    uint texArrayIndex = threadID.z;
     float pixelDepths[4];
     float frontmostDepth = 1.0f;
     uint validPixelCount = 4;
     float depthSum = 0.0f;
 
-    float2 texDims;
-    gIsmInput.GetDimensions(texDims.x, texDims.y);
-    print("input texDims = ", texDims);
-    gIsmOutput.GetDimensions(texDims.x, texDims.y);
-    print("output texDims = ", texDims);
+    // float2 texDims;
+    // gIsmInput.GetDimensions(texDims.x, texDims.y);
+    // gIsmOutput.GetDimensions(texDims.x, texDims.y);
+    // print("input texDims = ", texDims);
+    // print("output texDims = ", texDims);
 
     // Get pixels values and the frontmost pixel. Also check if is valid
     for (uint i = 0; i < 4; i++)
     {
         uint2 inputPixelPos = 2 * threadID.xy + offset[i];
-        float pixelDepth = gIsmInput[inputPixelPos];
+        float pixelDepth = gIsmInput[uint3(inputPixelPos, texArrayIndex)];
         frontmostDepth = min(frontmostDepth, pixelDepth);
 
         if (pixelDepth == 1.0f)
@@ -77,5 +78,5 @@ void main(uint3 threadID : SV_DispatchThreadID)
     }
     print("depthAvgOut = ", depthAvgOut);
 
-    gIsmOutput[threadID.xy] = depthAvgOut;
+    gIsmOutput[uint3(threadID.xy, texArrayIndex)] = depthAvgOut;
 }

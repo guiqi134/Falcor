@@ -31,11 +31,12 @@ def graph_ImportanceResampling():
         "envEmissiveScale" : 1.0,
         "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
-        "ismDepthBias" : 0.001,
+        "ismParaDepthBias" : 0.01,
+        "ismPersDepthBias" : 0.001,
         "ismMipLevels" : 3,
         "ismPushMode" : 1,
         "smDepthBias" : 0.000050,
-        "baseTriangleSize" : 0.1,
+        "baseTriangleSize" : 0.001,
         "adaptiveLightNear" : True,
     }
     gToneMappingParams = {

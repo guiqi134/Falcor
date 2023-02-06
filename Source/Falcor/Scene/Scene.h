@@ -334,8 +334,8 @@ namespace Falcor
         {
             // Geometry stats
             uint64_t meshCount = 0;                     ///< Number of meshes.
-            uint64_t meshInstanceCount = 0;             ///< Number if mesh instances.
-            uint64_t meshInstanceOpaqueCount = 0;       ///< Number if mesh instances that are opaque.
+            uint64_t meshInstanceCount = 0;             ///< Number of mesh instances.
+            uint64_t meshInstanceOpaqueCount = 0;       ///< Number of mesh instances that are opaque.
             uint64_t transformCount = 0;                ///< Number of transform matrices.
             uint64_t uniqueTriangleCount = 0;           ///< Number of unique triangles. A triangle can exist in multiple instances.
             uint64_t uniqueVertexCount = 0;             ///< Number of unique vertices. A vertex can be referenced by multiple triangles/instances.
@@ -804,7 +804,7 @@ namespace Falcor
         */
         const AABB& getSceneBounds() const { return mSceneBB; }
 
-        /** Get a mesh's bounds in object space.
+        /** Get a mesh's bounds in object space. (meshID = geometryID)
         */
         const AABB& getMeshBounds(uint32_t meshID) const { return mMeshBBs[meshID]; }
 

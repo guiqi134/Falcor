@@ -67,6 +67,9 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // If needed, allocate an RTXDI context & resources so we can run our lighting code
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
 
+    // If needed, allocate the resources in our method
+    if (!mpSortedLightsBuffer) allocateStochasticSmResrouces(pRenderContext, renderData);
+
     // A few UI changes give screwy results if reusing across the change; zero our reservoirs in these cases
     if (mPassData.clearReservoirs)
     {
@@ -84,21 +87,18 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // Update the data in this render pass
     RTXDITutorialBase::execute(pRenderContext, renderData);
 
-    // Pre-compute the center of all light meshes and their transformation matrix
-    if (mpLightShadowDataBuffer == nullptr) prepareLightShadowMapData();
-
     // Wait until ReSTIR is stable. This should happen after updating the params
-    mTurnOffShadowRay = mRtxdiFrameParams.frameIndex >= mLightingParams.maxHistoryLength ? true : false;
+    mEnableShadowRay = mRtxdiFrameParams.frameIndex < mLightingParams.maxHistoryLength ? true : false;
 
     // Toggle between different visibility algorithms
     if ((mVisibility != Visibility::BaselineSM || mVisibility != Visibility::AllShadowRay)
-        && mTurnOffShadowRay)
+        && !mEnableShadowRay)
     {
         // Do stochastic shadow map passes using last frame ReSTIR sample data
         prepareStochasticShadowMaps(pRenderContext, renderData);
         runSpatioTemporalReuse(pRenderContext, renderData);
     }
-    else if (mVisibility == Visibility::BaselineSM && mTurnOffShadowRay)
+    else if (mVisibility == Visibility::BaselineSM && !mEnableShadowRay)
     {
         runBaselineShadowMap(pRenderContext, renderData);
     }
@@ -153,8 +153,8 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
     if (mLightingParams.traceInitialShadowRay)
     {
         FALCOR_PROFILE("Candidate Visibility");
-        uint checkCandiateVisMode = mTurnOffShadowRay == false ? uint(Visibility::AllShadowRay) : uint(mVisibility);
-        checkCandiateVisMode = mOnlyUseIsmForTesting == true ? uint(Visibility::AllISM) : checkCandiateVisMode;
+        uint checkCandiateVisMode = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        checkCandiateVisMode = mOnlyUseIsmForTesting ? uint(Visibility::AllISM) : checkCandiateVisMode;
 
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
@@ -204,7 +204,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
         shadeVars["ShadeCB"]["gShadingVisibility"] = mShadingVisibility;
-        shadeVars["ShadeCB"]["gVisMode"] = mTurnOffShadowRay == false ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        shadeVars["ShadeCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();
@@ -247,6 +247,7 @@ void RTXDITutorial5::renderUI(Gui::Widgets& widget)
     Gui::Group pipeOptions(widget.gui(), "Renderer Options", false);
     pipeOptions.dropdown("Bias correction", kBiasCorrection, mLightingParams.biasCorrectionMode);
     pipeOptions.var("Reuse radius", mLightingParams.spatialRadius, 0.0f, 50.0f, 0.1f);
+    pipeOptions.var("History length", mLightingParams.maxHistoryLength, 1u, 30u, 1u);
     pipeOptions.var("Samples", mLightingParams.spatialSamples, 0u, 25u);
     pipeOptions.checkbox(mLightingParams.useBoilFilter ? "Boil filter strength:" : "Not using boil filter",
         mLightingParams.useBoilFilter);

@@ -1,7 +1,7 @@
 import Utils.Debug.PixelDebug;
 
-Texture2D<float> gInput;
-RWTexture2D<float> gOutput;
+Texture2DArray<float> gInput;
+RWTexture2DArray<float> gOutput;
 
 cbuffer PushCB
 {
@@ -23,10 +23,11 @@ void main(uint3 threadID : SV_DispatchThreadID)
     // printSetPixel(threadID.xy);
     print("gDepthDiffThreshold = ", gDepthDiffThreshold);
 
+    uint texArrayIndex = threadID.z;
     uint2 currPixelCoarsePos = threadID.xy / 2;
     uint2 currPixelCoarseOffset = currPixelCoarsePos % 2;
     uint2 leftTopCoarsePos = currPixelCoarsePos - currPixelCoarseOffset;
-    float currPixelDepth = gOutput[threadID.xy];
+    float currPixelDepth = gOutput[uint3(threadID.xy, texArrayIndex)];
     float computedDepth = 0.0f;
 
     print("currPixelCoarsePos = ", currPixelCoarsePos);
@@ -36,7 +37,7 @@ void main(uint3 threadID : SV_DispatchThreadID)
     // Brute-force method: Just copy the repective value in the coarser level to the pixel in the finer level
     if (gPushMode == 0)
     {
-        computedDepth = gInput[currPixelCoarsePos];
+        computedDepth = gInput[uint3(currPixelCoarsePos, texArrayIndex)];
     }
 
     // Interpolation method: Get the left-most top-most pixel on the coarser level, and then get all the 4 pixels based on it. Do the interpolation using
@@ -66,9 +67,9 @@ void main(uint3 threadID : SV_DispatchThreadID)
         float weightSum = 0.0f;
         for (uint i = 0; i < 4; i++)
         {
-            float coarseDepth = gInput[leftTopCoarsePos + offsets[i]];
+            float coarseDepth = gInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
             if (coarseDepth == 1.0f) continue;
-            computedDepth += weights[i] * gInput[leftTopCoarsePos + offsets[i]];
+            computedDepth += weights[i] * gInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
             weightSum += weights[i];
         }
 
@@ -86,7 +87,7 @@ void main(uint3 threadID : SV_DispatchThreadID)
     // Check if the interpolated depth value is valid or occluded
     if (computedDepth != 1.0f && computedDepth < currPixelDepth /*&& (currPixelDepth - computedDepth) <= gDepthDiffThreshold*/)
     {
-        gOutput[threadID.xy] = computedDepth;
+        gOutput[uint3(threadID.xy, texArrayIndex)] = computedDepth;
     }
 
 }

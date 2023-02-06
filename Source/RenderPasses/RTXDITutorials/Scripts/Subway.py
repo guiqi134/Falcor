@@ -1,4 +1,4 @@
-scene = "EmeraldSquare/EmeraldSquare_Dusk.pyscene"
+scene = "Subway/Subway.pyscene"
 currentTime = 0.0
 paused = False
 restirPassName = "RTXDITutorial5"
@@ -21,11 +21,11 @@ def graph_ImportanceResampling():
         "ismParaDepthBias" : 0.001,
         "ismPersDepthBias" : 0.0001,
         "ismMipLevels" : 3,
-        "smDepthBias" : 0.000001,
+        "smDepthBias" : 0.000010,
         "ismPushMode" : 1,
-        "baseTriangleSize" : 0.1,
-        "sceneName" : 2,
-        "adaptiveLightNear" : True,
+        "baseTriangleSize" : 0.001,
+        "sceneName" : 3,
+        "adaptiveLightNear" : False,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -58,35 +58,36 @@ ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
-m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes))
-# m.loadScene(scene, buildFlags=SceneBuilderFlags.DontMergeMeshes)
+m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes | SceneBuilderFlags.FlattenStaticMeshInstances |
+    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeInstanced))
+# m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes))
+# m.loadScene(scene)
 if (paused):
     t.pause()
 t.time = currentTime
 
 # Initial camera.
 camera = [
-    float3( 9.500712, 33.203568, 87.346031 ),
-    float3( 9.008278, 32.750584, 86.602852 ),
-    float3( 0.000456,   1.000000,  0.000688 ) ]
+    float3( 34.775719, 9.926392, 36.550968 ),
+    float3( 33.801498, 9.920357, 36.776485 ),
+    float3( 0.000000,   1.000000,  0.000000 ) ]
 
-m.scene.camera.animated = False
 m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
-m.scene.cameraSpeed = 20
+m.scene.camera.animated = False
+m.scene.cameraSpeed = 10
 m.scene.animated = False
 
 # Add other view point
 viewport = [
-    float3( 9.500712, 33.203568, 87.346031 ),
-    float3( 9.008278, 32.750584, 86.602852 ),
-    float3( 0.000456,   1.000000,  0.000688 ) ]
+    float3( 34.775719, 9.926392, 36.550968 ),
+    float3( 33.801498, 9.920357, 36.776485 ),
+    float3( 0.000000,   1.000000,  0.000000 ) ]
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
 
 viewport = [
-    float3(-55.607540, 7.932875, 29.874557),
-    float3(-54.797466, 7.826821, 29.297897),
+    float3(-12.666439, 2.530612, -39.123089),
+    float3(-13.606641, 2.555843, -38.783409),
     float3(0, 1, 0) ]
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
-

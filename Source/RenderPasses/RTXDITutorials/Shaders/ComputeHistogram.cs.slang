@@ -5,21 +5,21 @@ import Utils.Debug.PixelDebug;
 
 cbuffer histogramCB
 {
-    uint gTotalLightsCount;
+    uint gTotalBinCount;
 }
 
 Buffer<int> gPrevLightSelectionBuffer;
 RWBuffer<uint> gFinalHistogramBuffer;
 
-groupshared uint sBlockHistogram[8192];
+groupshared uint sBlockHistogram[8192]; // Note: total number of light faces should be smaller than 8K
 
 // One atomic add in shared memory and one in global memory
 [numthreads(1024, 1, 1)]
 void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThreadId: SV_GroupThreadID, uint3 groupId: SV_GroupID)
 {
-    // printSetPixel(threadId.xy);
+    printSetPixel(threadId.xy);
 
-    uint nSections = (gTotalLightsCount - 1) / 1024 + 1;
+    uint nSections = (gTotalBinCount - 1) / 1024 + 1;
     // print("nSections = ", nSections);
 
     // Initialize shared memory
@@ -39,7 +39,7 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
     // Add to global memory
     if (nSections == 1)
     {
-        if (groupThreadId.x < gTotalLightsCount)
+        if (groupThreadId.x < gTotalBinCount)
         {
             uint sum = sBlockHistogram[groupThreadId.x];
             if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[groupThreadId.x], sum);
@@ -50,7 +50,7 @@ void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThr
         for (uint i = 0; i < nSections; i++)
         {
             uint sharedIndex = groupThreadId.x + (i * 1024);
-            if (sharedIndex < gTotalLightsCount)
+            if (sharedIndex < gTotalBinCount)
             {
                 uint sum = sBlockHistogram[sharedIndex];
                 if (sum != 0) InterlockedAdd(gFinalHistogramBuffer[sharedIndex], sum);

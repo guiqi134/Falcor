@@ -13,7 +13,7 @@ import Utils.Debug.PixelDebug;
 
 cbuffer sortCB
 {
-    uint gTotalLightsCount; ///< Total number of elements.
+    uint gTotalElementCount; ///< Total number of elements.
 
     // A sort key that will end up at the end of the list; to be used to pad
     // lists in LDS (always 2048 items).
@@ -54,7 +54,7 @@ void fillSortKeys(uint elementIdx, bool innerPass = false)
     uint sharedIdx = elementIdx & 2047;
 
     // Unused elements must sort to the end
-    if (innerPass || elementIdx < gTotalLightsCount)
+    if (innerPass || elementIdx < gTotalElementCount)
     {
         uint2 keyValuePair = gSortBuffer[elementIdx];
         sKeys[sharedIdx] = keyValuePair.x;
@@ -70,7 +70,7 @@ void storeKeyValuePair(uint elementIdx)
 {
     uint sharedIdx = elementIdx & 2047;
 
-    if (elementIdx < gTotalLightsCount)
+    if (elementIdx < gTotalElementCount)
         gSortBuffer[elementIdx] = uint2(sKeys[sharedIdx], sValues[sharedIdx]);
 }
 
@@ -181,7 +181,7 @@ void outerSortCS(uint3 threadId: SV_DispatchThreadID)
     uint index2 = InsertOneBit(threadId.x, j);
     uint index1 = index2 ^ (k == 2 * j ? k - 1 : j);
 
-    if (index2 >= gTotalLightsCount)
+    if (index2 >= gTotalElementCount)
         return;
 
     uint2 A = gSortBuffer[index1];

@@ -42,7 +42,7 @@ cbuffer SampleCB
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    // printSetPixel(threadId.xy);
+    printSetPixel(threadId.xy);
 
     print("11111111111111111", 1);
 
@@ -74,6 +74,11 @@ void main(uint3 threadId : SV_DispatchThreadID)
         if (gDebugLight) localLightID = (int)gDebugLightMeshID;
 
         bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
+        // isVisible = true;
+
+        if (localLightID == 389)
+            print("localLightID = ", localLightID);
+        print("isVisible = ", isVisible);
 
         if (!isVisible)
         {

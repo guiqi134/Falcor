@@ -3,12 +3,17 @@ import Utils.Debug.PixelDebug;
 
 #include "../HostDeviceSharedDefinitions.h"
 
+#ifndef MAX_VERTEX_COUNT
+#define MAX_VERTEX_COUNT 18
+#endif
+
 cbuffer shadowMapCB
 {
-    uint gRanking;
-    uint gCurrFrameLightStartIdx;
+    uint gCurrPassReusingStartIdx;
     uint gVisMode;
     float gDepthBias;
+    uint gShadowMapsPerLight;
+    uint gSortingRules;
 }
 
 Buffer<uint> gReusingLightIndexBuffer;
@@ -18,7 +23,6 @@ Buffer<uint2> gSortedLightsBuffer; // for baseline use
 struct GSOut
 {
     VSOut vsOut;
-    float3 lightCenter : LightCenter;
     uint rtIndex : SV_RenderTargetArrayIndex;
     uint triangleIndex : SV_PrimitiveID;
 }
@@ -37,31 +41,31 @@ VSOut vsMain(VSIn vIn)
     return vsOut;
 }
 
-// Must use built-in instance to represent each render target
+// TODO: do the culling for each primitive and decide it will be visible on which face, then only loop over the visible face (ISM)
 [instance(1)]
-[maxvertexcount(18)]
-void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout TriangleStream<GSOut> outStream)
+[maxvertexcount(18)] // Warning: this may cause bug if MAX_VERTEX_COUNT is larger than 100
+void gsMain(triangle VSOut gsIn[3], uint gsInstanceID : SV_GSInstanceID, uint primitiveID : SV_PrimitiveID, inout TriangleStream<GSOut> outStream)
 {
-    // Get current light mesh's data
-    uint localLightIdx;
-    if (gVisMode == (uint)Visibility::BaselineSM)
-    {
-        localLightIdx = gSortedLightsBuffer[gRanking].x;
-    }
-    else
-    {
-        localLightIdx = gReusingLightIndexBuffer[gCurrFrameLightStartIdx + gRanking];
-    }
-    // uint face = 3;
-
     GSOut gsOut;
-
-    for (uint face = 0; face < 6; face++)
+    // uint psmIdx = gsInstanceID;
+    for (uint psmIdx = 0; psmIdx < gShadowMapsPerLight; psmIdx++)
     {
-        gsOut.rtIndex = face;
-        gsOut.triangleIndex = face;
-        gsOut.lightCenter = gLightShadowDataBuffer[localLightIdx].centerPosW;
-        float4x4 lightViewProj = gLightShadowDataBuffer[localLightIdx].viewProjMats[face];
+        // Get light and face index
+        uint offset = gSortingRules == (uint)SortingRules::LightFaces ? psmIdx : 0u;
+        uint lightOrGlobalFaceIdx = gReusingLightIndexBuffer[gCurrPassReusingStartIdx + offset];
+        uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
+        uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx % gShadowMapsPerLight : psmIdx;
+
+        // Discard primitive if it is on the light itself & it is a true emissive triangle
+        uint currLightIntanceID = gScene.lightCollection.meshData[localLightIdx].instanceID;
+        uint emissiveTriIndex = gScene.lightCollection.getTriangleIndex(gsIn[0].instanceID, primitiveID);
+        // if (currLightIntanceID == gsIn[0].instanceID.index && any(gScene.lightCollection.getAverageRadiance(emissiveTriIndex) != float3(0.0f)))
+        if (currLightIntanceID == gsIn[0].instanceID.index)
+            continue;
+
+        gsOut.rtIndex = psmIdx;
+        gsOut.triangleIndex = gShadowMapsPerLight * primitiveID + psmIdx;
+        float4x4 lightViewProj = mul(gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].viewMat, gLightShadowDataBuffer[localLightIdx].persProjMat);
 
         for (uint v = 0; v < 3; v++)
         {
@@ -71,7 +75,6 @@ void gsMain(triangle VSOut gsIn[3], uint instanceID : SV_GSInstanceID, inout Tri
         }
         outStream.RestartStrip();
     }
-
 }
 
 /** D3DXMatrixPerspectiveFovRH (be care, it is row major, so it is multiplied in right!!!):
@@ -95,22 +98,6 @@ PSOut psMain(GSOut psIn)
 
     let lod = ExplicitLodTextureSampler(0.f);
     if (alphaTest(psIn.vsOut, psIn.triangleIndex, lod)) discard;
-
-    // Ignore the emissive surface's fragment
-    float3 viewDir = normalize(gScene.camera.getPosition() - psIn.vsOut.posW);
-    ShadingData sd = prepareShadingData(psIn.vsOut, psIn.triangleIndex, viewDir, lod);
-    // print("isEmissive = ", sd.mtl.isEmissive());
-    if (sd.mtl.isEmissive()) discard;
-
-    // Compute the depth bias
-    //  -> better do it in the shading part using NdotL
-    float NdotL = dot(psIn.vsOut.normalW, psIn.lightCenter - psIn.vsOut.posW);
-    // float bias = max(5.0 * gDepthBias * (1.0 - NdotL), gDepthBias);
-    float bias = gDepthBias + 5.0 * gDepthBias * max(ddx(psIn.vsOut.posH.z), ddy(psIn.vsOut.posH.z));
-
-    print("bias = ", bias);
-    print("ddx(psIn.vsOut.posH.z) = ", ddx(psIn.vsOut.posH.z));
-    print("ddy(psIn.vsOut.posH.z) = ", ddy(psIn.vsOut.posH.z));
 
     float depth = saturate(psIn.vsOut.posH.z);
     psOut.color = depth;

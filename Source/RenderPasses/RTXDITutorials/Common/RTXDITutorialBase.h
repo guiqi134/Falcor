@@ -226,7 +226,6 @@ protected:
 
     /** All types, parameters and resources for this render pass
     */ 
-    enum class SortingRules { AllPixels, OccludedPixels, ShadowEdgePixels};
     enum class ISMSceneType { Triangle, ThreePoints, CenterPoint };
     enum class ISMPushSamplingMode { Point, Interpolation };
 
@@ -240,7 +239,7 @@ protected:
     // Below are parameters for rendering, scene or updating control
     bool mEnableStatistics = false;
     bool mShadowParamsChanged = false;
-    bool mTurnOffShadowRay = false;
+    bool mEnableShadowRay = false;
     bool mShadowRayForRestPixels = false;
     bool mShadingVisibility = true;
     bool mDrawWireframe = false;
@@ -248,6 +247,8 @@ protected:
     bool mFullSizeShadowMaps = true;
     bool mAdaptiveISM = false;
     bool mOnlyUseIsmForTesting = false;
+    bool mLimitSwitchRegionInUpdating = true;
+    bool mRenderIsmCS = true;
 
     // Below are the parameters for debugging
     bool mFrozenFrame = false;
@@ -263,6 +264,7 @@ protected:
         bool getSortingData = false;
         bool getIsmData = false;
         bool getConverageData = false;
+        bool getReusingLightData = false;
     } mGpuDataToGet;
 
     // Below are the light infos  
@@ -273,22 +275,27 @@ protected:
     float2 mLightNearFarPlane = float2(0.001f, 100.0f);
 
     // Below are the parameters in our method
-    uint mLightTopN = 4u;
+    uint mLightTopN = 4u; 
+    uint mLightFaceTopN = 24u;
+    uint mTopN = 4u;
+    uint mPsmCountPerFrame = 24u;
     uint mTemporalReusingLength = 5u;
-    uint mCurrFrameLightStartIdx = 0u;
+    uint mCurrFrameReusingStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
     float mSmDepthBias = 1e-6f;
     float mConstEpsilonForAdaptiveDepthBias = 0;
     uint mUpdatingFrequency = 1u;
-    uint mSortingRules = (uint)SortingRules::AllPixels;
+    uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
+    uint mLightAgeThreshold = 1u;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;
-    float mIsmDepthBias = 0.003f; 
+    float2 mIsmDepthBias = float2(0.0f); 
     uint mIsmPerLight = 2u;
     uint mIsmVisTextureSize = 2048u; // max light: 2k*2k -> 128, 4k*4k -> 512 
     uint mIsmSize = 128u;
+    uint mIsmMinSize = 128u;
     uint mIsmMipLevels = 3;
     float mSceneDepthThresholdScale = 0.01f;
     float mDepthThreshold = 0.0f;
@@ -296,6 +303,8 @@ protected:
     uint mIsmLightSamplingMode = 0u;
     uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
     uint mIsmSceneType = (uint)ISMSceneType::ThreePoints;
+    bool mIsmLinearProjection = true;
+    uint mIsmMaxTriCountAcrossInstance = 0;
 
     // Global resources
     Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights
@@ -305,23 +314,19 @@ protected:
     Buffer::SharedPtr mpTotalValidPixels;
     Buffer::SharedPtr mpLightPdfBuffer;
     Buffer::SharedPtr mpLightCdfBuffer;
+    Buffer::SharedPtr mpTriOffsetBuffer;
 
     // Temporal resuing shadow map resources
+    std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
-    //Texture::SharedPtr mpReusingShadowMapsTexture; // TODO: use vector to store multiple texture arrays to hold all lights SM (in Emerald Scene)
 
     // ISM resources
-    Texture::SharedPtr mpIsmTextureArray; // Max lights = 1024
-    Texture::SharedPtr mpIsmTexture;
+    std::vector<Texture::SharedPtr> mSortedLightsISMs;
+    std::vector<Texture::SharedPtr> mSortedLightsISMsUint;
     Buffer::SharedPtr mpIsmLightIndexBuffer;
     Buffer::SharedPtr mpPointsBuffer;
     Buffer::SharedPtr mpCounterBuffer;
 
-    // Experiments with different shadow map resolutions
-    //std::vector<Texture::SharedPtr> mReusingSmTextureArrays; // 32, 64, 128, 256, 512, 1024 (max = 172 lights)
-    //std::map<uint, std::vector<Texture::SharedPtr>> mReusingSmTextureArrays;
-
-    std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
 
     /** Passes for computing and updating the top N lighs 
     */
@@ -339,9 +344,9 @@ protected:
 
     } mComputeTopLightsPass;
 
-    // Pass for updating light shadow data buffer when light data changes in animation
+    // Pass for updating light shadow data buffer due to different changes
     ComputePass::SharedPtr mpUpdateLightShadowDataCenter;
-
+    ComputePass::SharedPtr mpPerFrameGeneralUpdates;
     ComputePass::SharedPtr mpUpdateLightMeshData;
 
     /** Normal shadow map pass
@@ -363,17 +368,13 @@ protected:
     {
         GraphicsProgram::SharedPtr pProgram;
         GraphicsState::SharedPtr pState;
-        //GraphicsStateObject::SharedPtr pGSO;
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
     } mIsmRenderPass;
 
-    // TODO: using CS to render ISMs
-    struct
-    {
-        ComputePass::SharedPtr generatePoints;
-        ComputePass::SharedPtr renderISMs;
-    } mCsIsmRenderPass;
+    // Using CS to render ISMs
+    ComputePass::SharedPtr mpIsmRenderPassCS;
+    ComputePass::SharedPtr mpIsmUint2Float;
 
     ComputePass::SharedPtr mpIsmPullPass;
     ComputePass::SharedPtr mpIsmPushPass;
@@ -397,23 +398,32 @@ protected:
 
         std::vector<uint> extraPointsCount;
         uint totalExtraPoints;
+        uint totalPoints;
+        uint totalNonZeroLightOrFace;
 
         std::string sortedLightIndexArray;
         std::string reusingLightIndexArray;
         std::string ismLightIndexArray;
+        std::string lightRankingAcrossFrames;
 
         std::string shadowMapSizeCount;
-        uint64_t totalShadowTexSize;
+        uint64_t totalSmTexSize;
+        uint64_t totalIsmTexSize;
+
+        std::string reusingLightAge;
+        std::string reusingLightRanking;
+        std::string reusingLightFrequency;
     } mValuesToPrint;
 
     // Recording data resources
     Buffer::SharedPtr mpShadowOptionsBuffer; // Each pixel's shadow option (two places). Stores how each pixel's shadow is evalutated
     Buffer::SharedPtr mpExtraPointsCountBuffer;
     Buffer::SharedPtr mpShadowMapSizeBuffer;
+    Buffer::SharedPtr mpRecordReusingLightData;
 
     struct
     {
-        ComputePass::SharedPtr pVisualizeSingle;
+        ComputePass::SharedPtr pVisualizeSingleSm;
         ComputePass::SharedPtr pVisualizeAll;
         ComputePass::SharedPtr pVisualizeAll2;
     } mVisualizePass;
@@ -484,13 +494,14 @@ protected:
 
     /** Global functions 
     */
-    void allocateShadowTextureArrays();
-    void prepareLightShadowMapData();
+    void allocateShadowTextureArrays(RenderContext* pContext);
+    void allocateStochasticSmResrouces(RenderContext* pRenderContext, const RenderData& renderData);
+    std::vector<LightShadowMapData> prepareLightShadowMapData();
     void computeTopLightsPass(RenderContext* pRenderContext);
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
     ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint = "main", bool hasScene = false);
-    void visualizeShadowMapTex(ComputePass::SharedPtr pPass, Texture::SharedPtr pSrcTexture, Texture::SharedPtr pDstTexture, RenderContext* pRenderContext, uint mipLevel,
-        uint2 lightFaceIdx, const std::string& mode);
+    void visualizeShadowMapTex(ComputePass::SharedPtr pPass, std::vector<Texture::SharedPtr>& pSrcTexture, Texture::SharedPtr pDstTexture,
+        RenderContext* pRenderContext, uint mipLevel, uint2 lightFaceIdx, const std::string& mode);
 
     /** Some ISM functions
     */
@@ -503,10 +514,9 @@ protected:
 
     /** Debug & Print helper functions
     */ 
-    void printDeviceResources(RenderContext* pRenderContext);
     void calcDiffShadowCoverage(const std::vector<uint32_t>& shadowOptionsList, uint offset);
 
-    /** This function only supports getting the typed buffer data or texture with the multiple of word(4 bytes) size data
+    /** This function only supports getting the typed buffer data or texture with the multiple of a word (4 bytes) size data
     */ 
     template <typename T>
     std::vector<T> getDeviceResourceData(RenderContext* pRenderContext, const Resource::SharedPtr& pResource)
@@ -568,7 +578,6 @@ protected:
 
         return deviceResult;
     }
-    
 };
 
 // Operator overload for enum class type

@@ -43,8 +43,8 @@ Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 Texture2D<PackedHitInfo> gVbuffer;
 
-float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx,
-           out float3 dif, out float3 spec)
+float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx, bool shadingVisibility,
+            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
     if (!RTXDI_IsValidReservoir(reservoir)) return 0;
@@ -55,9 +55,11 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     // Evaluate the visibility
     int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+    float isVisible = 1.0f;
+    if (shadingVisibility)
+        isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
 
-    // float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM);
-    float isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
+    print("localLightID = ", localLightID);
 
     // Compute our geometry term for the light sample
     float geomTerm = lightSample.getJacobianAtoW();
@@ -90,7 +92,9 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    // printSetPixel(threadId.xy);
+    printSetPixel(threadId.xy);
+
+    print("222222222222222222222", 2);
 
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;
@@ -118,32 +122,63 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        float visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, difColor, specColor);
+        float visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, difColor, specColor);
 
         // Do statistics on light sampling, but also count for the visibility
-        // if (true)
         {
             int lightID = -1;
+            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
 
+            // Get mesh light ID
             uint idxInAllLight = RTXDI_GetReservoirLightIndex(reservoir);
             lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
+            if (gSortingRules == (uint)SortingRules::OccludedPixels && visibility == 0.0f) lightID = -1;
 
-            if (gSortingRules == 1 && visibility == 0.0f) lightID = -1;
+            print("lightID = ", lightID);
 
-            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-            gPrevLightSelectionBuffer[bufferIndex] = lightID;
+            // Get global light face ID
+            if (gSortingRules == (uint)SortingRules::LightFaces && lightID != -1)
+            {
+                float3 posW = RAB_GetSurfaceWorldPos(surface);
+                float3 lightPosW = gLightShadowDataBuffer[lightID].centerPosW;
+                float3 lightToShadingW = normalize(posW - lightPosW);
+                uint faceIdx = getFaceIndex(lightToShadingW);
+                print("faceIdx = ", faceIdx);
+                gPrevLightSelectionBuffer[bufferIndex] = int(gShadowMapsPerLight * lightID + faceIdx);
+            }
+            else
+            {
+                gPrevLightSelectionBuffer[bufferIndex] = lightID;
+            }
+
         }
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
 
+    // Extract a triangle hit from the V-buffer
+    HitInfo hit = HitInfo(gVbuffer[launchIdx]);
+    const TriangleHit triangleHit = hit.getTriangleHit();
+
+    uint emissiveTriIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+    print("emissive Triangle index = ", emissiveTriIndex);
+    if (emissiveTriIndex != UINT32_MAX)
+    {
+        print("active triangle index = ", gScene.lightCollection.getActiveTriangleIndex(emissiveTriIndex));
+        print("triangle mesh instance = ", gScene.lightCollection.getLightIdx(emissiveTriIndex));
+        print("triangle flux = ", gScene.lightCollection.fluxData[emissiveTriIndex].flux);
+    }
+
     // Visual debugging
     if (gDebugLight)
     {
+        uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightMeshID].instanceID;
         int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
 
-        print("debug light center = ", gLightShadowDataBuffer[gDebugLight].centerPosW);
+        // print("localLightID = ", localLightID);
+        // print("light triangle index = ", lightIndex);
+        print("debug light center = ", gLightShadowDataBuffer[gDebugLightMeshID].centerPosW);
 
         // Debugging mesh lights
         if (gDebugLightMeshID < gTotalLightMeshCount)
@@ -151,18 +186,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
             // For pixel has emissive surface
             if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
             {
-                uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightMeshID].instanceID;
 
-                HitInfo hit = HitInfo(gVbuffer[launchIdx]);
                 if (hit.isValid() && hit.getType() == HitType::Triangle)
                 {
-                    // Extract a triangle hit from the V-buffer
-                    const TriangleHit triangleHit = hit.getTriangleHit();
-
-                    print("triangle Hit instanceId = ", triangleHit.instanceID.index);
-
                     // Turn off all other light's emission
-                    if (triangleHit.instanceID.index != debugLightMeshInstanceID) outColor = float3(0.0f);
+                    if (triangleHit.instanceID.index != debugLightMeshInstanceID)
+                        outColor = float3(0.0f);
                 }
             }
             else
