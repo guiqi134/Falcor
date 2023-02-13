@@ -43,7 +43,7 @@ VSOut vsMain(VSIn vIn)
 
 // TODO: do the culling for each primitive and decide it will be visible on which face, then only loop over the visible face (ISM)
 [instance(1)]
-[maxvertexcount(18)] // Warning: this may cause bug if MAX_VERTEX_COUNT is larger than 100
+[maxvertexcount(MAX_VERTEX_COUNT)] // Warning: this may cause bug if MAX_VERTEX_COUNT is larger than 100
 void gsMain(triangle VSOut gsIn[3], uint gsInstanceID : SV_GSInstanceID, uint primitiveID : SV_PrimitiveID, inout TriangleStream<GSOut> outStream)
 {
     GSOut gsOut;

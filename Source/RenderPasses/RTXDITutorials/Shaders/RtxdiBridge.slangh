@@ -46,6 +46,8 @@
 #define USE_DXR_1_0  0
 #endif
 
+#define RTXDI_RANKING_RESERVOIR_OFFSET 3
+
 // A bunch of Falcor-specific includes needed for RTXDI bridge functionality.
 import Scene.Raytracing;
 import Scene.ShadingData;
@@ -159,6 +161,7 @@ cbuffer SharedCB
     bool gIsmLinearProjection;
     uint gShadowMapsPerLight;
     uint gSortingRules;
+    bool gOnlyIsmForRanking;
 
     uint gDebugLightMeshID;
     bool gDebugLight;
@@ -177,7 +180,7 @@ Texture2DArray<float> gSortedLightsShadowMaps[NUM_PSM_TEXTURE_ARRAYS]; // Order 
 Texture2DArray<float> gSortedLightsISMs[NUM_ISM_TEXTURE_ARRAYS];
 
 // Global evaluate visiblity functions for two stages in RTXDI
-bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode)
+bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, out uint shadowOption)
 {
     bool isVisible = true;
 
@@ -198,19 +201,19 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
     if (gVisMode == (uint)Visibility::AllShadowRay)
     {
         isVisible = RAB_GetVisibility(surface, lightSample);
-        gShadowOptionsBuffer[bufferIndex] = 4;
+        shadowOption = 4;
     }
     // Evaulate shadow maps
     else if (gVisMode == (uint)Visibility::ShadowMap_FullyLit || gVisMode == (uint)Visibility::ShadowMap_ISM)
     {
-        gShadowOptionsBuffer[bufferIndex] = 1;
+        shadowOption = 1;
 
         // light has shadow map? ...
         if (lightShadowMapType == 1)
         {
             isVisible = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightFaceData.whichPsmTexArray], gLinearSampler, gSmDepthBias, faceIdx, gSortingRules,
-                gDepthBiasMode, gConstEpsilon);
-            gShadowOptionsBuffer[bufferIndex] = 2;
+                                           gDepthBiasMode, gConstEpsilon);
+            shadowOption = 2;
         }
         else
         {
@@ -224,13 +227,13 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
                 }
 
                 isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx, gIsmLinearProjection);
-                gShadowOptionsBuffer[bufferIndex] = 3;
+                shadowOption = 3;
             }
             // Use shadow ray?
             else if (gShadowRayForRestPixels)
             {
                 isVisible = RAB_GetVisibility(surface, lightSample);
-                gShadowOptionsBuffer[bufferIndex] = 4;
+                shadowOption = 4;
             }
         }
     }
@@ -243,8 +246,10 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
         }
 
         isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx, gIsmLinearProjection);
-        gShadowOptionsBuffer[bufferIndex] = 3;
+        shadowOption = 3;
     }
+
+    gShadowOptionsBuffer[bufferIndex] = shadowOption;
 
     return isVisible;
 }

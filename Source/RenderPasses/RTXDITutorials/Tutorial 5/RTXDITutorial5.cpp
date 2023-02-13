@@ -70,6 +70,9 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // If needed, allocate the resources in our method
     if (!mpSortedLightsBuffer) allocateStochasticSmResrouces(pRenderContext, renderData);
 
+    // Update the data in this render pass
+    RTXDITutorialBase::execute(pRenderContext, renderData);
+
     // A few UI changes give screwy results if reusing across the change; zero our reservoirs in these cases
     if (mPassData.clearReservoirs)
     {
@@ -83,9 +86,6 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
 
     // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
     prepareSurfaceData(pRenderContext, renderData);
-
-    // Update the data in this render pass
-    RTXDITutorialBase::execute(pRenderContext, renderData);
 
     // Wait until ReSTIR is stable. This should happen after updating the params
     mEnableShadowRay = mRtxdiFrameParams.frameIndex < mLightingParams.maxHistoryLength ? true : false;
@@ -144,6 +144,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         candidatesVars["SampleCB"]["gLocalSamples"] = mLightingParams.primLightSamples;
         candidatesVars["SampleCB"]["gEnvironmentSamples"] = mLightingParams.envLightSamples;
         candidatesVars["SampleCB"]["gOutputReservoirIndex"] = uint(2);
+        candidatesVars["SampleCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
         setupRTXDIBridgeVars(candidatesVars, renderData);
         mpPixelDebug->prepareProgram(mShader.initialCandidates->getProgram(), candidatesVars);
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
@@ -154,7 +155,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
     {
         FALCOR_PROFILE("Candidate Visibility");
         uint checkCandiateVisMode = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
-        checkCandiateVisMode = mOnlyUseIsmForTesting ? uint(Visibility::AllISM) : checkCandiateVisMode;
+        //checkCandiateVisMode = mOnlyIsmForRanking ? uint(Visibility::AllISM) : checkCandiateVisMode;
 
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
@@ -190,6 +191,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         reuseVars["ReuseCB"]["gSamplesInDisocclusions"] = uint(mLightingParams.spatialSamples);
         reuseVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         reuseVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
+        reuseVars["ReuseCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
         setupRTXDIBridgeVars(reuseVars, renderData);
         mpPixelDebug->prepareProgram(mShader.spatiotemporalReuse->getProgram(), reuseVars);
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);

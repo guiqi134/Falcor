@@ -56,8 +56,9 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex);
     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
     float isVisible = 1.0f;
+    uint shadowOption;
     if (shadingVisibility)
-        isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
+        isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, shadowOption);
 
     print("localLightID = ", localLightID);
 
@@ -107,11 +108,13 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // Load the reservoir with the light sample we need to shade
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex);
+    RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0, specColor = 0;
+    float visibility = 1.0f;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
     {
         // Lookup the selected light and the specific light sample on it.
@@ -122,40 +125,45 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        float visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, difColor, specColor);
-
-        // Do statistics on light sampling, but also count for the visibility
-        {
-            int lightID = -1;
-            uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-
-            // Get mesh light ID
-            uint idxInAllLight = RTXDI_GetReservoirLightIndex(reservoir);
-            lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
-            if (gSortingRules == (uint)SortingRules::OccludedPixels && visibility == 0.0f) lightID = -1;
-
-            print("lightID = ", lightID);
-
-            // Get global light face ID
-            if (gSortingRules == (uint)SortingRules::LightFaces && lightID != -1)
-            {
-                float3 posW = RAB_GetSurfaceWorldPos(surface);
-                float3 lightPosW = gLightShadowDataBuffer[lightID].centerPosW;
-                float3 lightToShadingW = normalize(posW - lightPosW);
-                uint faceIdx = getFaceIndex(lightToShadingW);
-                print("faceIdx = ", faceIdx);
-                gPrevLightSelectionBuffer[bufferIndex] = int(gShadowMapsPerLight * lightID + faceIdx);
-            }
-            else
-            {
-                gPrevLightSelectionBuffer[bufferIndex] = lightID;
-            }
-
-        }
+        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, difColor, specColor);
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
+
+    // Do statistics on light sampling, but also count for the visibility
+    if (!gOnlyIsmForRanking)
+        rankingReservoir = reservoir;
+    int lightID = -1;
+    uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+    if (isValidSurface && RTXDI_IsValidReservoir(rankingReservoir))
+    {
+        // Get mesh light ID
+        uint idxInAllLight = RTXDI_GetReservoirLightIndex(rankingReservoir); // triangle + point light index
+        lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
+        if (gSortingRules == (uint)SortingRules::OccludedPixels && visibility == 0.0f) lightID = -1;
+
+        print("lightID = ", lightID);
+
+        // Get global light face ID
+        if (gSortingRules == (uint)SortingRules::LightFaces && lightID != -1)
+        {
+            float3 posW = RAB_GetSurfaceWorldPos(surface);
+            float3 lightPosW = gLightShadowDataBuffer[lightID].centerPosW;
+            float3 lightToShadingW = normalize(posW - lightPosW);
+            uint faceIdx = getFaceIndex(lightToShadingW);
+            gPrevLightSelectionBuffer[bufferIndex] = int(gShadowMapsPerLight * lightID + faceIdx);
+        }
+        else
+        {
+            gPrevLightSelectionBuffer[bufferIndex] = lightID;
+        }
+    }
+    else
+    {
+        gPrevLightSelectionBuffer[bufferIndex] = lightID;
+    }
+
 
     // Extract a triangle hit from the V-buffer
     HitInfo hit = HitInfo(gVbuffer[launchIdx]);

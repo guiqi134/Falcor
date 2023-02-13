@@ -142,8 +142,7 @@ struct RTXDI_ResamplingRuntimeParameters
     RTXDI_ReGIRGridParameters regirGrid;
     RTXDI_ReGIROnionParameters regirOnion;
 };
-
-struct RTXDI_PackedReservoir
+struct RTXDI_PackedReservoir // 24B
 {
     uint32_t lightData;
     uint32_t uvData;

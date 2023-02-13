@@ -52,7 +52,6 @@
     </ClInclude>
     <ClInclude Include="Common\RTXDITutorialBase.h" />
     <ClInclude Include="Common\RTXDITutorialConstants.h" />
-    <ClInclude Include="Common\RtxdiTypes.h" />
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
     <ClInclude Include="rtxdi\RTXDI.h" />
     <ClInclude Include="rtxdi\RtxdiParameters.h" />

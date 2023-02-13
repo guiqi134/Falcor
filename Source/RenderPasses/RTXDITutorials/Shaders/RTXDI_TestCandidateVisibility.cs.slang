@@ -73,17 +73,28 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         if (gDebugLight) localLightID = (int)gDebugLightMeshID;
 
-        bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode);
-        // isVisible = true;
-
-        if (localLightID == 389)
-            print("localLightID = ", localLightID);
-        print("isVisible = ", isVisible);
-
+        // Evaluate the visiblity for shading reservoir
+        uint shadowOption;
+        bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, shadowOption);
         if (!isVisible)
         {
             RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
+        }
+
+        // Also evalute the ISM for ranking reservoir if it is a PSM light
+        // if (shadowOption == (uint)ShadowOptions::PSM && gOnlyIsmForRanking)
+        if (gOnlyIsmForRanking)
+        {
+            // So far, ranking reservoir is the same as shading reservoir. Just copy the data to ranking reservoir
+            RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+
+            isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, shadowOption);
+            if (!isVisible)
+            {
+                RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
+                RTXDI_StoreReservoir(rankingReservoir, params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+            }
         }
     }
 }

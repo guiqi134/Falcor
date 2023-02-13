@@ -18,7 +18,7 @@
 #error "RTXDI_LIGHT_RESERVOIR_BUFFER must be defined to point to a RWStructuredBuffer<RTXDI_PackedReservoir> type resource"
 #endif
 
-// Define this macro to 0 if your shader needs read-only access to the reservoirs, 
+// Define this macro to 0 if your shader needs read-only access to the reservoirs,
 // to avoid compile errors in the RTXDI_StoreReservoir function
 #ifndef RTXDI_ENABLE_STORE_RESERVOIR
 #define RTXDI_ENABLE_STORE_RESERVOIR 1
@@ -29,10 +29,10 @@
 struct RTXDI_Reservoir
 {
     // Light index (bits 0..30) and validity bit (31)
-    uint lightData;     
+    uint lightData;
 
     // Sample UV encoded in 16-bit fixed point format
-    uint uvData;        
+    uint uvData;
 
     // Overloaded: represents RIS weight sum during streaming,
     // then reservoir weight (inverse PDF) after FinalizeResampling
@@ -91,9 +91,9 @@ RTXDI_PackedReservoir RTXDI_PackReservoir(const RTXDI_Reservoir reservoir)
     data.mVisibility = reservoir.packedVisibility
         | (min(uint(reservoir.M), RTXDI_PackedReservoir_MaxM) << RTXDI_PackedReservoir_MShift);
 
-    data.distanceAge = 
-          ((clampedSpatialDistance.x & RTXDI_PackedReservoir_DistanceMask) << RTXDI_PackedReservoir_DistanceXShift) 
-        | ((clampedSpatialDistance.y & RTXDI_PackedReservoir_DistanceMask) << RTXDI_PackedReservoir_DistanceYShift) 
+    data.distanceAge =
+          ((clampedSpatialDistance.x & RTXDI_PackedReservoir_DistanceMask) << RTXDI_PackedReservoir_DistanceXShift)
+        | ((clampedSpatialDistance.y & RTXDI_PackedReservoir_DistanceMask) << RTXDI_PackedReservoir_DistanceYShift)
         | (clampedAge << RTXDI_PackedReservoir_AgeShift);
 
     data.targetPdf = reservoir.targetPdf;
@@ -167,7 +167,7 @@ void RTXDI_StoreVisibilityInReservoir(
     bool discardIfInvisible)
 {
     // Pack float3 to uint
-    reservoir.packedVisibility = uint(saturate(visibility.x) * RTXDI_PackedReservoir_VisibilityChannelMax) 
+    reservoir.packedVisibility = uint(saturate(visibility.x) * RTXDI_PackedReservoir_VisibilityChannelMax)
         | (uint(saturate(visibility.y) * RTXDI_PackedReservoir_VisibilityChannelMax)) << RTXDI_PackedReservoir_VisibilityChannelShift
         | (uint(saturate(visibility.z) * RTXDI_PackedReservoir_VisibilityChannelMax)) << (RTXDI_PackedReservoir_VisibilityChannelShift * 2);
 

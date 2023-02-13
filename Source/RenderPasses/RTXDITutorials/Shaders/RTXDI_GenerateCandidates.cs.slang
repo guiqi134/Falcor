@@ -36,7 +36,8 @@ cbuffer SampleCB
 {
     uint  gLocalSamples;           // How many candidate lights should RTXDI pick on emissive triangles / primitives
     uint  gEnvironmentSamples;     // How many candidate lights should RTXDI pick on the environment map
-    uint  gOutputReservoirIndex;   // Which of our reservoirs should we use for output?
+    uint gOutputReservoirIndex;    // Which of our reservoirs should we use for output?
+    uint gVisMode;
 }
 
 
@@ -79,4 +80,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     // Store data about our selected light in an intermediate reservoir for later reuse and shading.
     RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex);
+
+    if (gOnlyIsmForRanking)
+        RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
 }

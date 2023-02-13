@@ -39,7 +39,7 @@
 
 cbuffer ReuseCB
 {
-    uint  gCurFrameInputReservoirIndex;
+    uint  gCurFrameInputReservoirIndex; // = uint(2)
     uint  gPrevFrameInputReservoirIndex;
     uint  gOutputReservoirIndex;
     uint  gMaxHistory;
@@ -52,6 +52,7 @@ cbuffer ReuseCB
     uint  gSamplesInDisocclusions;
     bool  gUseVisibilityShortcut;
     bool gEnablePermutationSampling;
+    uint gVisMode;
 }
 
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
@@ -72,16 +73,12 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
 
     // Create our reservoir temporary for accumulating spatial samples
     RTXDI_Reservoir restirResult = RTXDI_EmptyReservoir();
+    RTXDI_Reservoir restirRankingResult = RTXDI_EmptyReservoir();
 
-    // Actually execute the resampling on valid visibile geometry
-    uint currentLightIndex = -1;
-    float2 currentSampleUV = float2(0.0f);
     if (RAB_IsSurfaceValid(surface))
     {
         // We want to combine our previously-computed light sample...
         RTXDI_Reservoir curSample = RTXDI_LoadReservoir(params, launchIdx, gCurFrameInputReservoirIndex);
-        currentLightIndex = RTXDI_GetReservoirLightIndex(curSample);
-        currentSampleUV = RTXDI_GetReservoirSampleUV(curSample);
 
         // ... with the results of our spatiotemporal resampling.  Set parameters here...
         RTXDI_SpatioTemporalResamplingParameters stparams;
@@ -98,10 +95,23 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         stparams.enablePermutationSampling = gEnablePermutationSampling;
 
         // ... then actually spawn the spatiotemporal resampling.
-        RAB_LightSample selectedSample = (RAB_LightSample)0;
-        int2            selectedSamplePos = 0;
-        restirResult = RTXDI_SpatioTemporalResampling(pixelPosition, surface, curSample,
-            rng, stparams, params, selectedSamplePos, selectedSample);
+        RAB_LightSample selectedSample[2] = { (RAB_LightSample)0, (RAB_LightSample)0 };
+        int2 selectedSamplePos = 0;
+
+        if (gOnlyIsmForRanking)
+        {
+            RTXDI_Reservoir curSamples[2] = {
+                curSample,
+                RTXDI_LoadReservoir(params, launchIdx, gCurFrameInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET)
+            };
+            restirResult = RTXDI_SpatioTemporalResampling(pixelPosition, surface, curSamples,
+                rng, stparams, params, selectedSamplePos, selectedSample, restirRankingResult);
+        }
+        else
+        {
+            restirResult = RTXDI_SpatioTemporalResampling(pixelPosition, surface, curSample,
+                rng, stparams, params, selectedSamplePos, selectedSample[0]);
+        }
     }
 
     // If requested (and if we're in a compute shader), spawn a filter to surpress boiling
@@ -112,20 +122,9 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     }
 #endif
 
-    // Do statistics after biased reusing
-    // if (false)
-    // {
-    //     int lightID = -1;
-    //     if (RTXDI_IsValidReservoir(restirResult))
-    //     {
-    //         uint idxInAllLight = RTXDI_GetReservoirLightIndex(restirResult);
-    //         lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex);
-    //     }
-
-    //     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-    //     gPrevLightSelectionBuffer[bufferIndex] = lightID;
-    // }
-
     // Store the reservoir after spatiotemporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(restirResult, params, launchIdx, gOutputReservoirIndex);
+
+    if (gOnlyIsmForRanking)
+        RTXDI_StoreReservoir(restirRankingResult, params, launchIdx, gOutputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
 }

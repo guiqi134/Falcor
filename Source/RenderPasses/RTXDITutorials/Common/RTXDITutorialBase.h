@@ -88,7 +88,7 @@ protected:
     /** Config setting : Maximum number of unique screen-sized reservoir bufers needed by any
         of our derived RTXDI tutorials.  This just controls memory allocation (not really perf)
     */
-    static const uint32_t kMaxReservoirs = 3;   // 3 is probably sufficient with careful ping-ponging
+    static const uint32_t kMaxReservoirs = 6;   // 3 is probably sufficient with careful ping-ponging
 
     // Structures built by, for, or needed explicitly by RTXDI
     rtxdi::ContextParameters           mRtxdiContextParams;      // Parameters that largely stay constant during program execution
@@ -246,7 +246,7 @@ protected:
     bool mAdaptiveLightNearPlane = false;
     bool mFullSizeShadowMaps = true;
     bool mAdaptiveISM = false;
-    bool mOnlyUseIsmForTesting = false;
+    bool mOnlyIsmForRanking = true;
     bool mLimitSwitchRegionInUpdating = true;
     bool mRenderIsmCS = true;
 
@@ -272,11 +272,11 @@ protected:
     uint mTotalPointLightsCount = 0u;
     uint mTotalLightsCount = 0u;
     std::vector<PointLight*> mPointLights;
-    float2 mLightNearFarPlane = float2(0.001f, 100.0f);
+    float2 mLightNearFarPlane = float2(0.001f, 1000.0f);
 
     // Below are the parameters in our method
     uint mLightTopN = 4u; 
-    uint mLightFaceTopN = 24u;
+    uint mLightFaceTopN = 24u; // Bug: the program will crash when directly entering the value for this
     uint mTopN = 4u;
     uint mPsmCountPerFrame = 24u;
     uint mTemporalReusingLength = 5u;
@@ -288,6 +288,7 @@ protected:
     uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
     uint mLightAgeThreshold = 1u;
+    TemporalReusingFix mTemporalReusingFix = TemporalReusingFix::None;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;

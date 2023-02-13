@@ -56,9 +56,6 @@
       <Filter>Combined</Filter>
     </ClInclude>
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
-    <ClInclude Include="Common\RtxdiTypes.h">
-      <Filter>rtxdi</Filter>
-    </ClInclude>
     <ClInclude Include="rtxdi\RTXDI.h">
       <Filter>rtxdi</Filter>
     </ClInclude>

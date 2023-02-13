@@ -357,7 +357,8 @@ namespace Falcor
     {
         if (drawCount == 0) return;
 
-        logInfo("drawCount = {}" + std::to_string(drawCount));
+        logInfo(std::format("drawCount = {}, indexData count = {}, static data count = {}, skinning data count = {}",
+            drawCount, indexData.size(), staticData.size(), skinningData.size());
 
         // Create the index buffer.
         size_t ibSize = sizeof(uint32_t) * indexData.size();
