@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "Scene/SceneDefines.slangh"
 
+import Utils.Debug.PixelDebug;
 import Scene.Raytracing;
 import Scene.Intersection;
 import Scene.SDFs.SDFGridHitData;
@@ -180,6 +181,8 @@ void sdfGridClosestHit(inout RayData rayData, SDFGridHitData sdfGridHitData)
 void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
+
+    printSetPixel(launchIndex);
 
     GpuTimer timer;
     gVBufferRT.beginTime(timer);

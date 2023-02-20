@@ -179,13 +179,16 @@ Texture2DArray<float> gSortedLightsShadowMaps[NUM_PSM_TEXTURE_ARRAYS]; // Order 
 // All light's ISMs in light ranking order
 Texture2DArray<float> gSortedLightsISMs[NUM_ISM_TEXTURE_ARRAYS];
 
+// Debugging textures
+RWTexture2D<float4> gDebugScreenMotion;
+
 // Global evaluate visiblity functions for two stages in RTXDI
 bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, out uint shadowOption)
 {
     bool isVisible = true;
 
     LightShadowMapData lightData = gLightShadowDataBuffer[localLightID];
-    // lightData = gLightShadowDataBuffer[389];
+    // lightData = gLightShadowDataBuffer[1];
 
     // Get surface data
     float3 posW = RAB_GetSurfaceWorldPos(surface);

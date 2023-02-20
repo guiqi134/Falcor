@@ -31,13 +31,15 @@ cbuffer CB
     uint gSortingRules;
     uint gMaxSupportedShadowMaps1024;
     uint gMaxPsmPerArray;
+    uint gTemporalReusingFix;
 }
 
 Buffer<uint2> gSortedLightsBuffer; // only need top N light/face index
-RWBuffer<uint> gTotalValidPixels;
 RWBuffer<uint> gReusingLightIndexBuffer;
 RWBuffer<uint> gIsmLightIndexBuffer;
 RWStructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
+RWBuffer<uint> gTotalValidPixels;
+
 RWBuffer<uint> gShadowMapSizeBuffer;
 RWBuffer<uint4> gRecordReusingLightData;
 
@@ -68,6 +70,7 @@ void generalUpdates(uint3 threadId: SV_DispatchThreadID)
 
         gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].currRanking = threadId.x;
         gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].accumulatedFrames += 1;
+        gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmAge += 1;
     }
     else
     {
@@ -77,6 +80,17 @@ void generalUpdates(uint3 threadId: SV_DispatchThreadID)
         gLightShadowDataBuffer[localLightIdx].lightFaceData[0].currRanking = threadId.x;
         // Count the frames accumulated
         gLightShadowDataBuffer[threadId.x].lightFaceData[0].accumulatedFrames += 1;
+        gLightShadowDataBuffer[threadId.x].lightFaceData[0].psmAge += 1;
+    }
+}
+
+// This is at the end of stochastic shadow map function
+[numthreads(256, 1, 1)]
+void updatePrevViewMatrices(uint3 threadID: SV_DispatchThreadID)
+{
+    for (uint face = 0; face < gShadowMapsPerLight; face++)
+    {
+        gLightShadowDataBuffer[threadID.x].lightFaceData[face].prevViewMat = gLightShadowDataBuffer[threadID.x].lightFaceData[face].viewMat;
     }
 }
 
@@ -94,29 +108,34 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Find the top N lights in this frame and only update the valid light (light that is less posssible to cause flickering)
     if (gVisibility != (uint)Visibility::AllISM)
     {
-        uint validIndex[VALID_ARRAY_SIZE]; // TODO: use define to set this value
+        bool validMask[VALID_ARRAY_SIZE];
         uint validCount = 0;
 
         print("VALID_ARRAY_SIZE = ", VALID_ARRAY_SIZE);
 
+        // 1. Iterate over all the light face in current frame's reusing section
         for (uint j = 0; j < gTopN; j++)
         {
             // Get previous stored light mesh/face index in reusing buffer, we're going to update its data
             uint prevLightOrGlobalFaceIdx = gReusingLightIndexBuffer[reusingBufferIdx + j];
 
-            // Get the local light index and face index
-            uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx / gShadowMapsPerLight : prevLightOrGlobalFaceIdx;
-            uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
-            LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx]; // only for read
-
             // It is valid if there is no light data
             if (prevLightOrGlobalFaceIdx == UINT32_MAX)
             {
-                validIndex[validCount] = reusingBufferIdx + j;
+                validMask[j] = true;
                 validCount++;
             }
             else
             {
+                // Get the local light index and face index
+                uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx / gShadowMapsPerLight : prevLightOrGlobalFaceIdx;
+                uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+                LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx]; // only for read
+
+                // Mark this face as old
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].newPsmLightFace = false;
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmAge = 0;
+
                 // Limit the light switching around the boundary region
                 bool isSwitchingRegionOk = true;
                 uint prevRanking = lightFaceData.prevRanking;
@@ -128,12 +147,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
                     isSwitchingRegionOk = !((prevRanking >= limitedRegion.x && prevRanking < limitedRegion.z) && (currRanking >= limitedRegion.x && currRanking < limitedRegion.z));
                     // isSwitchingRegionOk = !((prevRanking >= limitedRegion.x && prevRanking < limitedRegion.y) && (currRanking >= limitedRegion.y && currRanking < limitedRegion.z));
 
-                    print("limitedRegion = ", limitedRegion);
-                    print("prevRanking = ", prevRanking);
-                    print("currRanking = ", currRanking);
+                    // print("limitedRegion = ", limitedRegion);
+                    // print("prevRanking = ", prevRanking);
+                    // print("currRanking = ", currRanking);
                 }
 
-                print("isSwitchingRegionOk = ", isSwitchingRegionOk);
+                // print("isSwitchingRegionOk = ", isSwitchingRegionOk);
 
                 // Check if the light accumulated frames is large enough
                 bool isAccumulatedFramesOk = lightFaceData.accumulatedFrames >= gAgeThreshold;
@@ -142,19 +161,28 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 // Clear previous shadow map data if it is completely valid
                 if (isSwitchingRegionOk && isAccumulatedFramesOk)
                 {
-                    validIndex[validCount] = reusingBufferIdx + j;
+                    validMask[j] = true;
                     validCount++;
 
                     gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].shadowMapType = 0; // this is most important
                     gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].shadowMapSize = 0;
                 }
+                else
+                {
+                    validMask[j] = false;
+                }
             }
         }
 
         print("validCount = ", validCount);
+        print("gCurrFrameReusingStartIdx = ", gCurrFrameReusingStartIdx);
+        print("gTotalBinCount = ", gTotalBinCount);
 
-        // Then updating PSM resuing list from the target index
-        for (uint i = 0, j = 0; i < gTotalBinCount; i++)
+        // 2. Iterate over face ranking list in this frame. Updating PSM light face ID and light shadow data for valid index selected in previous step
+        uint3 newPsmLightFaces[VALID_ARRAY_SIZE];
+        uint currNewPsmIdx = 0;
+        uint j = 0;
+        for (uint i = 0; i < gTotalBinCount; i++)
         {
             // Get light and face index
             uint lightOrGlobalFaceIdx = gSortedLightsBuffer[i].x;
@@ -164,33 +192,29 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
             gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].rankingFreqInFrame = uint2(i, gSortedLightsBuffer[i].y);
 
+            // Update old PSM light data and some partial data of new PSM light
             if (lightFaceData.shadowMapType != 1 && j < validCount)
             {
-                // Store new light mesh index and update its light data
-                uint reusingBufferValidIdx = validIndex[j];
-                gReusingLightIndexBuffer[reusingBufferValidIdx] = lightOrGlobalFaceIdx;
-                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].shadowMapType = 1;
-                if (gSortingRules == (uint)SortingRules::LightFaces)
+                // Record the ID of new PSM light
+                if (lightFaceData.newPsmLightFace)
                 {
-                    int globalPsmTexArrayIdx = (int)reusingBufferValidIdx;
-                    gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmTexArrayIdx = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? globalPsmTexArrayIdx :
-                        int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) % gMaxPsmPerArray);
-                    gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].whichPsmTexArray = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? 0u :
-                        int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) / gMaxPsmPerArray + 1u);
+                    print("lightOrGlobalFaceIdx = ", lightOrGlobalFaceIdx);
+                    newPsmLightFaces[currNewPsmIdx] = uint3(lightOrGlobalFaceIdx, localLightIdx, faceIdx);
+                    currNewPsmIdx++;
                 }
                 else
                 {
-                    int globalPsmTexArrayStartIdx = int(reusingBufferValidIdx * gShadowMapsPerLight);
-                    print("globalPsmTexArrayStartIdx = ", globalPsmTexArrayStartIdx);
-                    for (uint face = 0; face < gShadowMapsPerLight; face++)
-                    {
-                        int globalPsmTexArrayIdx = int(globalPsmTexArrayStartIdx + face);
-                        gLightShadowDataBuffer[localLightIdx].lightFaceData[face].psmTexArrayIdx = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? globalPsmTexArrayIdx :
-                            int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) % gMaxPsmPerArray);
-                        gLightShadowDataBuffer[localLightIdx].lightFaceData[face].whichPsmTexArray = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? 0u :
-                            int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) / gMaxPsmPerArray + 1u);
-                    }
+                    uint validMaskIndex = (gSortingRules == (uint)SortingRules::LightFaces ? lightFaceData.psmTexArrayIdx : lightFaceData.psmTexArrayIdx / gShadowMapsPerLight) % gTopN;
+                    validMask[validMaskIndex] = false;
+
+                    print("validMaskIndex = ", validMaskIndex);
                 }
+
+                // Mark the light face as PSM face
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].shadowMapType = 1;
+
+                // Reset the age
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmAge = 0;
 
                 // Use the ranking change to see if this is a switch from ISM to PSM
                 uint prevRanking = lightFaceData.prevRanking;
@@ -224,9 +248,49 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 j++;
             }
         }
+
+        // Replace target positions in reusing list with new PSM light face and update indexing data
+        currNewPsmIdx = 0;
+        for (j = 0; j < gTopN; j++)
+        {
+            if (validMask[j])
+            {
+                uint3 newPsmLightFace = newPsmLightFaces[currNewPsmIdx];
+                uint currReusingBufferIdx = reusingBufferIdx + j;
+                uint localLightIdx = newPsmLightFace.y;
+                uint faceIdx = newPsmLightFace.z;
+
+                print("newPsmLightFace = ", newPsmLightFace);
+
+                // Only update the index for new PSM light face.
+                gReusingLightIndexBuffer[currReusingBufferIdx] = newPsmLightFace.x;
+                if (gSortingRules == (uint)SortingRules::LightFaces)
+                {
+                    int globalPsmTexArrayIdx = (int)currReusingBufferIdx;
+                    gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmTexArrayIdx = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? globalPsmTexArrayIdx :
+                    int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) % gMaxPsmPerArray);
+                    gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].whichPsmTexArray = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? 0u :
+                    int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) / gMaxPsmPerArray + 1u);
+                }
+                else
+                {
+                    int globalPsmTexArrayStartIdx = int(currReusingBufferIdx * gShadowMapsPerLight);
+                    for (uint face = 0; face < gShadowMapsPerLight; face++)
+                    {
+                        int globalPsmTexArrayIdx = int(globalPsmTexArrayStartIdx + face);
+                        gLightShadowDataBuffer[localLightIdx].lightFaceData[face].psmTexArrayIdx = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? globalPsmTexArrayIdx :
+                        int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) % gMaxPsmPerArray);
+                        gLightShadowDataBuffer[localLightIdx].lightFaceData[face].whichPsmTexArray = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? 0u :
+                        int((globalPsmTexArrayIdx - gMaxSupportedShadowMaps1024) / gMaxPsmPerArray + 1u);
+                    }
+                }
+
+                currNewPsmIdx++;
+            }
+        }
     }
 
-    // Also update all lights using ISM if it is not a regular shadow map type
+    // 3. Iterate over face ranking list in this frame. Also update all ISM light face resources
     if (gVisibility != (uint)Visibility::ShadowMap_FullyLit)
     {
         uint bufferSize;
@@ -259,6 +323,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
             if (lightFaceData.shadowMapType != 1)
             {
+                // ISM light face can be considered as a potiential new PSM light face
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].newPsmLightFace = true;
+                gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmAge = 0;
+
                 // Store new light mesh index and update its light data
                 gIsmLightIndexBuffer[bufferIdx] = lightOrGlobalFaceIdx;
                 gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].shadowMapType = 2;
@@ -276,7 +344,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         }
     }
 
-    // Write current ranking into previous ranking
+    // 4. Write current ranking into previous ranking
     for (uint j = 0; j < gTopN; j++)
     {
         uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[reusingBufferIdx + j];
@@ -317,11 +385,14 @@ void main(uint3 threadId : SV_DispatchThreadID)
     for (uint i = 0; i < gMaxReusingCount; i++)
     {
         uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[i];
+        // if (i > 100)
+        //     print("currLightOrGlobalFaceIdx = ", currLightOrGlobalFaceIdx);
         uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx / gShadowMapsPerLight : currLightOrGlobalFaceIdx;
         uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
         LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx];
 
-        gRecordReusingLightData[i] = uint4(lightFaceData.accumulatedFrames, lightFaceData.rankingFreqInFrame.x, lightFaceData.rankingFreqInFrame.y, 0);
+        // gRecordReusingLightData[i] = uint4(lightFaceData.accumulatedFrames, lightFaceData.rankingFreqInFrame.x, lightFaceData.rankingFreqInFrame.y, 0);
+        gRecordReusingLightData[i] = uint4(lightFaceData.newPsmLightFace, lightFaceData.rankingFreqInFrame.x, lightFaceData.rankingFreqInFrame.y, 0);
     }
 }
 

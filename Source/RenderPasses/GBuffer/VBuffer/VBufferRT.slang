@@ -30,6 +30,8 @@ __exported import Utils.Timing.GpuTimer;
 __exported import Utils.Math.Ray;
 import Utils.Math.MathHelpers;
 import Utils.Sampling.SampleGenerator;
+import Utils.Debug.PixelDebug;
+
 
 RWTexture2D<PackedHitInfo> gVBuffer;
 RWTexture2D<float>  gDepth;
@@ -100,11 +102,25 @@ struct VBufferRT
             prevPosW = gScene.getPrevPosWFromSDFGrid(sdfGridHit, v.posW);
         }
 
+
         if (hit.getType() == HitType::Triangle || hit.getType() == HitType::DisplacedTriangle || hit.getType() == HitType::Curve || hit.getType() == HitType::SDFGrid)
         {
             // Compute depth similar to raster (NDC).
             float4 curPosH = mul(float4(v.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
             depth = curPosH.z / curPosH.w;
+
+            print("prevPosW = ", prevPosW);
+            print("posW = ", v.posW);
+            const TriangleHit triangleHit = hit.getTriangleHit();
+            const GeometryInstanceData instance = gScene.getGeometryInstance(triangleHit.instanceID);
+            //const float4x4 prevWorldMat = gScene.loadPrevWorldMatrix(instance.globalMatrixID);
+            const float4x4 prevWorldMat = gScene.getPrevWorldMatrix(triangleHit.instanceID);
+            //const float4x4 worldMat = gScene.loadWorldMatrix(instance.globalMatrixID);
+            const float4x4 worldMat = gScene.getWorldMatrix(triangleHit.instanceID);
+            for (uint i = 0; i < 4; i++)
+                print("prevWorldMat = ", prevWorldMat[i]);
+            for (uint i = 0; i < 4; i++)
+                print("worldMat = ", worldMat[i]);
 
             // Compute motion vector.
             float2 pixelPos = pixel + float2(0.5f, 0.5f);

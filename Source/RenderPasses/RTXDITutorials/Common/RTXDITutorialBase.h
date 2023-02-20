@@ -249,6 +249,7 @@ protected:
     bool mOnlyIsmForRanking = true;
     bool mLimitSwitchRegionInUpdating = true;
     bool mRenderIsmCS = true;
+    bool mUseReconstructPSMs = false;
 
     // Below are the parameters for debugging
     bool mFrozenFrame = false;
@@ -279,7 +280,7 @@ protected:
     uint mLightFaceTopN = 24u; // Bug: the program will crash when directly entering the value for this
     uint mTopN = 4u;
     uint mPsmCountPerFrame = 24u;
-    uint mTemporalReusingLength = 5u;
+    uint mTemporalReusingLength = 1u;
     uint mCurrFrameReusingStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
     float mSmDepthBias = 1e-6f;
@@ -288,7 +289,7 @@ protected:
     uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
     uint mLightAgeThreshold = 1u;
-    TemporalReusingFix mTemporalReusingFix = TemporalReusingFix::None;
+    uint mTemporalReusingFix = (uint)TemporalReusingFix::None;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;
@@ -319,6 +320,8 @@ protected:
 
     // Temporal resuing shadow map resources
     std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
+    std::vector<Texture::SharedPtr> mSortedLightsShadowMapsStatic;
+    std::vector<Texture::SharedPtr> mSortedLightsMotionTextures;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
 
     // ISM resources
@@ -349,6 +352,7 @@ protected:
     ComputePass::SharedPtr mpUpdateLightShadowDataCenter;
     ComputePass::SharedPtr mpPerFrameGeneralUpdates;
     ComputePass::SharedPtr mpUpdateLightMeshData;
+    ComputePass::SharedPtr mpUpdatePrevViewMatrices;
 
     /** Normal shadow map pass
     */ 
@@ -359,6 +363,9 @@ protected:
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
     } mShadowMapPass;
+
+    // Reconstruct PSMs pass
+    ComputePass::SharedPtr mpReconstructPSMs;
 
     /** ISM passes
     */
@@ -424,7 +431,9 @@ protected:
 
     struct
     {
-        ComputePass::SharedPtr pVisualizeSingleSm;
+        ComputePass::SharedPtr pVisualizeSinglePsm;
+        ComputePass::SharedPtr pVisualizeSingleIsm;
+        ComputePass::SharedPtr pVisualizeSingleMotionTex;
         ComputePass::SharedPtr pVisualizeAll;
         ComputePass::SharedPtr pVisualizeAll2;
     } mVisualizePass;
@@ -496,7 +505,7 @@ protected:
     /** Global functions 
     */
     void allocateShadowTextureArrays(RenderContext* pContext);
-    void allocateStochasticSmResrouces(RenderContext* pRenderContext, const RenderData& renderData);
+    void allocateStochasticSmResources(RenderContext* pRenderContext, const RenderData& renderData);
     std::vector<LightShadowMapData> prepareLightShadowMapData();
     void computeTopLightsPass(RenderContext* pRenderContext);
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);

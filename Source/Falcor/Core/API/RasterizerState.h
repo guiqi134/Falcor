@@ -54,6 +54,14 @@ namespace Falcor
             Solid        ///< Solid
         };
 
+        // What instance to draw in one rasterize call
+        enum class DrawOption : uint
+        {
+            All = 0,
+            Static = 1,
+            Dynamic = 2
+        };
+
         /** Rasterizer state descriptor
         */
         class FALCOR_API Desc

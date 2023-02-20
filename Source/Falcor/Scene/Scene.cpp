@@ -281,12 +281,12 @@ namespace Falcor
         return mpLightCollection;
     }
 
-    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode, bool isTopologyPatch)
+    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode, RasterizerState::DrawOption drawOption)
     {
-        rasterize(pContext, pState, pVars, mFrontClockwiseRS[cullMode], mFrontCounterClockwiseRS[cullMode], isTopologyPatch);
+        rasterize(pContext, pState, pVars, mFrontClockwiseRS[cullMode], mFrontCounterClockwiseRS[cullMode], drawOption);
     }
 
-    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, bool isTopologyPatch)
+    void Scene::rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, RasterizerState::DrawOption drawOption)
     {
         FALCOR_PROFILE("rasterizeScene");
 
@@ -300,12 +300,15 @@ namespace Falcor
         {
             FALCOR_ASSERT(draw.count > 0); // draw.count = # of instance
 
+            //logInfo("draw count = " + std::to_string(draw.count) + " draw.ccw = " + std::to_string(draw.ccw) +
+            //    " draw.ibFormat16 = " + std::to_string(draw.ibFormat == ResourceFormat::R16Uint));
+            //logInfo("draw isStatic = " + std::to_string(draw.isStatic));
+
+            if (drawOption == RasterizerState::DrawOption::Static && !draw.isStatic) continue;
+            else if (drawOption == RasterizerState::DrawOption::Dynamic && draw.isStatic) continue;
+
             // Set state.
-            if (!isTopologyPatch) pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
-            else pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16BitPatch : mpMeshVaoPatch);
-
-            //pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
-
+            pState->setVao(draw.ibFormat == ResourceFormat::R16Uint ? mpMeshVao16Bit : mpMeshVao);
 
             if (draw.ccw) pState->setRasterizerState(pRasterizerStateCCW);
             else pState->setRasterizerState(pRasterizerStateCW);
@@ -320,6 +323,8 @@ namespace Falcor
                 pContext->drawIndirect(pState, pVars, draw.count, draw.pBuffer.get(), 0, nullptr, 0);
             }
         }
+
+        //logInfo("");
 
         pState->setRasterizerState(pCurrentRS);
     }
@@ -353,12 +358,15 @@ namespace Falcor
     }
 
     // All mesh data vertex data is stored in two vectors: one for vertex indices, another for vertex attributes (position, normal, ...)
+    // staticData: equal to total number of 
     void Scene::createMeshVao(uint32_t drawCount, const std::vector<uint32_t>& indexData, const std::vector<PackedStaticVertexData>& staticData, const std::vector<SkinningVertexData>& skinningData)
     {
         if (drawCount == 0) return;
 
-        logInfo(std::format("drawCount = {}, indexData count = {}, static data count = {}, skinning data count = {}",
-            drawCount, indexData.size(), staticData.size(), skinningData.size());
+        logInfo("drawCount = " + std::to_string(drawCount));
+        logInfo("indexData count  = " + std::to_string(indexData.size()));
+        logInfo("staticData count = " + std::to_string(staticData.size()));
+        logInfo("skinningData count = " + std::to_string(skinningData.size()));
 
         // Create the index buffer.
         size_t ibSize = sizeof(uint32_t) * indexData.size();
@@ -394,6 +402,8 @@ namespace Falcor
         Vao::BufferVec pVBs(kVertexBufferCount);
         pVBs[kStaticDataBufferIndex] = pStaticBuffer; // static vertex buffer will always be the first one?
 
+        logInfo("kStaticDataBufferIndex = " + std::to_string(kStaticDataBufferIndex));
+
         // Create the draw ID buffer.
         // This is only needed when rasterizing meshes in the scene.
         ResourceFormat drawIDFormat = drawCount <= (1 << 16) ? ResourceFormat::R16Uint : ResourceFormat::R32Uint;
@@ -416,6 +426,8 @@ namespace Falcor
 
         FALCOR_ASSERT(pDrawIDBuffer);
         pVBs[kDrawIdBufferIndex] = pDrawIDBuffer;
+
+        logInfo("kDrawIdBufferIndex = " + std::to_string(kDrawIdBufferIndex));
 
         // Create vertex layout.
         // The layout only initializes the vertex data and draw ID layout. The skinning data doesn't get passed into the vertex shader.
@@ -2319,11 +2331,13 @@ namespace Falcor
         // 2) mesh triangle winding is CW or CCW after transformation.
         //
         // TODO: Update the draw args if a mesh undergoes animation that flips the winding.
+        //
+        // Song: for our project, we need split the rendering of static and dynamic instances
 
         mDrawArgs.clear();
 
         // Helper to create the draw-indirect buffer.
-        auto createDrawBuffer = [this](const auto& drawMeshes, bool ccw, ResourceFormat ibFormat = ResourceFormat::Unknown)
+        auto createDrawBuffer = [this](const auto& drawMeshes, bool ccw, bool isStatic, ResourceFormat ibFormat = ResourceFormat::Unknown)
         {
             if (drawMeshes.size() > 0)
             {
@@ -2334,13 +2348,15 @@ namespace Falcor
                 draw.count = (uint32_t)drawMeshes.size();
                 draw.ccw = ccw;
                 draw.ibFormat = ibFormat;
+                draw.isStatic = isStatic;
                 mDrawArgs.push_back(draw);
             }
         };
 
         if (hasIndexBuffer())
         {
-            std::vector<DrawIndexedArguments> drawClockwiseMeshes[2], drawCounterClockwiseMeshes[2];
+            std::vector<DrawIndexedArguments> drawClockwiseStaticMeshes[2], drawCounterClockwiseStaticMeshes[2];
+            std::vector<DrawIndexedArguments> drawClockwiseDynamicMeshes[2], drawCounterClockwiseDynamicMeshes[2];
 
             uint32_t instanceID = 0;
             for (const auto& instance : mGeometryInstanceData)
@@ -2357,18 +2373,32 @@ namespace Falcor
                 draw.BaseVertexLocation = mesh.vbOffset;
                 draw.StartInstanceLocation = instanceID++;
 
+                //logInfo("is instance dynamic = " + std::to_string(instance.isDynamic())); // Why this is all false?
+                //logInfo("is matrix changed = " + std::to_string(getAnimationController()->isMatrixChanged(instance.globalMatrixID)));
+
                 int i = use16Bit ? 0 : 1;
-                (instance.isWorldFrontFaceCW()) ? drawClockwiseMeshes[i].push_back(draw) : drawCounterClockwiseMeshes[i].push_back(draw);
+                if (getAnimationController()->isMatrixChanged(instance.globalMatrixID))
+                    (instance.isWorldFrontFaceCW()) ? drawClockwiseDynamicMeshes[i].push_back(draw) : drawCounterClockwiseDynamicMeshes[i].push_back(draw);
+                else
+                    (instance.isWorldFrontFaceCW()) ? drawClockwiseStaticMeshes[i].push_back(draw) : drawCounterClockwiseStaticMeshes[i].push_back(draw);
+
+                //(instance.isWorldFrontFaceCW()) ? drawClockwiseStaticMeshes[i].push_back(draw) : drawCounterClockwiseStaticMeshes[i].push_back(draw);
             }
 
-            createDrawBuffer(drawClockwiseMeshes[0], false, ResourceFormat::R16Uint);
-            createDrawBuffer(drawClockwiseMeshes[1], false, ResourceFormat::R32Uint);
-            createDrawBuffer(drawCounterClockwiseMeshes[0], true, ResourceFormat::R16Uint);
-            createDrawBuffer(drawCounterClockwiseMeshes[1], true, ResourceFormat::R32Uint);
+            createDrawBuffer(drawClockwiseStaticMeshes[0], false, true, ResourceFormat::R16Uint);
+            createDrawBuffer(drawClockwiseStaticMeshes[1], false, true, ResourceFormat::R32Uint);
+            createDrawBuffer(drawCounterClockwiseStaticMeshes[0], true, true, ResourceFormat::R16Uint);
+            createDrawBuffer(drawCounterClockwiseStaticMeshes[1], true, true, ResourceFormat::R32Uint);
+
+            createDrawBuffer(drawClockwiseDynamicMeshes[0], false, false, ResourceFormat::R16Uint);
+            createDrawBuffer(drawClockwiseDynamicMeshes[1], false, false, ResourceFormat::R32Uint);
+            createDrawBuffer(drawCounterClockwiseDynamicMeshes[0], true, false, ResourceFormat::R16Uint);
+            createDrawBuffer(drawCounterClockwiseDynamicMeshes[1], true, false, ResourceFormat::R32Uint);
         }
         else
         {
-            std::vector<DrawArguments> drawClockwiseMeshes, drawCounterClockwiseMeshes;
+            std::vector<DrawArguments> drawClockwiseStaticMeshes, drawCounterClockwiseStaticMeshes;
+            std::vector<DrawArguments> drawClockwiseDynamicMeshes, drawCounterClockwiseDynamicMeshes;
 
             uint32_t instanceID = 0;
             for (const auto& instance : mGeometryInstanceData)
@@ -2384,11 +2414,17 @@ namespace Falcor
                 draw.StartVertexLocation = mesh.vbOffset;
                 draw.StartInstanceLocation = instanceID++;
 
-                (instance.isWorldFrontFaceCW()) ? drawClockwiseMeshes.push_back(draw) : drawCounterClockwiseMeshes.push_back(draw);
+                //if (instance.isDynamic())
+                if (getAnimationController()->isMatrixChanged(instance.globalMatrixID))
+                    (instance.isWorldFrontFaceCW()) ? drawClockwiseDynamicMeshes.push_back(draw) : drawCounterClockwiseDynamicMeshes.push_back(draw);
+                else
+                    (instance.isWorldFrontFaceCW()) ? drawClockwiseStaticMeshes.push_back(draw) : drawCounterClockwiseStaticMeshes.push_back(draw);
             }
 
-            createDrawBuffer(drawClockwiseMeshes, false);
-            createDrawBuffer(drawCounterClockwiseMeshes, true);
+            createDrawBuffer(drawClockwiseStaticMeshes, false, true);
+            createDrawBuffer(drawCounterClockwiseStaticMeshes, true, true);
+            createDrawBuffer(drawClockwiseDynamicMeshes, false, false);
+            createDrawBuffer(drawCounterClockwiseDynamicMeshes, true, false);
         }
     }
 

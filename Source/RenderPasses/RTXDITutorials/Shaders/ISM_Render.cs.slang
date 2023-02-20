@@ -38,7 +38,7 @@ RWBuffer<uint> gExtraPointsCountBuffer;
 RWBuffer<uint> gCounterBuffer; // Counter for each light or face
 
 // All light's ISMs in light ranking order
-RWTexture2DArray<uint> gSortedLightsISMsUint[3];
+RWTexture2DArray<uint> gSortedLightsISMsUint[NUM_ISM_TEXTURE_ARRAYS];
 
 [numthreads(16, 16, 1)]
 void renderIsmCS(uint3 threadID: SV_DispatchThreadID)

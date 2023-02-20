@@ -68,7 +68,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
 
     // If needed, allocate the resources in our method
-    if (!mpSortedLightsBuffer) allocateStochasticSmResrouces(pRenderContext, renderData);
+    if (!mpSortedLightsBuffer) allocateStochasticSmResources(pRenderContext, renderData);
 
     // Update the data in this render pass
     RTXDITutorialBase::execute(pRenderContext, renderData);
@@ -110,6 +110,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
         runSpatioTemporalReuse(pRenderContext, renderData);
     }
 
+    pRenderContext->blit(renderData["mvec"]->asTexture()->getSRV(), renderData["debugScreenMotion"]->asTexture()->getRTV());
+
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     mRtxdiFrameParams.frameIndex++;
 
@@ -126,6 +128,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
 
 void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    FALCOR_PROFILE("ReSTIR Passes");
+
     // Set our RTXDI parameters for the current frame.
     //  -> This calls RTXDI's rtxdi::FillRuntimeParameters() routine.
     setCurrentFrameRTXDIParameters(renderData);

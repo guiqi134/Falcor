@@ -62,7 +62,9 @@ struct VSOut
     INTERPOLATION_MODE float4 tangentW   : TANGENT;     ///< Shading tangent in world space (not normalized!).
     INTERPOLATION_MODE float2 texC       : TEXCRD;      ///< Texture coordinate.
     INTERPOLATION_MODE float3 posW       : POSW;        ///< Position in world space.
-    INTERPOLATION_MODE float4 prevPosH   : PREVPOSH;    ///< Position in clip space for the previous frame.
+    INTERPOLATION_MODE float4 prevPosH   : PREVPOSH;    ///< Position in camera clip space for the previous frame.
+
+    INTERPOLATION_MODE float4 prevPosW   : PREVPOSW;    ///< Position in world space for the previous frame.
 
     // Per-triangle data
     nointerpolation GeometryInstanceID instanceID   : INSTANCE_ID;  ///< Geometry instance ID.
@@ -92,12 +94,13 @@ VSOut defaultVS(VSIn vIn)
     // Compute the vertex position in the previous frame.
     float3 prevPos = vIn.pos;
     GeometryInstanceData instance = gScene.getGeometryInstance(instanceID);
-    if (instance.isDynamic())
+    if (instance.isDynamic()) // Song: instance.isDynamic() has bug, it always return false
     {
         uint prevVertexIndex = gScene.meshes[instance.geometryIndex].prevVbOffset + vIn.vertexID;
         prevPos = gScene.prevVertices[prevVertexIndex].position;
     }
     float3 prevPosW = mul(float4(prevPos, 1.f), gScene.getPrevWorldMatrix(instanceID)).xyz;
+    vOut.prevPosW = float4(prevPosW, 1.0f);
     vOut.prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
 
     return vOut;

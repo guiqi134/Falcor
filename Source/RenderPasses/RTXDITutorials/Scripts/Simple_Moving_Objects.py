@@ -58,7 +58,7 @@ ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
-m.loadScene(scene)
+m.loadScene(scene, buildFlags=(SceneBuilderFlags.RTDontMergeDynamic))
 if (paused):
     t.pause()
 t.time = currentTime
@@ -75,7 +75,7 @@ m.scene.camera.up = camera[2]
 m.scene.camera.animated = False
 m.scene.camera.farPlane = 1000.0
 m.scene.cameraSpeed = 100
-m.scene.animated = False
+m.scene.animated = True
 
 # Add other view point
 m.scene.addViewpoint(camera[0], camera[1], camera[2])

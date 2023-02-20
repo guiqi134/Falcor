@@ -2,7 +2,7 @@
 # Define important scene parameters
 scene = "ZeroDay/ZeroDay.pyscene"
 currentTime = 0.0
-paused = False
+paused = True
 restirPassName = "RTXDITutorial5"
 
 # Initial camera.
@@ -75,7 +75,7 @@ m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
 m.scene.cameraSpeed = 1
-m.scene.animated = False
+m.scene.animated = True
 
 # Add some view points
 # viewport1 = [

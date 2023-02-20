@@ -58,7 +58,9 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    // printSetPixel(threadId);
+    printSetPixel(threadId);
+
+    print("222222222222222222222222", 2);
 
     // Find where we are on the screen and in the reservoir
     const uint2 launchIdx = threadId.xy;
@@ -82,7 +84,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
 
         // ... with the results of our spatiotemporal resampling.  Set parameters here...
         RTXDI_SpatioTemporalResamplingParameters stparams;
-        stparams.screenSpaceMotion = gMotionVectorTexture[pixelPosition].xyz * float3(gFrameSize, 1.0f); // motion vector is in [-1, 1]
+        stparams.screenSpaceMotion = gMotionVectorTexture[pixelPosition].xyz * float3(gFrameSize, 1.0f); // motion vector is normalized
         stparams.sourceBufferIndex = gPrevFrameInputReservoirIndex;
         stparams.maxHistoryLength = gMaxHistory;
         stparams.biasCorrectionMode = gBiasCorrectionMode;
@@ -93,6 +95,8 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         stparams.samplingRadius = gReuseRadius;
         stparams.enableVisibilityShortcut = gUseVisibilityShortcut;
         stparams.enablePermutationSampling = gEnablePermutationSampling;
+
+        print("screenSpaceMotion = ", stparams.screenSpaceMotion);
 
         // ... then actually spawn the spatiotemporal resampling.
         RAB_LightSample selectedSample[2] = { (RAB_LightSample)0, (RAB_LightSample)0 };

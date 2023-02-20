@@ -1,6 +1,6 @@
 scene = "Subway/Subway.pyscene"
 currentTime = 0.0
-paused = False
+paused = True
 restirPassName = "RTXDITutorial5"
 
 def graph_ImportanceResampling():
@@ -59,7 +59,7 @@ try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes | SceneBuilderFlags.FlattenStaticMeshInstances |
-    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeInstanced))
+    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeDynamic))
 # m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes))
 # m.loadScene(scene)
 if (paused):
@@ -77,7 +77,7 @@ m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
 m.scene.camera.animated = False
 m.scene.cameraSpeed = 10
-m.scene.animated = False
+m.scene.animated = True
 
 # Add other view point
 viewport = [

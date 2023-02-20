@@ -94,6 +94,8 @@ void VBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
         return;
     }
 
+    mpPixelDebug->beginFrame(pRenderContext, uint2(pOutput->getWidth(), pOutput->getHeight()));
+
     // Check for scene changes.
     if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::GeometryChanged) ||
         is_set(mpScene->getUpdates(), Scene::UpdateFlags::SDFGridConfigChanged))
@@ -112,6 +114,8 @@ void VBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
     mUseTraceRayInline ? executeCompute(pRenderContext, renderData) : executeRaytrace(pRenderContext, renderData);
 
     mFrameCount++;
+
+    mpPixelDebug->endFrame(pRenderContext);
 }
 
 void VBufferRT::renderUI(Gui::Widgets& widget)
@@ -128,6 +132,8 @@ void VBufferRT::renderUI(Gui::Widgets& widget)
         mOptionsChanged = true;
     }
     widget.tooltip("This option enables stochastic depth-of-field when the camera's aperture radius is nonzero. Disable it to force the use of a pinhole camera.", true);
+
+    mpPixelDebug->renderUI(widget);
 }
 
 Dictionary VBufferRT::getScriptingDictionary()
@@ -244,6 +250,7 @@ void VBufferRT::executeCompute(RenderContext* pRenderContext, const RenderData& 
     ShaderVar var = mpComputePass->getRootVar();
     setShaderData(var, renderData);
 
+    mpPixelDebug->prepareProgram(mpComputePass->getProgram(), var);
     mpComputePass->execute(pRenderContext, uint3(mFrameDim, 1));
 }
 
@@ -289,6 +296,7 @@ VBufferRT::VBufferRT(const Dictionary& dict)
 
     // Create sample generator
     mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_DEFAULT);
+    mpPixelDebug = PixelDebug::create();
 }
 
 void VBufferRT::parseDictionary(const Dictionary& dict)

@@ -642,6 +642,7 @@ struct Scene
         return mul(float4(prevPos, 1.f), prevWorldMat).xyz;
     }
 
+
     /** Returns interpolated position on a triangle in world space for the previous frame.
         \param[in] hit Triangle hit info.
         \return Interpolated position in world space for the previous frame.

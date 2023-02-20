@@ -64,6 +64,9 @@ namespace Falcor
             mpPrevInvTransposeWorldMatricesBuffer->setName("AnimationController::mpPrevInvTransposeWorldMatricesBuffer");
         }
 
+        logInfo("prevVertexCount = " + std::to_string(prevVertexCount));
+        logInfo("float4Count = " + std::to_string(float4Count));
+
         // An extra buffer is required to store the previous frame vertex data for skinned and vertex-animated meshes.
         // The buffer contains data for skinned meshes first, followed by vertex-animated meshes.
         //
@@ -260,6 +263,8 @@ namespace Falcor
         // This updates all animated matrices and dynamic vertex data.
         if (edited || mEnabled && (time != mTime || mTime != mPrevTime))
         {
+            logInfo("incremental Animation update called");
+
             if (edited || hasAnimations())
             {
                 FALCOR_ASSERT(mpWorldMatricesBuffer && mpPrevWorldMatricesBuffer);
@@ -276,6 +281,8 @@ namespace Falcor
 
             if (mpVertexCache && mpVertexCache->hasAnimations())
             {
+                logInfo("Vertex Cache part called");
+
                 // Recompute time based on the cycle length of vertex caches.
                 double vertexCacheTime = (mGlobalAnimationLength == 0) ? currentTime : time;
                 mpVertexCache->animate(pContext, vertexCacheTime);
@@ -291,6 +298,8 @@ namespace Falcor
 
     void AnimationController::updateLocalMatrices(double time)
     {
+        logInfo("time = " + std::to_string(time));
+
         for (auto& pAnimation : mAnimations)
         {
             uint32_t nodeID = pAnimation->getNodeID();
@@ -367,10 +376,12 @@ namespace Falcor
 
     void AnimationController::bindBuffers()
     {
+        logInfo("bindBuffers() called");
         ParameterBlock* pBlock = mpScene->mpSceneBlock.get();
         pBlock->setBuffer(kWorldMatrices, mpWorldMatricesBuffer);
         pBlock->setBuffer(kInverseTransposeWorldMatrices, mpInvTransposeWorldMatricesBuffer);
         bool usePrev = mEnabled && hasAnimations();
+        logInfo("usePrev = " + std::to_string(usePrev));
         pBlock->setBuffer(kPrevWorldMatrices, usePrev ? mpPrevWorldMatricesBuffer : mpWorldMatricesBuffer);
         pBlock->setBuffer(kPrevInverseTransposeWorldMatrices, usePrev ? mpPrevInvTransposeWorldMatricesBuffer : mpInvTransposeWorldMatricesBuffer);
     }

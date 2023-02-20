@@ -51,6 +51,7 @@ public:
     void renderUI(Gui::Widgets& widget) override;
     Dictionary getScriptingDictionary() override;
     void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return mpPixelDebug->onMouseEvent(mouseEvent); }
 
 private:
     void executeRaytrace(RenderContext* pRenderContext, const RenderData& renderData);
@@ -78,4 +79,6 @@ private:
     } mRaytrace;
 
     ComputePass::SharedPtr mpComputePass;
+
+    PixelDebug::SharedPtr mpPixelDebug;
 };

@@ -95,7 +95,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 {
     printSetPixel(threadId.xy);
 
-    print("222222222222222222222", 2);
+    print("33333333333333333333333", 3);
 
     // Find our pixel location (on screen and in our reservoir list)
     const uint2 launchIdx = threadId.xy;

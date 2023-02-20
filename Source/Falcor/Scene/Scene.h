@@ -888,7 +888,8 @@ namespace Falcor
             \param[in] pVars Graphics vars.
             \param[in] cullMode Optional rasterizer cull mode. The default is to cull back-facing primitives.
         */
-        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode = RasterizerState::CullMode::Back, bool isTopologyPatch = false);
+        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, RasterizerState::CullMode cullMode = RasterizerState::CullMode::Back,
+            RasterizerState::DrawOption drawOption = RasterizerState::DrawOption::All);
 
         /** Render the scene using the rasterizer.
             This overload uses the supplied rasterizer states.
@@ -898,7 +899,7 @@ namespace Falcor
             \param[in] pRasterizerStateCW Rasterizer state for meshes with clockwise triangle winding.
             \param[in] pRasterizerStateCCW Rasterizer state for meshes with counter-clockwise triangle winding. Can be the same as for clockwise.
         */
-        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, bool isTopologyPatch = false);
+        void rasterize(RenderContext* pContext, GraphicsState* pState, GraphicsVars* pVars, const RasterizerState::SharedPtr& pRasterizerStateCW, const RasterizerState::SharedPtr& pRasterizerStateCCW, RasterizerState::DrawOption drawOption = RasterizerState::DrawOption::All);
 
         /** Get the required raytracing maximum attribute size for this scene.
             Note: This depends on what types of geometry are used in the scene.
@@ -1152,6 +1153,7 @@ namespace Falcor
             uint32_t count = 0;             ///< Number of draws.
             bool ccw = true;                ///< True if counterclockwise triangle winding.
             ResourceFormat ibFormat = ResourceFormat::Unknown;  ///< Index buffer format.
+            bool isStatic = true;
         };
 
         GeometryTypeFlags mGeometryTypes;                           ///< Set of geometry types that exist in the scene.

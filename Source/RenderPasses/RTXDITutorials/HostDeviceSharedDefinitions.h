@@ -16,19 +16,22 @@ struct LightFaceData
 
     // View matrices. (Paraboloid projection will only use -Y (index 3) and +Y (index 2) as front and back)
     float4x4 viewMat;
-    //float4x4 prevViewMat; // previous frame view matrix. This is used for light motion
+    float4x4 prevViewMat; // previous frame view matrix. This is used for light motion
 
     // Variable for indexing into two sorted texture array. (For per-light base, these variables should also be set for each face)
     uint whichPsmTexArray;
-    int psmTexArrayIdx; // for per-light base, it is the start index (true index should also add face idx in the evaluating part)
+    int psmTexArrayIdx; // this is also the index in PSM reusing list 
+    int staticPsmTexArrayIdx; // since PSM array for static objects are inconsistent with indexing in the reusing list
     uint whichIsmTexArray;
     int ismTexArrayIdx;
 
     // Temporal related information. 
-    uint accumulatedFrames;
+    uint accumulatedFrames; // = age
     uint prevRanking; // update frequency depends on temporal resuing length
     uint currRanking; // updating each frame
-    //bool newPsmLightFace;
+    bool newPsmLightFace; // used for static PSM rendering
+    uint psmAge; 
+    uint weight;
 
     // Data to print on CPU side
     uint2 rankingFreqInFrame;

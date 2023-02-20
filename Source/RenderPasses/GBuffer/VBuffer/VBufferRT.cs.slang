@@ -27,6 +27,8 @@
  **************************************************************************/
 import Scene.RaytracingInline;
 import VBufferRT;
+import Utils.Debug.PixelDebug;
+
 
 ConstantBuffer<VBufferRT> gVBufferRT;
 
@@ -35,6 +37,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
     if (any(pixel >= gVBufferRT.frameDim)) return;
+
+    printSetPixel(pixel);
 
     GpuTimer timer;
     gVBufferRT.beginTime(timer);

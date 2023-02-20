@@ -5,7 +5,6 @@ scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 
 currentTime = 0.0
 paused = True
-animateCamera = True
 
 restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
 
@@ -74,13 +73,14 @@ m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
 if (paused):
     t.pause()
 t.time = currentTime
-m.scene.camera.animated = animateCamera
+m.scene.camera.animated = False
 m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
 m.scene.cameraSpeed = 5
 m.scene.camera.focalLength = 35.0
-m.scene.animated = False
+m.scene.animated = True
+
 
 # Add some view points
 m.scene.addViewpoint()

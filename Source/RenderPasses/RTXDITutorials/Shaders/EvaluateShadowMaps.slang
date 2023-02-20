@@ -128,8 +128,12 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
         float3 posLightNDC = posLightClipping.xyz / posLightClipping.w;
         float3 projCoord = float3(posLightNDC.xy * float2(0.5f, -0.5f) + 0.5f, posLightNDC.z);
 
+        print("projCoord = ", projCoord);
+
         // Sample the target face's shadow map
         float shadowMapDepth = shadowMaps.SampleLevel(linearSampler, float3(projCoord.xy, lightData.lightFaceData[faceIdx].psmTexArrayIdx), 0);
+
+        print("shadowMapDepth = ", shadowMapDepth);
 
         isVisible = shadowMapDepth < projCoord.z - depthBias ? false : true;
     }
