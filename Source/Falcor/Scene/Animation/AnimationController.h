@@ -106,6 +106,7 @@ namespace Falcor
             \return true if a change occurred, otherwise false.
         */
         bool animate(RenderContext* pContext, double currentTime);
+        bool animateSelectedCamera(RenderContext* pContext, double currentTime, int selectedCameraMatrixID);
 
         /** Check if a matrix changed since last frame.
         */
@@ -148,8 +149,8 @@ namespace Falcor
         AnimationController(Scene* pScene, const StaticVertexVector& staticVertexData, const SkinningVertexVector& skinningVertexData, uint32_t prevVertexCount, const std::vector<Animation::SharedPtr>& animations);
 
         void initLocalMatrices();
-        void updateLocalMatrices(double time);
-        void updateWorldMatrices(bool updateAll = false);
+        void updateLocalMatrices(double time, int cameraNodeID = -1);
+        void updateWorldMatrices(bool updateAll = false, int cameraNodeID = -1);
         void uploadWorldMatrices(bool uploadAll = false);
 
         void bindBuffers();

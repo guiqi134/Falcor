@@ -39,7 +39,7 @@ struct RAB_LightInfo
     uint   mLocalIdx;
     uint mLightID;
 
-    // for point light
+    // for point (spot) light
     float3 mNormal;
     float mOpeningAngle;
     float mCosOpeningAngle;
@@ -243,12 +243,11 @@ RAB_LightInfo RAB_LoadLightInfo(uint index, bool previousFrame)
 
             // For point light, it is the point world position
             l.mBase = pointLight.posW;
-
             l.mFlux = luminance(pointLight.intensity);
             l.mNormal = pointLight.dirW;
-            // l.mOpeningAngle = pointLight.openingAngle;
-            // l.mCosOpeningAngle = pointLight.cosOpeningAngle;
-            // l.mPenumbraAngle = pointLight.penumbraAngle;
+            l.mOpeningAngle = pointLight.openingAngle;
+            l.mCosOpeningAngle = pointLight.cosOpeningAngle;
+            l.mPenumbraAngle = pointLight.penumbraAngle;
         }
 
     }

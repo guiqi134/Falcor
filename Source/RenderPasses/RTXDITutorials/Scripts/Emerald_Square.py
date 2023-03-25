@@ -1,6 +1,6 @@
 scene = "EmeraldSquare/EmeraldSquare_Dusk.pyscene"
 currentTime = 0.0
-paused = False
+paused = True
 restirPassName = "RTXDITutorial5"
 
 def graph_ImportanceResampling():
@@ -19,18 +19,19 @@ def graph_ImportanceResampling():
         "triEmissiveScale" : 1.0,
         "useLowerShininess" : True,
         "ismParaDepthBias" : 0.001,
-        "ismPersDepthBias" : 0.0001,
+        "ismPersDepthBias" : 0.00004,
         "ismMipLevels" : 3,
-        "smDepthBias" : 0.000001,
+        "smDepthBias" : 0.000002,
         "ismPushMode" : 1,
         "baseTriangleSize" : 0.1,
         "sceneName" : 2,
         "adaptiveLightNear" : True,
+        "temporalReusingLength" : 1,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 2.0,
+        'exposureCompensation' : 2.4,
     }
     gAccumParams = {
         'enabled': False,
@@ -75,7 +76,7 @@ m.scene.camera.position = camera[0]
 m.scene.camera.target = camera[1]
 m.scene.camera.up = camera[2]
 m.scene.cameraSpeed = 20
-m.scene.animated = False
+m.scene.animated = True
 
 # Add other view point
 viewport = [

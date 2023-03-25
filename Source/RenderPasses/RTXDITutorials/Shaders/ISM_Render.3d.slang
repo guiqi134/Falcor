@@ -1,4 +1,4 @@
-#include "../HostDeviceSharedDefinitions.h"
+// #include "../HostDeviceSharedDefinitions.h"
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Raster;

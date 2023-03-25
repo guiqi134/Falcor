@@ -47,6 +47,7 @@ cbuffer CB
     uint gTotalTriPrimitives;
     bool gUpdatePrimitiveGeometry;
     bool gUpdatePrimitiveFlux;
+    bool gUpdateLightIntensity;
 }
 
 // Our output PDF texture used for importance sampling primitves -> localLightPdfTexture
@@ -105,13 +106,13 @@ void main(uint3 threadId : SV_DispatchThreadID)
     }
     else
     {
-        // Get the point light ID
-        uint pointLightID = lightID - gTotalTriPrimitives;
+        // Get the analytic light ID
+        uint analyticLightID = lightID - gTotalTriPrimitives;
 
         // Find where in the pdf texture RTXDI expects to find this primitive.
         uint2 pdfTexturePosition = RTXDI_LinearIndexToZCurve(lightID);
 
         // Take the point light flux as sampling weight
-        gPrimitivePDFTexture[pdfTexturePosition] = clamp(max(luminance(gScene.getLight(pointLightID).intensity), 0.0f), 0.0f, 65504.0f);
+        gPrimitivePDFTexture[pdfTexturePosition] = clamp(max(luminance(gScene.getLight(analyticLightID).intensity), 0.0f), 0.0f, 65504.0f);
     }
 }

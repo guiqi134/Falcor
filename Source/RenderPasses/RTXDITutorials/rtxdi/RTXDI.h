@@ -102,11 +102,20 @@ namespace rtxdi
         // Linear index of the current frame, used to determine the checkerboard field.
         uint32_t frameIndex = 0;
 
+        // Index of the first point light in analytic lights
+        uint32_t firstPointLight = 0;
+
+        // Number of points lights available on this frame.
+        uint32_t numPointLights = 0;
+
+        // Index of the first spot light in analytic lights
+        uint32_t firstSpotLight = 0;
+
+        // Number of spot lights available on this frame.
+        uint32_t numSpotLights = 0;
+
         // Index of the first local light in the light buffer.
         uint32_t firstLocalLight = 0;
-
-        // Index of the first point light in local lights
-        uint32_t firstPointLight = 0;
 
         // Number of local lights available on this frame.
         uint32_t numLocalLights = 0;

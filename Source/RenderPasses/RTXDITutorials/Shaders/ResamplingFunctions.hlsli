@@ -404,7 +404,7 @@ void RTXDI_PresampleLocalLights(
 
     lightIndex += params.firstLocalLight;
 
-    if(compact) {
+    if (compact) {
         lightIndex |= RTXDI_LIGHT_COMPACT_BIT;
     }
 
@@ -461,7 +461,7 @@ RTXDI_Reservoir RTXDI_SampleLocalLightsInternal(
     RTXDI_SampleParameters sampleParams,
     RTXDI_ResamplingRuntimeParameters params,
 #if RTXDI_ENABLE_PRESAMPLING
-    bool useRisBuffer,
+    bool useRisBuffer, // true for now
     uint risBufferBase, // which tile we are in
     uint risBufferCount, // tile size
 #endif
@@ -536,7 +536,7 @@ RTXDI_Reservoir RTXDI_SampleLocalLightsInternal(
         }
     }
 
-    // Song: Why it is the numMisSamples?
+    // Since the source pdf is blended using MIS, we need to divide by number of MIS samples
     RTXDI_FinalizeResampling(state, 1.0, sampleParams.numMisSamples);
     state.M = 1;
 

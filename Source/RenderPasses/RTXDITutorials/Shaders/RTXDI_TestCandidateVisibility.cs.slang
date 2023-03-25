@@ -68,10 +68,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Shoot a shadow ray and, if it's shadowed, update the visibility
     if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
     {
-        int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex); // mesh light + point light
+        int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex, gFalcorLightIDtoOurs); // mesh light + point light
         uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
 
-        if (gDebugLight) localLightID = (int)gDebugLightMeshID;
+        if (gDebugLightID >= 0) localLightID = gDebugLightID;
 
         // Evaluate the visiblity for shading reservoir
         uint shadowOption;
@@ -84,7 +84,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         // Also evalute the ISM for ranking reservoir if it is a PSM light
         // if (shadowOption == (uint)ShadowOptions::PSM && gOnlyIsmForRanking)
-        if (gOnlyIsmForRanking)
+        if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking)
         {
             // So far, ranking reservoir is the same as shading reservoir. Just copy the data to ranking reservoir
             RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);

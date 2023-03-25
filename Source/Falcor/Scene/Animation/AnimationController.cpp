@@ -64,8 +64,8 @@ namespace Falcor
             mpPrevInvTransposeWorldMatricesBuffer->setName("AnimationController::mpPrevInvTransposeWorldMatricesBuffer");
         }
 
-        logInfo("prevVertexCount = " + std::to_string(prevVertexCount));
-        logInfo("float4Count = " + std::to_string(float4Count));
+        //logInfo("prevVertexCount = " + std::to_string(prevVertexCount));
+        //logInfo("float4Count = " + std::to_string(float4Count));
 
         // An extra buffer is required to store the previous frame vertex data for skinned and vertex-animated meshes.
         // The buffer contains data for skinned meshes first, followed by vertex-animated meshes.
@@ -224,6 +224,8 @@ namespace Falcor
         // including transformation matrices, dynamic vertex data etc.
         if (mFirstUpdate || mEnabled != mPrevEnabled)
         {
+            //logInfo("Switch Animation update called");
+
             initLocalMatrices();
             if (mEnabled)
             {
@@ -263,7 +265,7 @@ namespace Falcor
         // This updates all animated matrices and dynamic vertex data.
         if (edited || mEnabled && (time != mTime || mTime != mPrevTime))
         {
-            logInfo("incremental Animation update called");
+            //logInfo("incremental Animation update called");
 
             if (edited || hasAnimations())
             {
@@ -281,7 +283,7 @@ namespace Falcor
 
             if (mpVertexCache && mpVertexCache->hasAnimations())
             {
-                logInfo("Vertex Cache part called");
+                //logInfo("Vertex Cache part called");
 
                 // Recompute time based on the cycle length of vertex caches.
                 double vertexCacheTime = (mGlobalAnimationLength == 0) ? currentTime : time;
@@ -296,46 +298,135 @@ namespace Falcor
         return changed;
     }
 
-    void AnimationController::updateLocalMatrices(double time)
+    bool AnimationController::animateSelectedCamera(RenderContext* pContext, double currentTime, int selectedCameraMatrixID)
     {
-        logInfo("time = " + std::to_string(time));
+        FALCOR_PROFILE("animate camera");
+
+        // Check for edited scene nodes and update local matrices.
+        const auto& sceneGraph = mpScene->mSceneGraph;
+        bool edited = false;
+        if (mNodesEdited[selectedCameraMatrixID])
+        {
+            mLocalMatrices[selectedCameraMatrixID] = sceneGraph[selectedCameraMatrixID].transform;
+            mNodesEdited[selectedCameraMatrixID] = false;
+            mMatricesChanged[selectedCameraMatrixID] = true;
+            edited = true;
+        }
+
+        bool changed = false;
+        double time = mLoopAnimations ? std::fmod(currentTime, mGlobalAnimationLength) : currentTime;
+
+        // Perform incremental update.
+        // This updates all animated matrices and dynamic vertex data.
+        if (edited || (time != mTime || mTime != mPrevTime))
+        {
+            logInfo("incremental Camera Animation update called");
+            FALCOR_ASSERT(mpWorldMatricesBuffer && mpPrevWorldMatricesBuffer);
+            FALCOR_ASSERT(mpInvTransposeWorldMatricesBuffer && mpPrevInvTransposeWorldMatricesBuffer);
+            swap(mpPrevWorldMatricesBuffer, mpWorldMatricesBuffer);
+            swap(mpPrevInvTransposeWorldMatricesBuffer, mpInvTransposeWorldMatricesBuffer);
+            updateLocalMatrices(time, selectedCameraMatrixID);
+            updateWorldMatrices(false, selectedCameraMatrixID);
+            uploadWorldMatrices(true);
+            bindBuffers();
+            executeSkinningPass(pContext);
+            changed = true;
+
+            mPrevTime = mTime;
+            mTime = time;
+        }
+
+        return changed;
+    }
+
+    void AnimationController::updateLocalMatrices(double time, int cameraNodeID)
+    {
+        //logInfo("time = " + std::to_string(time));
 
         for (auto& pAnimation : mAnimations)
         {
             uint32_t nodeID = pAnimation->getNodeID();
             FALCOR_ASSERT(nodeID < mLocalMatrices.size());
-            mLocalMatrices[nodeID] = pAnimation->animate(time);
-            mMatricesChanged[nodeID] = true;
+            if (cameraNodeID == -1)
+            {
+                mLocalMatrices[nodeID] = pAnimation->animate(time);
+                mMatricesChanged[nodeID] = true;
+            }
+            else
+            {
+                const auto& sceneGraph = mpScene->mSceneGraph;
+                if (cameraNodeID == nodeID || sceneGraph[cameraNodeID].parent == nodeID)
+                {
+                    logInfo("nodeID = " + std::to_string(nodeID));
+                    mLocalMatrices[nodeID] = pAnimation->animate(time);
+                    mMatricesChanged[nodeID] = true;
+                }
+            }
         }
     }
 
-    void AnimationController::updateWorldMatrices(bool updateAll)
+    void AnimationController::updateWorldMatrices(bool updateAll, int cameraNodeID)
     {
         const auto& sceneGraph = mpScene->mSceneGraph;
 
-        for (size_t i = 0; i < mGlobalMatrices.size(); i++)
+        if (cameraNodeID == -1)
         {
-            // Propagate matrix change flag to children.
-            if (sceneGraph[i].parent != SceneBuilder::kInvalidNode)
+            for (size_t i = 0; i < mGlobalMatrices.size(); i++)
             {
-                mMatricesChanged[i] = mMatricesChanged[i] || mMatricesChanged[sceneGraph[i].parent];
+                // Propagate matrix change flag to children.
+                if (sceneGraph[i].parent != SceneBuilder::kInvalidNode)
+                {
+                    mMatricesChanged[i] = mMatricesChanged[i] || mMatricesChanged[sceneGraph[i].parent];
+                }
+
+                if (!mMatricesChanged[i] && !updateAll) continue;
+
+                mGlobalMatrices[i] = mLocalMatrices[i];
+
+                if (mpScene->mSceneGraph[i].parent != SceneBuilder::kInvalidNode)
+                {
+                    mGlobalMatrices[i] = mGlobalMatrices[sceneGraph[i].parent] * mGlobalMatrices[i];
+                }
+
+                mInvTransposeGlobalMatrices[i] = transpose(inverse(mGlobalMatrices[i]));
+
+                if (mpSkinningPass)
+                {
+                    mSkinningMatrices[i] = mGlobalMatrices[i] * sceneGraph[i].localToBindSpace;
+                    mInvTransposeSkinningMatrices[i] = transpose(inverse(mSkinningMatrices[i]));
+                }
+            }
+        }
+        else
+        {
+            if (sceneGraph[cameraNodeID].parent != SceneBuilder::kInvalidNode)
+            {
+                mMatricesChanged[cameraNodeID] = mMatricesChanged[cameraNodeID] || mMatricesChanged[sceneGraph[cameraNodeID].parent];
             }
 
-            if (!mMatricesChanged[i] && !updateAll) continue;
+            logInfo("mMatricesChanged[cameraNodeID] = " + std::to_string(mMatricesChanged[cameraNodeID]));
 
-            mGlobalMatrices[i] = mLocalMatrices[i];
-
-            if (mpScene->mSceneGraph[i].parent != SceneBuilder::kInvalidNode)
+            if (mMatricesChanged[cameraNodeID])
             {
-                mGlobalMatrices[i] = mGlobalMatrices[sceneGraph[i].parent] * mGlobalMatrices[i];
-            }
+                mGlobalMatrices[cameraNodeID] = mLocalMatrices[cameraNodeID];
 
-            mInvTransposeGlobalMatrices[i] = transpose(inverse(mGlobalMatrices[i]));
+                if (mpScene->mSceneGraph[cameraNodeID].parent != SceneBuilder::kInvalidNode)
+                {
+                    logInfo("sceneGraph[cameraNodeID].parent = " + std::to_string(sceneGraph[cameraNodeID].parent));
 
-            if (mpSkinningPass)
-            {
-                mSkinningMatrices[i] = mGlobalMatrices[i] * sceneGraph[i].localToBindSpace;
-                mInvTransposeSkinningMatrices[i] = transpose(inverse(mSkinningMatrices[i]));
+                    mGlobalMatrices[cameraNodeID] = mGlobalMatrices[sceneGraph[cameraNodeID].parent] * mGlobalMatrices[cameraNodeID];
+                }
+
+                mInvTransposeGlobalMatrices[cameraNodeID] = transpose(inverse(mGlobalMatrices[cameraNodeID]));
+
+
+                if (mpSkinningPass)
+                {
+                    logInfo("mpSkinningPass called");
+
+                    mSkinningMatrices[cameraNodeID] = mGlobalMatrices[cameraNodeID] * sceneGraph[cameraNodeID].localToBindSpace;
+                    mInvTransposeSkinningMatrices[cameraNodeID] = transpose(inverse(mSkinningMatrices[cameraNodeID]));
+                }
             }
         }
     }
@@ -376,12 +467,12 @@ namespace Falcor
 
     void AnimationController::bindBuffers()
     {
-        logInfo("bindBuffers() called");
+        //logInfo("bindBuffers() called");
         ParameterBlock* pBlock = mpScene->mpSceneBlock.get();
         pBlock->setBuffer(kWorldMatrices, mpWorldMatricesBuffer);
         pBlock->setBuffer(kInverseTransposeWorldMatrices, mpInvTransposeWorldMatricesBuffer);
         bool usePrev = mEnabled && hasAnimations();
-        logInfo("usePrev = " + std::to_string(usePrev));
+        //logInfo("usePrev = " + std::to_string(usePrev));
         pBlock->setBuffer(kPrevWorldMatrices, usePrev ? mpPrevWorldMatricesBuffer : mpWorldMatricesBuffer);
         pBlock->setBuffer(kPrevInverseTransposeWorldMatrices, usePrev ? mpPrevInvTransposeWorldMatricesBuffer : mpInvTransposeWorldMatricesBuffer);
     }

@@ -6,6 +6,7 @@ RWTexture2D Result;
 
 groupshared float4 partialSums[groupthreads * 2];
 
+// Note: This scan is inclusive, Falcor's prefix-sum is exclusive
 // If shadow map size = n, then block size = n/2. So each block will have n/2 threads, and each thread will handle two locations (outputs)
 // in the shadow map. Thus the shared memory size is n.
 void CSScan(uint2 DTid, uint2 Gid, uint2 GTid)

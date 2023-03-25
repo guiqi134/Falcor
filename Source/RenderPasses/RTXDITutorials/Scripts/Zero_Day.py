@@ -33,6 +33,7 @@ def graph_ImportanceResampling():
         "ismPushMode" : 1,
         "baseTriangleSize" : 0.001,
         "sceneName" : 1,
+        "temporalReusingLength" : 1,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -65,7 +66,9 @@ ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
-m.loadScene(scene)
+# m.loadScene(scene)
+m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes | SceneBuilderFlags.FlattenStaticMeshInstances |
+    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeInstanced))
 if (paused):
     t.pause()
 t.time = currentTime

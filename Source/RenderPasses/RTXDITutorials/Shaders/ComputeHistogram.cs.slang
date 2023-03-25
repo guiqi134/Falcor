@@ -17,10 +17,9 @@ groupshared uint sBlockHistogram[8192]; // Note: total number of light faces sho
 [numthreads(1024, 1, 1)]
 void computeHistogramTwoAdds(uint3 threadId: SV_DispatchThreadID, uint3 groupThreadId: SV_GroupThreadID, uint3 groupId: SV_GroupID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
 
     uint nSections = (gTotalBinCount - 1) / 1024 + 1;
-    // print("nSections = ", nSections);
 
     // Initialize shared memory
     for (uint i = 0; i < nSections; i++)
@@ -71,7 +70,7 @@ void createKeyValuePairs(uint3 threadID : SV_DispatchThreadID)
 
 
 
-// The following part is another unchecked counting method
+// The following part is another unfinished counting method
 
 /*
 #define BLOCK_SIZE 128

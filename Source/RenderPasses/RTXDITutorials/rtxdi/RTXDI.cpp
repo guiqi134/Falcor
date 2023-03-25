@@ -259,8 +259,11 @@ void rtxdi::Context::FillRuntimeParameters(
     const FrameParameters& frame) const
 {
     runtimeParams.firstLocalLight = frame.firstLocalLight;
-    runtimeParams.firstPointLight = frame.firstPointLight;
     runtimeParams.numLocalLights = frame.numLocalLights;
+    runtimeParams.firstPointLight = frame.firstPointLight;
+    runtimeParams.numPointLights = frame.numPointLights;
+    runtimeParams.firstSpotLight = frame.firstSpotLight;
+    runtimeParams.numSpotLights = frame.numSpotLights;
     runtimeParams.firstInfiniteLight = frame.firstInfiniteLight;
     runtimeParams.numInfiniteLights = frame.numInfiniteLights;
     runtimeParams.environmentLightPresent = frame.environmentLightPresent;

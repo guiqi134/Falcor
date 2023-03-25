@@ -44,6 +44,7 @@
 #include <random>
 #include <numeric>
 #include "../HostDeviceSharedDefinitions.h"
+#include "Utils/Algorithm/PrefixSum.h"
 
 // For baseline method use
 #include "Rendering/Lights/EmissivePowerSampler.h"
@@ -82,8 +83,6 @@ public:
 
 protected:
     RTXDITutorialBase(const Dictionary& dict, const RenderPass::Info& desc);
-
-    PixelDebug::SharedPtr mpPixelDebug;
 
     /** Config setting : Maximum number of unique screen-sized reservoir bufers needed by any
         of our derived RTXDI tutorials.  This just controls memory allocation (not really perf)
@@ -225,39 +224,47 @@ protected:
     ////////////////////////////////////////////////////////////////////////////////////////////
 
     /** All types, parameters and resources for this render pass
-    */ 
-    enum class ISMSceneType { Triangle, ThreePoints, CenterPoint };
-    enum class ISMPushSamplingMode { Point, Interpolation };
+    */
 
+    PixelDebug::SharedPtr mpPixelDebug;
+    GpuFence::SharedPtr mpFence;
+    PrefixSum::SharedPtr mpPrefixSum;
     Visibility mVisibility = Visibility::ShadowMap_ISM;
     UpdateFlags mUpdates = UpdateFlags::None;
-    GpuFence::SharedPtr mpFence;
     Sampler::SharedPtr mpPointSampler;
     Sampler::SharedPtr mpLinearSampler;
     uint mSceneName = 0; // TODO: use pybind11 to register scene enum on python side 
 
     // Below are parameters for rendering, scene or updating control
     bool mEnableStatistics = false;
-    bool mShadowParamsChanged = false;
-    bool mEnableShadowRay = false;
     bool mShadowRayForRestPixels = false;
     bool mShadingVisibility = true;
     bool mDrawWireframe = false;
     bool mAdaptiveLightNearPlane = false;
-    bool mFullSizeShadowMaps = true;
-    bool mAdaptiveISM = false;
+    bool mUseHighResISM = false;
+    bool mUseNewPullPush = false;
+    bool mRenderIsmNewCS = true;
+    bool mEnableGpuDebugPrintMode = false;
+    bool mFirstPrecompute = true;
+    bool3 mIsmPointSampleTypes = bool3(false, true, false);
+    // Some redundent toggles
+    bool mUseNearestPointSamples = false;
     bool mOnlyIsmForRanking = true;
-    bool mLimitSwitchRegionInUpdating = true;
-    bool mRenderIsmCS = true;
     bool mUseReconstructPSMs = false;
+    bool mEnableEmissiveLightSampling = false;
+    bool mCompareToBoundary = false;
+    bool mAdaptiveISM = false;
+    bool mEnableRotateLightFace = false;
+
 
     // Below are the parameters for debugging
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
-    bool mDebugLight = false;
-    uint mDebugLightMeshID = 0u;
+    int mDebugLightID = -1;
     uint mVisualizeMipLevel = 0;
-    uint2 mVisLightFaceID = uint2(0);
+    uint2 mVisLightFaceID = uint2(6, 3);
+    bool mVisFaceSamples = false;
+    uint mVisPointSamplesStride = 1u;
 
     struct 
     {
@@ -269,44 +276,55 @@ protected:
     } mGpuDataToGet;
 
     // Below are the light infos  
-    uint mTotalLightMeshCount = 0u;
-    uint mTotalPointLightsCount = 0u;
     uint mTotalLightsCount = 0u;
+    uint mTotalPointLightCount = 0u;
+    uint mTotalSpotLightCount = 0u;
+    uint mTotalLightMeshCount = 0u;
+    uint mTotalActiveEmissiveTriCount = 0u; // not contributing to total lights
+    uint mTotalNonEmissiveTriCount = 0u;
     std::vector<PointLight*> mPointLights;
-    float2 mLightNearFarPlane = float2(0.001f, 1000.0f);
+    float2 mLightNearFarPlane = float2(0.01f, 100.0f);
 
     // Below are the parameters in our method
     uint mLightTopN = 4u; 
     uint mLightFaceTopN = 24u; // Bug: the program will crash when directly entering the value for this
     uint mTopN = 4u;
     uint mPsmCountPerFrame = 24u;
+    uint mTotalBinCount = 1u;
     uint mTemporalReusingLength = 1u;
     uint mCurrFrameReusingStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
     float mSmDepthBias = 1e-6f;
     float mConstEpsilonForAdaptiveDepthBias = 0;
-    uint mUpdatingFrequency = 1u;
+    uint mLightAgeThreshold = 1u;
+    float mAlphaBlendingFactor = 0.1f; // for exponential smoothing function
+    float mConfidenceScaler = 3.0f;
+    uint mWarmUpFrameCount = 20u; // this is used for warming up the light face data in our method (e.g. frequency, variance, face direction, ...)
+    float mSpotPerspectiveFov = -1.0f;
+
     uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
-    uint mLightAgeThreshold = 1u;
     uint mTemporalReusingFix = (uint)TemporalReusingFix::None;
+    uint mFlickerReduction = (uint)FlickerReduction::VarianceCheck;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;
+    uint mTotalHighResIsmCount = 0u;
     float2 mIsmDepthBias = float2(0.0f); 
-    uint mIsmPerLight = 2u;
+    uint mIsmPerPointLight = 6u;
     uint mIsmVisTextureSize = 2048u; // max light: 2k*2k -> 128, 4k*4k -> 512 
     uint mIsmSize = 128u;
-    uint mIsmMinSize = 128u;
     uint mIsmMipLevels = 3;
     float mSceneDepthThresholdScale = 0.01f;
     float mDepthThreshold = 0.0f;
-    float mBaseTriSize = 0.01f;
-    uint mIsmLightSamplingMode = 0u;
     uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
-    uint mIsmSceneType = (uint)ISMSceneType::ThreePoints;
-    bool mIsmLinearProjection = true;
-    uint mIsmMaxTriCountAcrossInstance = 0;
+    uint mHighResIsmSize = 512u;
+    uint mHighResIsmMipLevels = 4;
+    float mHighResIsmCountScaler = 1.0f;
+    float mBaseTriSize = 0.01f;
+    uint mTotalPointSamples = 0;
+    uint mExtraPointSamples = uint(30 * 1e6); // unit: Million
+    float mExtraPointsForSamllTriPercentage = 0.2f;
 
     // Global resources
     Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights
@@ -314,9 +332,8 @@ protected:
     Buffer::SharedPtr mpLightHistogramBuffer;
     Buffer::SharedPtr mpSortedLightsBuffer;
     Buffer::SharedPtr mpTotalValidPixels;
-    Buffer::SharedPtr mpLightPdfBuffer;
-    Buffer::SharedPtr mpLightCdfBuffer;
-    Buffer::SharedPtr mpTriOffsetBuffer;
+    Buffer::SharedPtr mpBoundaryVarianceBuffer;
+    Buffer::SharedPtr mpFalcorLightIDtoOurs;
 
     // Temporal resuing shadow map resources
     std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
@@ -327,10 +344,23 @@ protected:
     // ISM resources
     std::vector<Texture::SharedPtr> mSortedLightsISMs;
     std::vector<Texture::SharedPtr> mSortedLightsISMsUint;
-    Buffer::SharedPtr mpIsmLightIndexBuffer;
-    Buffer::SharedPtr mpPointsBuffer;
-    Buffer::SharedPtr mpCounterBuffer;
+    std::vector<Texture::SharedPtr> mSortedLightsHighResISMs;
+    std::vector<Texture::SharedPtr> mSortedLightsHighResISMsUint;
+    // Below are additional data for pull & push
+    std::vector<Texture::SharedPtr> mSortedIsmRadiusNormal;
+    std::vector<Texture::SharedPtr> mSortedIsmDispVec;
 
+    Texture::SharedPtr mpTriAreaPDFTexture;
+    Texture::SharedPtr mpTriAreaPDFTexOnlyForSmallTri;
+    Buffer::SharedPtr mpPointsBuffer;
+    Buffer::SharedPtr mpTriVerticesPointsBuffer;
+
+    Buffer::SharedPtr mpIsmLightIndexBuffer;
+    Buffer::SharedPtr mpHighResIsmFaceIdxBuffer;
+    Buffer::SharedPtr mpLightPdfBuffer;
+    Buffer::SharedPtr mpLightCdfBuffer;
+    Buffer::SharedPtr mpInstTriOffsetBuffer;
+    Buffer::SharedPtr mpNonEmisInstTriOffsetBuffer;
 
     /** Passes for computing and updating the top N lighs 
     */
@@ -351,8 +381,10 @@ protected:
     // Pass for updating light shadow data buffer due to different changes
     ComputePass::SharedPtr mpUpdateLightShadowDataCenter;
     ComputePass::SharedPtr mpPerFrameGeneralUpdates;
-    ComputePass::SharedPtr mpUpdateLightMeshData;
-    ComputePass::SharedPtr mpUpdatePrevViewMatrices;
+    ComputePass::SharedPtr mpUpdatePsmIsmByRanking;
+    ComputePass::SharedPtr mpUpdateLightFacePrevRanking;
+    ComputePass::SharedPtr mpRotateLightFaces;
+    //ComputePass::SharedPtr mpUpdatePrevViewMatrices;
 
     /** Normal shadow map pass
     */ 
@@ -380,16 +412,35 @@ protected:
         Fbo::SharedPtr pFbo;
     } mIsmRenderPass;
 
+    // Semi-preprocessing pass to generate point samples
+    ComputePass::SharedPtr mpComputeTriAreaSum;
+    ComputePass::SharedPtr mpBuildTriAreaPDFTexture;
+    ComputePass::SharedPtr mpBuildPDFTextureForSmallTris;
+    ComputePass::SharedPtr mpPresampleLightForPoint;
+    ComputePass::SharedPtr mpPresampleTriangles;
+    ComputePass::SharedPtr mpPresampleNearestLight;
+
+    ComputePass::SharedPtr mpComputeNumPointSamples;
+    ComputePass::SharedPtr mpBuildPointSamplesForISM;
+
     // Using CS to render ISMs
     ComputePass::SharedPtr mpIsmRenderPassCS;
+    ComputePass::SharedPtr mpIsmRenderPassNewCS;
+    ComputePass::SharedPtr mpIsmRenderHighResCS;
     ComputePass::SharedPtr mpIsmUint2Float;
 
+    // Pull and push pass
     ComputePass::SharedPtr mpIsmPullPass;
     ComputePass::SharedPtr mpIsmPushPass;
+    ComputePass::SharedPtr mpIsmPullPassNew;
+    ComputePass::SharedPtr mpIsmPushPassNew;
 
     RasterizerState::SharedPtr mpWireframeRS;
     DepthStencilState::SharedPtr mpNoDepthDS;
     DepthStencilState::SharedPtr mpDepthTestDS;
+
+    // Compute ReSTIR statistics pass
+    ComputePass::SharedPtr mpComputeRestirStatistics;
 
     /** Baseline shadow map part
     */
@@ -404,14 +455,20 @@ protected:
         std::vector<float> shadowOptionsCoverage1;
         std::vector<float> shadowOptionsCoverage2;
 
-        std::vector<uint> extraPointsCount;
+        std::string extraPointsArray;
         uint totalExtraPoints;
         uint totalPoints;
-        uint totalNonZeroLightOrFace;
+        std::string numPointsPerLight;
+        std::string numPointsPerFace;
+        std::string numPointsPerLightHighIsm;
+        std::string numPointsPerFaceHighIsm;
 
+        uint totalNonZeroLightOrFace;
         std::string sortedLightIndexArray;
+        std::string sortedLightFreqArray;
         std::string reusingLightIndexArray;
         std::string ismLightIndexArray;
+        std::string highIsmLightIndexArray;
         std::string lightRankingAcrossFrames;
 
         std::string shadowMapSizeCount;
@@ -425,6 +482,10 @@ protected:
 
     // Recording data resources
     Buffer::SharedPtr mpShadowOptionsBuffer; // Each pixel's shadow option (two places). Stores how each pixel's shadow is evalutated
+    Buffer::SharedPtr mpPerLightCountingBuffer;
+    Buffer::SharedPtr mpPerFaceCountingBuffer;
+    Buffer::SharedPtr mpHighIsmPerLightCountingBuffer;
+    Buffer::SharedPtr mpHighIsmPerFaceCountingBuffer;
     Buffer::SharedPtr mpExtraPointsCountBuffer;
     Buffer::SharedPtr mpShadowMapSizeBuffer;
     Buffer::SharedPtr mpRecordReusingLightData;
@@ -434,8 +495,11 @@ protected:
         ComputePass::SharedPtr pVisualizeSinglePsm;
         ComputePass::SharedPtr pVisualizeSingleIsm;
         ComputePass::SharedPtr pVisualizeSingleMotionTex;
-        ComputePass::SharedPtr pVisualizeAll;
-        ComputePass::SharedPtr pVisualizeAll2;
+        ComputePass::SharedPtr pVisualizeAllSortedIsm;
+        ComputePass::SharedPtr pVisualizeAllIsmByID;
+        ComputePass::SharedPtr pVisualizeAllSortedPsm;
+        ComputePass::SharedPtr pVisualizeAllIsmPointSamples;
+        ComputePass::SharedPtr pVisualizeDebugLightIsmPointSamples;
     } mVisualizePass;
 
     struct
@@ -445,6 +509,7 @@ protected:
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
     } mWireframePass;
+
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     // Various internal pass utilities, setup/allocation routines, and common routines for
@@ -504,6 +569,7 @@ protected:
 
     /** Global functions 
     */
+    void precomputeIsmPointSamples(RenderContext* pRenderContext);
     void allocateShadowTextureArrays(RenderContext* pContext);
     void allocateStochasticSmResources(RenderContext* pRenderContext, const RenderData& renderData);
     std::vector<LightShadowMapData> prepareLightShadowMapData();
@@ -511,11 +577,16 @@ protected:
     void prepareStochasticShadowMaps(RenderContext* pRenderContext, const RenderData& data);
     ComputePass::SharedPtr createComputeShader(const std::string& file, const Program::DefineList& defines, const std::string& entryPoint = "main", bool hasScene = false);
     void visualizeShadowMapTex(ComputePass::SharedPtr pPass, std::vector<Texture::SharedPtr>& pSrcTexture, Texture::SharedPtr pDstTexture,
-        RenderContext* pRenderContext, uint mipLevel, uint2 lightFaceIdx, const std::string& mode);
+        RenderContext* pRenderContext, uint mipLevel, uint2 lightFaceIdx, const std::string& mode, uint shadowMapType);
+    void computeRestirStatistics(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Some ISM functions
     */
     void loadIsmShaders();
+    void runIsmPullPush(std::vector<Texture::SharedPtr>& sortedISMs, RenderContext* pRenderContext, Texture::SharedPtr pIsmAfterPull, Texture::SharedPtr pIsmAfterPush,
+        uint ismType);
+    void runIsmPullPushNew(std::vector<Texture::SharedPtr>& sortedISMs, RenderContext* pRenderContext, Texture::SharedPtr pIsmAfterPull, Texture::SharedPtr pIsmAfterPush,
+        uint ismType);
     void prepareIsms(RenderContext* pRenderContext, const RenderData& data);
 
     /** Baseline shadow map function

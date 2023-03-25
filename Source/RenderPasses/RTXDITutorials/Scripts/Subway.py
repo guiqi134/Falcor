@@ -19,13 +19,14 @@ def graph_ImportanceResampling():
         "triEmissiveScale" : 1.0,
         "useLowerShininess" : True,
         "ismParaDepthBias" : 0.001,
-        "ismPersDepthBias" : 0.0001,
+        "ismPersDepthBias" : 0.00004,
         "ismMipLevels" : 3,
-        "smDepthBias" : 0.000010,
+        "smDepthBias" : 0.000002,
         "ismPushMode" : 1,
         "baseTriangleSize" : 0.001,
         "sceneName" : 3,
         "adaptiveLightNear" : False,
+        "temporalReusingLength" : 1,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -59,7 +60,7 @@ try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes | SceneBuilderFlags.FlattenStaticMeshInstances |
-    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeDynamic))
+    SceneBuilderFlags.RTDontMergeStatic | SceneBuilderFlags.RTDontMergeInstanced))
 # m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes))
 # m.loadScene(scene)
 if (paused):

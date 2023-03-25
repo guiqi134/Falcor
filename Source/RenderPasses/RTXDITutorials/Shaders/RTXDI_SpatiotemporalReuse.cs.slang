@@ -58,7 +58,7 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    printSetPixel(threadId);
+    // printSetPixel(threadId);
 
     print("222222222222222222222222", 2);
 
@@ -102,7 +102,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
         RAB_LightSample selectedSample[2] = { (RAB_LightSample)0, (RAB_LightSample)0 };
         int2 selectedSamplePos = 0;
 
-        if (gOnlyIsmForRanking)
+        if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking)
         {
             RTXDI_Reservoir curSamples[2] = {
                 curSample,
@@ -129,6 +129,6 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
     // Store the reservoir after spatiotemporal resampling to our output reservoir buffer
     RTXDI_StoreReservoir(restirResult, params, launchIdx, gOutputReservoirIndex);
 
-    if (gOnlyIsmForRanking)
+    if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking)
         RTXDI_StoreReservoir(restirRankingResult, params, launchIdx, gOutputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
 }

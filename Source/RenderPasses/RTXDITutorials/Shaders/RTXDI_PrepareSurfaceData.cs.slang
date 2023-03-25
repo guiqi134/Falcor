@@ -68,8 +68,8 @@ cbuffer CB
 }
 
 // The geometry buffer we're creating to pass to RTXDI
-RWBuffer<float4> gOutputGeom;
 
+RWBuffer<float4> gOutputGeom;
 // An image containing directly-seen emission from lights & environment maps
 RWTexture2D<float4> gOutputEmissives;
 

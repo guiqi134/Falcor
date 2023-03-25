@@ -90,7 +90,7 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
 
     // Get data about this specific light sample by querying our light
     float3 norm;
-    float3 pos = lightInfo.getPosAndNorm(uv, norm);
+    float3 lightPos = lightInfo.getPosAndNorm(uv, norm);
 
     // Grab a precomputed scalar flux from this emitter for use in PDF computations
     s.mScalarFlux = lightInfo.getScalarLightEmission(uv);
@@ -98,7 +98,7 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
     float3 toLight;
     if (lightInfo.isTriangle())
     {
-        toLight = pos - RAB_GetSurfaceWorldPos(surface);  // getPosAndNorm() returns a direction to the light for environment maps
+        toLight = lightPos - RAB_GetSurfaceWorldPos(surface);  // getPosAndNorm() returns a direction to the light for environment maps
         s.mDistToLight = length(toLight);                      // Put in a large value for infinite lights
         toLight = normalize(toLight);
 
@@ -118,15 +118,16 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
 
         // Compute direction and distance to light.
         // The distance is clamped to a small epsilon to avoid div-by-zero below.
-        toLight = pos - RAB_GetSurfaceWorldPos(surface);
+        toLight = lightPos - RAB_GetSurfaceWorldPos(surface);
         float distSqr = max(dot(toLight, toLight), kMinLightDistSqr);
         s.mDistToLight = sqrt(distSqr);
         toLight = normalize(toLight);
 
         // Calculate the falloff for spot-lights.
-        float cosTheta = -dot(toLight, light.dirW);
+        float cosTheta = dot(-toLight, light.dirW);
         float falloff = 1.f;
-        if (cosTheta < light.cosOpeningAngle)
+        float cosOpeningAngle = light.openingAngle == float(M_PI) ? light.cosOpeningAngle : cos(0.5f * light.openingAngle); // point or spot light opening angle
+        if (cosTheta < cosOpeningAngle)
         {
             falloff = 0.f;
         }
@@ -142,7 +143,7 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
     }
     else
     {
-        toLight = pos;
+        toLight = lightPos;
         s.mDistToLight = 1.0e30f;
         toLight = normalize(toLight);
         s.mInvSampleArea = 4.0f * M_PI;
@@ -176,7 +177,9 @@ bool RAB_GetVisibility(RAB_Surface surface, RAB_LightSample lightSample)
     float3 origin = RAB_GetSurfaceWorldPos(surface);
     float4 rayDirLen = lightSample.getDirectionAndDistance();
     Ray ray = Ray( origin, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
-    return traceShadowRay(ray);
+    // Ray ray = Ray( origin + rayDirLen.w * rayDirLen.xyz, -rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    // return traceShadowRay(ray);
+    return traceShadowRay(ray, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
 }
 
 

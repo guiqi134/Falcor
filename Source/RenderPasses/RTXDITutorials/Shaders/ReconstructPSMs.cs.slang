@@ -15,7 +15,7 @@ Texture2DArray<float4> gSortedMotionTextures;
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
 Buffer<uint> gReusingLightIndexBuffer;
 
-
+[numthreads(16, 16, 1)]
 void main(uint3 threadID: SV_DispatchThreadID)
 {
     // printSetPixel(threadID.xy);

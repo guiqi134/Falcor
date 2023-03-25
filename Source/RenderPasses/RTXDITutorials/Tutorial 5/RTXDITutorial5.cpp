@@ -84,21 +84,30 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // data passed to RTXDI.  This queries our Falcor scene to update flags that track changes.
     checkForSceneUpdates();
 
+    // Precompute all the point samples for ISM render. If base triangle size changed, this should be called.
+    if (mFirstPrecompute)
+    {
+        precomputeIsmPointSamples(pRenderContext);
+        mFirstPrecompute = false;
+    }
+
     // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
     prepareSurfaceData(pRenderContext, renderData);
 
-    // Wait until ReSTIR is stable. This should happen after updating the params
-    mEnableShadowRay = mRtxdiFrameParams.frameIndex < mLightingParams.maxHistoryLength ? true : false;
+    // This is the warm-up stage for getting a stable ranking list at the beginning of our method
+    //mUseOnlyIsmToWarmUp = mRtxdiFrameParams.frameIndex < mLightingParams.maxHistoryLength ? true : false;
 
     // Toggle between different visibility algorithms
-    if ((mVisibility != Visibility::BaselineSM || mVisibility != Visibility::AllShadowRay)
-        && !mEnableShadowRay)
+    if (mVisibility != Visibility::BaselineSM || mVisibility != Visibility::AllShadowRay)
     {
         // Do stochastic shadow map passes using last frame ReSTIR sample data
         prepareStochasticShadowMaps(pRenderContext, renderData);
         runSpatioTemporalReuse(pRenderContext, renderData);
+
+        // Compute statistics for next frame
+        computeRestirStatistics(pRenderContext, renderData);
     }
-    else if (mVisibility == Visibility::BaselineSM && !mEnableShadowRay)
+    else if (mVisibility == Visibility::BaselineSM)
     {
         runBaselineShadowMap(pRenderContext, renderData);
     }
@@ -110,10 +119,10 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
         runSpatioTemporalReuse(pRenderContext, renderData);
     }
 
-    pRenderContext->blit(renderData["mvec"]->asTexture()->getSRV(), renderData["debugScreenMotion"]->asTexture()->getRTV());
+    //pRenderContext->blit(renderData["mvec"]->asTexture()->getSRV(), renderData["debugScreenMotion"]->asTexture()->getRTV());
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
-    mRtxdiFrameParams.frameIndex++;
+    if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
 
     // When we do temporal reuse, we need a G-buffer for this frame *and* last frame to compute shading.  We have
     // two G-buffer indicies (0 and 1), ping-pong back and forth between them each frame.
@@ -122,6 +131,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
 
     mPassData.updateLightPosition = false;
     mPassData.updateLightIntensity = false;
+    mPassData.updateLightOtherProperties = false;
 
     mpPixelDebug->endFrame(pRenderContext);
 }
@@ -148,7 +158,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         candidatesVars["SampleCB"]["gLocalSamples"] = mLightingParams.primLightSamples;
         candidatesVars["SampleCB"]["gEnvironmentSamples"] = mLightingParams.envLightSamples;
         candidatesVars["SampleCB"]["gOutputReservoirIndex"] = uint(2);
-        candidatesVars["SampleCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        candidatesVars["SampleCB"]["gVisMode"] = uint(mVisibility);
         setupRTXDIBridgeVars(candidatesVars, renderData);
         mpPixelDebug->prepareProgram(mShader.initialCandidates->getProgram(), candidatesVars);
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
@@ -158,14 +168,12 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
     if (mLightingParams.traceInitialShadowRay)
     {
         FALCOR_PROFILE("Candidate Visibility");
-        uint checkCandiateVisMode = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
-        //checkCandiateVisMode = mOnlyIsmForRanking ? uint(Visibility::AllISM) : checkCandiateVisMode;
 
         auto visVars = mShader.initialCandidateVisibility->getRootVar();
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
-        visVars["SampleCB"]["gVisMode"] = checkCandiateVisMode;
+        visVars["SampleCB"]["gVisMode"] = uint(mVisibility);
         setupRTXDIBridgeVars(visVars, renderData);
-        mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
+        //mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
@@ -195,7 +203,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         reuseVars["ReuseCB"]["gSamplesInDisocclusions"] = uint(mLightingParams.spatialSamples);
         reuseVars["ReuseCB"]["gUseVisibilityShortcut"] = bool(mLightingParams.useVisibilityShortcut);
         reuseVars["ReuseCB"]["gEnablePermutationSampling"] = bool(mLightingParams.permuteTemporalSamples);
-        reuseVars["ReuseCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        reuseVars["ReuseCB"]["gVisMode"] = uint(mVisibility);
         setupRTXDIBridgeVars(reuseVars, renderData);
         mpPixelDebug->prepareProgram(mShader.spatiotemporalReuse->getProgram(), reuseVars);
         mShader.spatiotemporalReuse->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
@@ -210,7 +218,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         auto shadeVars = mShader.shade->getRootVar();
         shadeVars["ShadeCB"]["gInputReservoirIndex"] = uint(1u - mLightingParams.lastFrameOutput);
         shadeVars["ShadeCB"]["gShadingVisibility"] = mShadingVisibility;
-        shadeVars["ShadeCB"]["gVisMode"] = mEnableShadowRay ? uint(Visibility::AllShadowRay) : uint(mVisibility);
+        shadeVars["ShadeCB"]["gVisMode"] = uint(mVisibility);
         shadeVars["gOutputColor"] = renderData["color"]->asTexture();
         shadeVars["gInputEmission"] = mResources.emissiveColors;
         shadeVars["gVbuffer"] = renderData["vbuffer"]->asTexture();

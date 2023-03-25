@@ -31,12 +31,13 @@ def graph_ImportanceResampling():
         "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
         "ismParaDepthBias" : 0.01,
-        "ismPersDepthBias" : 0.001,
+        "ismPersDepthBias" : 0.0001,
         "ismMipLevels" : 3,
         "ismPushMode" : 1,
-        "smDepthBias" : 0.000050,
-        "baseTriangleSize" : 0.001,
+        "smDepthBias" : 0.000002,
+        "baseTriangleSize" : 0.006,
         "adaptiveLightNear" : True,
+        "temporalReusingLength" : 1,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -69,7 +70,7 @@ try: m.addGraph(ImportanceResampling)
 except NameError: None
 
 m.loadScene(scene)
-m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
+# m.scene.setEnvMap("RTXDITutorialsBistro/san_giuseppe_bridge_4k.hdr")
 if (paused):
     t.pause()
 t.time = currentTime

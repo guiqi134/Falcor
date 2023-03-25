@@ -1603,6 +1603,11 @@ namespace Falcor
             if (mpAnimationController->hasAnimatedMeshCaches()) mUpdates |= UpdateFlags::MeshesChanged;
         }
 
+        //// Still update selected camera matrix data if it is animated
+        //auto camera = mCameras[mSelectedCamera];
+        //if (!mpAnimationController->isEnabled() && (camera->hasAnimation() && camera->isAnimated()))
+        //    mpAnimationController->animateSelectedCamera(pContext, currentTime, camera->getNodeID());
+
         for (const auto& pGridVolume : mGridVolumes)
         {
             pGridVolume->updatePlayback(currentTime);

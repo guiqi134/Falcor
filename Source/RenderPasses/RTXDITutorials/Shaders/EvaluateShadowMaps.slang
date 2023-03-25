@@ -1,8 +1,8 @@
-#include "../HostDeviceSharedDefinitions.h"
+// #include "../HostDeviceSharedDefinitions.h"
 
 import Scene.Scene;
 import Utils.Debug.PixelDebug;
-__exported import ISMHelpers;
+import ISMHelpers;
 
 // Reference: Adaptive Depth Bias for Shadow Maps, Dou 2014
 bool adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, uint face, uint mipLevel, float constEpsilon, const Texture2DArray<float> shadowMaps, SamplerState sampler,
@@ -15,7 +15,7 @@ bool adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, uin
     /** Define tangent plane **/
     // Light space frag normal
     // float4 normalLightView = mul(float4(normalW, 0.0f), inverse(transpose(lightParams.lightView)));
-    float4 normalLightView = mul(float4(normalW, 0.0f), lightData.lightFaceData[face].viewMat); // Because lightView is orthgonal matrix if we don't account for translation
+    float4 normalLightView = mul(float4(normalW, 0.0f), lightData.lightFaceData[face].normalViewMat); // Because lightView is orthgonal matrix if we don't account for translation
     float3 n = normalize(normalLightView.xyz);
 
     /** Locate shadow map texel center **/
@@ -126,8 +126,9 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
         float4x4 lightViewProj = mul(lightData.lightFaceData[faceIdx].viewMat, lightData.persProjMat);
         float4 posLightClipping = mul(float4(posW, 1.0f), lightViewProj);
         float3 posLightNDC = posLightClipping.xyz / posLightClipping.w;
-        float3 projCoord = float3(posLightNDC.xy * float2(0.5f, -0.5f) + 0.5f, posLightNDC.z);
+        float3 projCoord = float3(posLightNDC.xy * float2(0.5f, -0.5f) + 0.5f, posLightNDC.z - depthBias);
 
+        print("depthBias = ", depthBias);
         print("projCoord = ", projCoord);
 
         // Sample the target face's shadow map
@@ -135,7 +136,7 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
 
         print("shadowMapDepth = ", shadowMapDepth);
 
-        isVisible = shadowMapDepth < projCoord.z - depthBias ? false : true;
+        isVisible = shadowMapDepth < projCoord.z ? false : true;
     }
     else if (gDepthBiasMode == (uint)ShadowDepthBias::Dou2014)
     {
@@ -146,58 +147,38 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
 }
 
 bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> ismTextureArray, SamplerState linearSampler, float2 bias,
-    uint faceIdx, bool gIsmLinearProjection)
+    uint faceIdx, uint ismArrayIdx, out float shadowMapDepth)
 {
     float2 lightNearFar = lightData.nearFarPlane;
     float3 lightPosW = lightData.centerPosW;
 
-    // Compute depth bias. TODO: also adaptively based on pull & push levels
+    // Compute depth bias. (TODO: also adaptively based on pull & push levels)
     float3 L = normalize(lightPosW - posW);
     float NdotL = dot(normalW, L);
 
+    // Get the resolution of the ISM texture
+    uint2 ismSize;
+    uint elements;
+    ismTextureArray.GetDimensions(ismSize.x, ismSize.y, elements);
+    float depthBiasScaler = 128.0f / ismSize.x;
+
+    // Compute depth bias
+    float depthBias = max(10.0 * bias.y * (1.0 - NdotL), bias.y) * depthBiasScaler;
+
     // Projecting shading point to light space
-    float3 posLightNDC;
-    uint ismOffset;
-    float depthBias;
-    if (gIsmLinearProjection)
-    {
-        // Get the resolution of the ISM texture
-        uint2 ismSize;
-        uint elements;
-        ismTextureArray.GetDimensions(ismSize.x, ismSize.y, elements);
-        float depthBiasScaler = 128.0f / ismSize.x;
-
-        // Compute depth bias
-        depthBias = max(10.0 * bias.y * (1.0 - NdotL), bias.y) * depthBiasScaler;
-
-        float3 lightToShadingW = posW - lightPosW;
-        ismOffset = getFaceIndex(normalize(lightToShadingW));
-        float4x4 lightViewProj = mul(lightData.lightFaceData[faceIdx].viewMat, lightData.persProjMat);
-        float4 posLightClipping = mul(float4(posW, 1.0f), lightViewProj);
-        posLightNDC = posLightClipping.xyz / posLightClipping.w;
-    }
-    else
-    {
-        // Check the shading is in which hemisphere
-        int direction = sign(lightPosW.y - posW.y);
-        ismOffset = direction == 1 ? 0 : 1;
-
-        // Compute depth bias
-        depthBias = max(10.0 * bias.x * (1.0 - NdotL), bias.x);
-
-        print("ismOffset = ", ismOffset);
-
-        // Paraboloid project shading point
-        float4x4 viewMat = lightData.lightFaceData[3 - ismOffset].viewMat;
-        float3 shadingPosLightView = mul(float4(posW, 1.0f), viewMat).xyz;
-        posLightNDC = paraboloidProjection(shadingPosLightView, lightNearFar.x, lightNearFar.y);
-    }
+    float3 lightToShadingW = posW - lightPosW;
+    uint ismOffset = getClosestFace(normalize(lightToShadingW), lightData);
+    float4x4 lightViewProj = mul(lightData.lightFaceData[faceIdx].viewMat, lightData.persProjMat);
+    float4 posLightClipping = mul(float4(posW, 1.0f), lightViewProj);
+    float3 posLightNDC = posLightClipping.xyz / posLightClipping.w;
     float3 projCoord = float3(posLightNDC.xy * float2(0.5f, -0.5f) + 0.5f, posLightNDC.z - depthBias);
 
+    print("depthBias = ", depthBias);
     print("projCoord = ", projCoord);
 
     // Sample the target face's shadow map
-    float shadowMapDepth = ismTextureArray.SampleLevel(linearSampler, float3(projCoord.xy, lightData.lightFaceData[faceIdx].ismTexArrayIdx), 0);
+    float3 location = float3(projCoord.xy, ismArrayIdx);
+    shadowMapDepth = ismTextureArray.SampleLevel(linearSampler, location, 0);
 
     print("shadowMapDepth = ", shadowMapDepth);
 
@@ -208,7 +189,7 @@ bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, cons
 // Help functions for our method
 
 // Given the reservoir's (triangle) light index, map it to mesh light or point light index
-int toLocalLightIndex(uint reservoirLightIdx, uint totalLigthMeshCount, uint firstPointLight, uint environmentLightIndex)
+int toLocalLightIndex(uint reservoirLightIdx, uint totalLigthMeshCount, uint firstPointLight, uint environmentLightIndex, Buffer<uint> falcorLightIDtoOurs)
 {
     int lightID = -1;
     if (reservoirLightIdx < firstPointLight)
@@ -219,8 +200,12 @@ int toLocalLightIndex(uint reservoirLightIdx, uint totalLigthMeshCount, uint fir
     }
     else if (reservoirLightIdx < environmentLightIndex)
     {
-        uint pointLightIndex = reservoirLightIdx - firstPointLight;
-        lightID = int(totalLigthMeshCount + pointLightIndex);
+        // Since how light is stored in Falcor is different to ours, we need a buffer to link them
+        uint falcorPointLightIdx = reservoirLightIdx - firstPointLight;
+        uint oursPointLightIdx = falcorLightIDtoOurs[falcorPointLightIdx];
+        lightID = int(totalLigthMeshCount + oursPointLightIdx);
+        // print("falcorPointLightIdx = ", falcorPointLightIdx);
+        // print("oursPointLightIdx = ", oursPointLightIdx);
     }
 
     return lightID;

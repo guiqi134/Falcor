@@ -44,7 +44,7 @@ cbuffer SampleCB
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
 
     print("0000000000000", 0);
 
