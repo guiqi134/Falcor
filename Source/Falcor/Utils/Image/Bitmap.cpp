@@ -404,6 +404,8 @@ namespace Falcor
             filters.push_back({ "exr", "High Dynamic Range" });
             filters.push_back({ "pfm", "Portable Float Map" });
             filters.push_back({ "hdr", "Radiance HDR" });
+
+            filters.push_back({ "png", "Portable Network Graphics" });
         }
 
         if (showLdr)

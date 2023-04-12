@@ -14,8 +14,7 @@ bool adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, uin
 
     /** Define tangent plane **/
     // Light space frag normal
-    // float4 normalLightView = mul(float4(normalW, 0.0f), inverse(transpose(lightParams.lightView)));
-    float4 normalLightView = mul(float4(normalW, 0.0f), lightData.lightFaceData[face].normalViewMat); // Because lightView is orthgonal matrix if we don't account for translation
+    float4 normalLightView = mul(float4(normalW, 0.0f), inverse(transpose(lightData.lightFaceData[face].viewMat)));
     float3 n = normalize(normalLightView.xyz);
 
     /** Locate shadow map texel center **/
@@ -97,8 +96,55 @@ bool adaptiveDepthBias(float3 normalW, float3 wsFragPos, uint shadowMapSize, uin
     return isVisible;
 }
 
-bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> shadowMaps, SamplerState linearSampler, float bias, uint faceIdx,
-    uint sortingRules, uint gDepthBiasMode, float constEpsilon)
+float2 rotatedPoisson(float2 poissonSample, float2 rotation)
+{
+    return float2(
+        poissonSample.x * rotation.x - poissonSample.y * rotation.y,
+        poissonSample.x * rotation.y + poissonSample.y * rotation.x
+    );
+}
+
+float PCF(float kernelRadius, const Texture2DArray<float> shadowMaps, SamplerComparisonState compareSampler, float3 location, float projDepth, float texelSize)
+{
+    float sum = 0.0f;
+    float pcfSamples = (2 * kernelRadius + 1) * (2 * kernelRadius + 1);
+
+    for (float x = -kernelRadius; x <= kernelRadius; x++)
+    {
+        for (float y = -kernelRadius; y <= kernelRadius; y++)
+        {
+            float2 offset = texelSize * float2(x, y);
+            // print("offset = ", offset);
+            sum += shadowMaps.SampleCmpLevelZero(compareSampler, location + float3(offset, 0.0f), projDepth);
+        }
+    }
+
+    return sum / pcfSamples;
+}
+
+float PCF_PoissonDiskSamples(PCF_Parameters pcfParams, const Texture2DArray<float> shadowMaps, SamplerComparisonState compareSampler, float3 location, float projDepth, float texelSize,
+    Buffer<float2> poissonSamples, float2 rotation)
+{
+    float sum = 0.0f;
+    for (uint i = 0; i < pcfParams.numPcfPoissonSamples; i++)
+    {
+        float2 selectedSample = poissonSamples[i]; // [-1, 1]
+        if (pcfParams.useRotation) selectedSample = rotatedPoisson(selectedSample, rotation);
+        float2 offset = pcfParams.kernelRadius * texelSize * selectedSample;
+        print("offset = ", offset);
+        sum += shadowMaps.SampleCmpLevelZero(compareSampler, location + float3(offset, 0.0f), projDepth);
+    }
+
+    print("rotation = ", rotation);
+    print("numPoissonSamples = ", pcfParams.numPcfPoissonSamples);
+    print("sum / numPoissonSamples = ", sum / pcfParams.numPcfPoissonSamples);
+
+    return sum / pcfParams.numPcfPoissonSamples;
+}
+
+float evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> shadowMaps, SamplerState linearSampler, float bias, uint faceIdx,
+                         uint sortingRules, uint gDepthBiasMode, float constEpsilon, PCF_Parameters pcfParams, SamplerComparisonState compareSampler, Buffer<float2> poissonSamples,
+                         float2 rotation)
 {
     // Get the max resolution of the texture
     uint2 maxShadowMapSize;
@@ -111,16 +157,17 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
     float3 lightPosW = lightData.centerPosW;
     float3 L = normalize(lightPosW - posW);
     float NdotL = dot(normalW, L);
-    bool isVisible = true;
+    float isVisible = 1.0f;
     if (gDepthBiasMode == (uint)ShadowDepthBias::SlopeScale)
     {
         float depthBias = 0.0f;
+        float scaler = 20.0f;
         if (mipLevel <= 1)
-            depthBias = max(2.0 * bias * (1.0 - NdotL), bias);
+            depthBias = max(scaler * bias * (1.0 - NdotL), bias);
         else if (mipLevel <= 3)
-            depthBias = max(2.0 * bias * (1.0 - NdotL) * pow(2.0, mipLevel), bias);
+            depthBias = max(scaler * bias * (1.0 - NdotL) * pow(2.0, mipLevel), bias);
         else
-            depthBias = max(2.0 * bias * (1.0 - NdotL) * pow(2.1, mipLevel + 1), bias);
+            depthBias = max(scaler * bias * (1.0 - NdotL) * pow(2.1, mipLevel + 1), bias);
 
         // Project shading point to the selected light space
         float4x4 lightViewProj = mul(lightData.lightFaceData[faceIdx].viewMat, lightData.persProjMat);
@@ -132,22 +179,35 @@ bool evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDat
         print("projCoord = ", projCoord);
 
         // Sample the target face's shadow map
-        float shadowMapDepth = shadowMaps.SampleLevel(linearSampler, float3(projCoord.xy, lightData.lightFaceData[faceIdx].psmTexArrayIdx), 0);
-
-        print("shadowMapDepth = ", shadowMapDepth);
-
-        isVisible = shadowMapDepth < projCoord.z ? false : true;
+        float3 location = float3(projCoord.xy, lightData.lightFaceData[faceIdx].psmTexArrayIdx);
+        float texelSize = 1.0f / shadowMapSize;
+        if (pcfParams.usePCF)
+        {
+            if (pcfParams.usePoisson)
+            {
+                isVisible = PCF_PoissonDiskSamples(pcfParams, shadowMaps, compareSampler, location, projCoord.z, texelSize, poissonSamples, rotation);
+            }
+            else
+            {
+                isVisible = PCF(pcfParams.kernelRadius, shadowMaps, compareSampler, location, projCoord.z, texelSize);
+            }
+        }
+        else
+        {
+            float shadowMapDepth = shadowMaps.SampleLevel(linearSampler, location, 0);
+            isVisible = shadowMapDepth < projCoord.z ? 0.0f : 1.0f;
+        }
     }
     else if (gDepthBiasMode == (uint)ShadowDepthBias::Dou2014)
     {
-        isVisible = adaptiveDepthBias(normalW, posW, shadowMapSize, faceIdx, mipLevel, constEpsilon, shadowMaps, linearSampler, lightData);
+        isVisible = float(adaptiveDepthBias(normalW, posW, shadowMapSize, faceIdx, mipLevel, constEpsilon, shadowMaps, linearSampler, lightData));
     }
 
     return isVisible;
 }
 
-bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> ismTextureArray, SamplerState linearSampler, float2 bias,
-    uint faceIdx, uint ismArrayIdx, out float shadowMapDepth)
+float evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> ismTextureArray, SamplerState linearSampler, float2 bias,
+                  uint faceIdx, uint ismArrayIdx, PCF_Parameters pcfParams, SamplerComparisonState compareSampler, Buffer<float2> poissonSamples, float2 rotation)
 {
     float2 lightNearFar = lightData.nearFarPlane;
     float3 lightPosW = lightData.centerPosW;
@@ -167,7 +227,6 @@ bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, cons
 
     // Projecting shading point to light space
     float3 lightToShadingW = posW - lightPosW;
-    uint ismOffset = getClosestFace(normalize(lightToShadingW), lightData);
     float4x4 lightViewProj = mul(lightData.lightFaceData[faceIdx].viewMat, lightData.persProjMat);
     float4 posLightClipping = mul(float4(posW, 1.0f), lightViewProj);
     float3 posLightNDC = posLightClipping.xyz / posLightClipping.w;
@@ -178,11 +237,19 @@ bool evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, cons
 
     // Sample the target face's shadow map
     float3 location = float3(projCoord.xy, ismArrayIdx);
-    shadowMapDepth = ismTextureArray.SampleLevel(linearSampler, location, 0);
+    float texelSize = 1.0f / ismSize.x;
+    float visibility = 1.0f;
+    if (pcfParams.usePCF)
+    {
+        visibility = ismTextureArray.SampleCmpLevelZero(compareSampler, location, projCoord.z);
+    }
+    else
+    {
+        float shadowMapDepth = ismTextureArray.SampleLevel(linearSampler, location, 0);
+        visibility = shadowMapDepth < projCoord.z ? 0.0f : 1.0f;
+    }
 
-    print("shadowMapDepth = ", shadowMapDepth);
-
-    return shadowMapDepth < projCoord.z ? false : true;
+    return visibility;
 }
 
 

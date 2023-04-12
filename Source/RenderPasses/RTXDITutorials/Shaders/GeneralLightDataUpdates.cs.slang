@@ -66,12 +66,8 @@ void generalUpdates(uint3 threadId: SV_DispatchThreadID)
     print("localLightIDAndFaceIdx = ", localLightIDAndFaceIdx);
 
     gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].currRanking = threadId.x;
-    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].accumulatedFrames += 1;
-    // gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].psmAge += 1;
     gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].frequency = frequency;
-
-    // Reset light's average direction
-    // gLightShadowDataBuffer[localLightID].avgDirection = float3(0.0f);
+    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].fadeInFrameCount += 1;
 
     // Update mean and stdDev
     if (gFlickerReduction == (uint)FlickerReduction::VarianceCheck && gIterationCount > 0)

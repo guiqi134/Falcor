@@ -62,8 +62,8 @@ uint getClosestFace(float3 targetDir, LightShadowMapData lightShadowData)
     uint closestFaceIdx = 0u;
     for (uint face = 0; face < lightShadowData.numShadowMaps; face++)
     {
-        float cosValue = dot(targetDir, normalize(lightShadowData.lightFaceData[face].viewDirection));
-        // print("cosValue = ", cosValue);
+        float3 viewDirection = -lightShadowData.lightFaceData[face].viewMat[2].xyz;
+        float cosValue = dot(targetDir, normalize(viewDirection));
         if (cosValue > maxCosValue)
         {
             maxCosValue = cosValue;
@@ -132,7 +132,7 @@ uint getFaceIndex(float3 direction)
 */
 float linearizeDepth(float depthNDC, float near, float far)
 {
-    return (near * far) / (depthNDC * (far - near) - far);
+    return abs((near * far) / (depthNDC * (far - near) - far)); // return positive depth
 }
 
 // Paraboloid projection. We are in right-hand system, the view direction will be -z
@@ -243,74 +243,6 @@ uint2 getLocalLightIdAndFaceIdx(uint globalFaceID, uint firstSpotLightID)
     return uint2(localLightID, faceIdx);
 }
 
-#define RTXDI_TEX2D_LOAD(tex, pos, lod) tex.Load(int3(pos, lod))
-
-void samplePdfMipmap(
-    inout TinyUniformSampleGenerator rng,
-    Texture2D<float> pdfTexture, // full mip chain starting from unnormalized sampling pdf in mip 0
-    uint2 pdfTextureSize,   // dimensions of pdfTexture at mip 0; must be 16k or less
-    out uint2 position,
-    out float pdf)
-{
-    int lastMipLevel = max(0, int(floor(log2(max(pdfTextureSize.x, pdfTextureSize.y)))) - 1);
-
-    position = uint2(0, 0);
-    pdf = 1.0;
-    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
-    {
-        position *= 2;
-
-        float4 samples;
-        samples.x = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 0, position.y + 0), mipLevel).x);
-        samples.y = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 0, position.y + 1), mipLevel).x);
-        samples.z = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 1, position.y + 0), mipLevel).x);
-        samples.w = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 1, position.y + 1), mipLevel).x);
-
-        float weightSum = samples.x + samples.y + samples.z + samples.w;
-        if (weightSum <= 0)
-        {
-            pdf = 0;
-            return;
-        }
-
-        samples /= weightSum;
-
-        float rnd = sampleNext1D(rng);
-
-        int2 selectedOffset;
-
-        if (rnd < samples.x)
-        {
-            pdf *= samples.x;
-        }
-        else
-        {
-            rnd -= samples.x;
-
-            if (rnd < samples.y)
-            {
-                position += uint2(0, 1);
-                pdf *= samples.y;
-            }
-            else
-            {
-                rnd -= samples.y;
-
-                if (rnd < samples.z)
-                {
-                    position += uint2(1, 0);
-                    pdf *= samples.z;
-                }
-                else
-                {
-                    position += uint2(1, 1);
-                    pdf *= samples.w;
-                }
-            }
-        }
-    }
-}
-
 // ISM point sample data structure on GPU
 struct IsmPointSample
 {
@@ -325,7 +257,8 @@ static const uint kIsmPointSample_InstanceIdShift = 16;
 PackedIsmPointSample packIsmPointSample(IsmPointSample pointSample)
 {
     PackedIsmPointSample packedSample;
-    packedSample.pos = float16_t3(pointSample.pos);
+    // packedSample.pos = float16_t3(pointSample.pos);
+    packedSample.pos = pointSample.pos;
     packedSample.packedLightInstanceID = (pointSample.selectedLightID & 0xFFFF) | ((pointSample.instanceID & 0xFFFF) << 16);
 
     return packedSample;
@@ -362,3 +295,43 @@ IsmPointSample unpackIsmPointSample(PackedIsmPointSample packedSample)
 //     float len = sqrt(pos.x * pos.x + pos.y * pos.y);
 //     return float3(pos.xy / len * theta / (Pi * 0.5), pz);
 // }
+
+float4x4 inverse(float4x4 m)
+{
+    float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
+    float n21 = m[0][1], n22 = m[1][1], n23 = m[2][1], n24 = m[3][1];
+    float n31 = m[0][2], n32 = m[1][2], n33 = m[2][2], n34 = m[3][2];
+    float n41 = m[0][3], n42 = m[1][3], n43 = m[2][3], n44 = m[3][3];
+
+    float t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+    float t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+    float t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+    float t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+
+    float det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+    float idet = 1.0f / det;
+
+    float4x4 ret;
+
+    ret[0][0] = t11 * idet;
+    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
+    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
+    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
+
+    ret[1][0] = t12 * idet;
+    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
+    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
+    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
+
+    ret[2][0] = t13 * idet;
+    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
+    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
+    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
+
+    ret[3][0] = t14 * idet;
+    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
+    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
+    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
+
+    return ret;
+}

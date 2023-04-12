@@ -20,13 +20,16 @@ def graph_ImportanceResampling():
         "useLowerShininess" : True,
         "ismParaDepthBias" : 0.001,
         "ismPersDepthBias" : 0.00004,
-        "ismMipLevels" : 3,
-        "smDepthBias" : 0.000002,
+        "ismMipLevels" : 2,
+        "smDepthBias" : 0.00001,
         "ismPushMode" : 1,
         "baseTriangleSize" : 0.001,
         "sceneName" : 3,
         "adaptiveLightNear" : False,
         "temporalReusingLength" : 1,
+        "extraPointSamples" : 100000000,
+        "triAreaClampThreshold" : float2(0.001333, 0.024016),
+        "numPSMs" : 24,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
@@ -50,6 +53,7 @@ def graph_ImportanceResampling():
 
     tracer.addEdge("RTXDI Tutorials.color", "Accumulation.input")
     tracer.addEdge("Accumulation.output", "ToneMapping.src")
+
     tracer.markOutput("ToneMapping.dst")
 
     return tracer

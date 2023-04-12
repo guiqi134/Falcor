@@ -176,8 +176,8 @@ bool RAB_GetVisibility(RAB_Surface surface, RAB_LightSample lightSample)
 {
     float3 origin = RAB_GetSurfaceWorldPos(surface);
     float4 rayDirLen = lightSample.getDirectionAndDistance();
-    Ray ray = Ray( origin, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
-    // Ray ray = Ray( origin + rayDirLen.w * rayDirLen.xyz, -rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    // Ray ray = Ray( origin, rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
+    Ray ray = Ray( origin + rayDirLen.w * rayDirLen.xyz, -rayDirLen.xyz, gEpsilon, (rayDirLen.w - gEpsilon) );
     // return traceShadowRay(ray);
     return traceShadowRay(ray, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
 }

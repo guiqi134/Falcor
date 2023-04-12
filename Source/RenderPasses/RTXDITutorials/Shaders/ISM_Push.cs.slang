@@ -1,4 +1,5 @@
 import Utils.Debug.PixelDebug;
+import ISMHelpers;
 
 Texture2DArray<float> gInput;
 RWTexture2DArray<float> gOutput;
@@ -7,6 +8,7 @@ cbuffer PushCB
 {
     uint gPushMode;
     float gDepthDiffThreshold;
+    float2 gLightNearFarPlane;
 }
 
 static const uint2 offsets[4] = {
@@ -20,7 +22,7 @@ static const uint2 offsets[4] = {
 [numthreads(16, 16, 1)]
 void main(uint3 threadID : SV_DispatchThreadID)
 {
-    // printSetPixel(threadID.xy);
+    // printSetPixel(threadID.yz);
     print("gDepthDiffThreshold = ", gDepthDiffThreshold);
 
     uint texArrayIndex = threadID.z;
@@ -30,9 +32,9 @@ void main(uint3 threadID : SV_DispatchThreadID)
     float currPixelDepth = gOutput[uint3(threadID.xy, texArrayIndex)];
     float computedDepth = 0.0f;
 
-    print("currPixelCoarsePos = ", currPixelCoarsePos);
-    print("leftTopCoarsePos = ", leftTopCoarsePos);
-    print("currPixelCoarseOffset = ", currPixelCoarseOffset);
+    // print("currPixelCoarsePos = ", currPixelCoarsePos);
+    // print("leftTopCoarsePos = ", leftTopCoarsePos);
+    // print("currPixelCoarseOffset = ", currPixelCoarseOffset);
 
     // Brute-force method: Just copy the repective value in the coarser level to the pixel in the finer level
     if (gPushMode == 0)
@@ -42,7 +44,7 @@ void main(uint3 threadID : SV_DispatchThreadID)
 
     // Interpolation method: Get the left-most top-most pixel on the coarser level, and then get all the 4 pixels based on it. Do the interpolation using
     // these four coarser pixels.
-    // Each coarser level 2*2 region covers 4*4 region in the finer level
+    //  -> Each coarser level 2*2 region covers 4*4 region in the finer level
     if (gPushMode == 1)
     {
         // Adjust weights according to current pixel position in coarser level
@@ -68,12 +70,14 @@ void main(uint3 threadID : SV_DispatchThreadID)
         for (uint i = 0; i < 4; i++)
         {
             float coarseDepth = gInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
-            if (coarseDepth == 1.0f) continue;
-            computedDepth += weights[i] * gInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
-            weightSum += weights[i];
+            if (coarseDepth != 1.0f)
+            {
+                computedDepth += weights[i] * coarseDepth;
+                weightSum += weights[i];
+            }
         }
 
-        print("weightSum = ", weightSum);
+        // print("weightSum = ", weightSum);
 
         if (weightSum == 0.0f)
             computedDepth = 1.0f;
@@ -81,11 +85,17 @@ void main(uint3 threadID : SV_DispatchThreadID)
             computedDepth /= weightSum;
     }
 
-    print("computedDepth = ", computedDepth);
-    print("currPixelDepth = ", currPixelDepth);
 
     // Check if the interpolated depth value is valid or occluded
-    if (computedDepth != 1.0f && computedDepth < currPixelDepth /*&& (currPixelDepth - computedDepth) <= gDepthDiffThreshold*/)
+    float computedLinearDepth = linearizeDepth(computedDepth, gLightNearFarPlane.x, gLightNearFarPlane.y);
+    float currPixelLinearDepth = linearizeDepth(currPixelDepth, gLightNearFarPlane.x, gLightNearFarPlane.y);
+    print("computedLinearDepth = ", computedLinearDepth);
+    print("currPixelLinearDepth = ", currPixelLinearDepth);
+    print("diff = ", abs(currPixelLinearDepth - computedLinearDepth));
+    // bool isDepthDiffOK = abs(currPixelLinearDepth - computedLinearDepth) <= 0.5f * max(currPixelLinearDepth, computedLinearDepth);
+    bool isDepthDiffOK = currPixelDepth == 1.0f ? true : abs(currPixelLinearDepth - computedLinearDepth) <= gDepthDiffThreshold;
+    // bool isDepthDiffOK = abs(currPixelLinearDepth - computedLinearDepth) <= gDepthDiffThreshold;
+    if (computedDepth != 1.0f && computedDepth < currPixelDepth && isDepthDiffOK)
     {
         gOutput[uint3(threadID.xy, texArrayIndex)] = computedDepth;
     }

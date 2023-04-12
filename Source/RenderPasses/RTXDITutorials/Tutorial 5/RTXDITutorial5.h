@@ -58,6 +58,8 @@ public:
     // and then share this temporal result via spatial reuse.  This is the full ReSTIR.
     void runSpatioTemporalReuse(RenderContext* pRenderContext, const RenderData& renderData);
 
+    void runBasicRISLighting(RenderContext* pRenderContext, const RenderData& renderData);
+
 protected:
     RTXDITutorial5(const Dictionary& dict) : RTXDITutorialBase(dict, getClassDescription()) {}
 

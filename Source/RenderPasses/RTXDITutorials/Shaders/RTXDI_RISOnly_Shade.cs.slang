@@ -31,17 +31,31 @@
 Texture2D<float4> gInputEmission;     // Emissive color from the G-buffer
 RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, emissive, background)
 
+cbuffer ShadeCB
+{
+    uint gVisMode;
+}
 
 // Our per-pixel shading routine, given the RIS/ReSTIR reservoir, the current pixel surface, light sample,
 //    and looked-up / computed emissivity for the sample.
-void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission,
+float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx, RAB_RandomSamplerState rng,
            out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
-    if (!RTXDI_IsValidReservoir(reservoir)) return;
+    if (!RTXDI_IsValidReservoir(reservoir)) return 0.0f;
 
-    // Shoot a shadow ray to the selected light sample
-    float isVisible = traceShadowRay(RAB_GetSurfaceWorldPos(surface), lightSample.getDirectionAndDistance());
+    // Compute our geometry term for the light sample
+    float geomTerm = lightSample.getJacobianAtoW();
+
+    // Evaluate the visibility
+    int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex, gFalcorLightIDtoOurs);
+    uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+    float isVisible = 1.0f;
+    if (geomTerm != 0.0f)
+    {
+        uint shadowOption;
+        isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, rng, shadowOption);
+    }
 
     // Compute the BRDF terms for the target function.
     float D = surface.getNdf(lightSample.NdotH());
@@ -50,8 +64,8 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
         evalFresnelSchlick(surface.getSpecularColor(), float3(1), lightSample.LdotH());
 
     // Compute the specular and diffuse lobes of the BRDF separately.
-    float3 diffuseLobe = lightSample.NdotL() * (surface.getDiffuseColor() * M_1_PI);  // NdotL * albedo 
-    float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model 
+    float3 diffuseLobe = lightSample.NdotL() * (surface.getDiffuseColor() * M_1_PI);  // NdotL * albedo
+    float3 specularLobe = F * D * G / (4.0f * surface.NdotV());                       // Standard microfacet model
 
     // Get the PDF of selecting this sample via RIS from the reservoir
     //   -> PLEASE NOTE:  When using the full RTXDI API (i.e., not the simplistic light sampler in
@@ -60,13 +74,12 @@ void Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample light
     //      out to here to ensure correct PDFs.
     float invPdf = RTXDI_GetReservoirInvPdf(reservoir);
 
-    // Compute our geometry term for the light sample
-    float geomTerm = lightSample.getJacobianAtoW();
-
     // Return our result, separate in diffuse and specular channels:
     //   -> [ <shadow-ray> * L * <geometry-term> * BRDF] / <pdf-of-sampling>
     dif  = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * diffuseLobe);
     spec = isVisible * max(float3(0.0f), lightEmission * invPdf * geomTerm * specularLobe);
+
+    return isVisible;
 }
 
 
@@ -78,9 +91,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
+    RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 11);
+
     // Get our G-buffer for the current pixel
     RAB_Surface surface = RAB_GetGBufferSurface(pixelPosition, false);
-
     bool isValidSurface = RAB_IsSurfaceValid(surface);
 
     // Load the reservoir with the light sample we need to shade
@@ -91,6 +105,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0;    // Why split diffuse & specular color?  It makes a denoisers' job much easer!
     float3 specColor = 0;
+    float visibility = 1.0f;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
     {
         // Lookup the reservoir, get our light and specific light sample.
@@ -101,10 +116,32 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        Shade(reservoir, surface, lightSample, lightEmission, difColor, specColor);
+        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, rng, difColor, specColor);
     }
 
     // Add any directly-visible emssion & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
+
+    if (gVisMode != uint(Visibility::AllShadowRay))
+    {
+        RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, RTXDI_RANKING_RESERVOIR_OFFSET);
+
+        // Store each pixel's light ID first for later face statistics computation
+        if (!gOnlyIsmForRanking) rankingReservoir = reservoir;
+        int lightID = -1;
+        uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+        if (isValidSurface && RTXDI_IsValidReservoir(rankingReservoir))
+        {
+            // Get light ID
+            uint idxInAllLight = RTXDI_GetReservoirLightIndex(rankingReservoir); // triangle + point light index
+            lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex, gFalcorLightIDtoOurs);
+            if (gSortingRules == (uint)SortingRules::LightFace_OccludedPixels)
+            {
+                if (luminance(outColor) != 0.0f && visibility == 0.0f)
+                    lightID = -1;
+            }
+        }
+        gPrevLightSelectionBuffer[bufferIndex] = lightID;
+    }
 }

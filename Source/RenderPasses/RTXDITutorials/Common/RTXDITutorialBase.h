@@ -226,6 +226,12 @@ protected:
     /** All types, parameters and resources for this render pass
     */
 
+    enum class CaptureParams : uint
+    {
+        LightFacesTopN = 0,
+        NumPointSamples = 1
+    };
+
     PixelDebug::SharedPtr mpPixelDebug;
     GpuFence::SharedPtr mpFence;
     PrefixSum::SharedPtr mpPrefixSum;
@@ -233,38 +239,57 @@ protected:
     UpdateFlags mUpdates = UpdateFlags::None;
     Sampler::SharedPtr mpPointSampler;
     Sampler::SharedPtr mpLinearSampler;
+    Sampler::SharedPtr mpCompareSampler;
     uint mSceneName = 0; // TODO: use pybind11 to register scene enum on python side 
 
     // Below are parameters for rendering, scene or updating control
     bool mEnableStatistics = false;
     bool mShadowRayForRestPixels = false;
     bool mShadingVisibility = true;
-    bool mDrawWireframe = false;
     bool mAdaptiveLightNearPlane = false;
     bool mUseHighResISM = false;
     bool mUseNewPullPush = false;
-    bool mRenderIsmNewCS = true;
-    bool mEnableGpuDebugPrintMode = false;
+    bool mUseComputeShaderForIsmRender = true;
     bool mFirstPrecompute = true;
-    bool3 mIsmPointSampleTypes = bool3(false, true, false);
+    bool3 mIsmPointSampleTypes = bool3(true, false, false);
+    bool mDisableRankingUpdate = false;
+    bool mOnlyIsmForRanking = true;
+    bool mSplitReservoirs = true;
+    bool mRenderPsmGS = true;
     // Some redundent toggles
     bool mUseNearestPointSamples = false;
-    bool mOnlyIsmForRanking = true;
     bool mUseReconstructPSMs = false;
     bool mEnableEmissiveLightSampling = false;
     bool mCompareToBoundary = false;
     bool mAdaptiveISM = false;
     bool mEnableRotateLightFace = false;
 
-
     // Below are the parameters for debugging
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
+    bool mDrawWireframe = false;
+    bool mEnableGpuDebugPrintMode = false;
+    bool mEnableVisualization = false;
+    bool mVisFaceSamples = false;
     int mDebugLightID = -1;
     uint mVisualizeMipLevel = 0;
     uint2 mVisLightFaceID = uint2(6, 3);
-    bool mVisFaceSamples = false;
     uint mVisPointSamplesStride = 1u;
+
+    // Settings for capturing
+    struct 
+    {
+        bool enabled = false;
+        bool startCapturing = false;
+        uint frameAccumlated = 0u;
+        uint frameStride = 10u;
+        uint numCaptures = 300u;
+        uint paramToCapture = uint(CaptureParams::LightFacesTopN);
+        std::string outputDir;
+
+        // Record the value before enabling capture
+        //bool prevDisableRankingUpdate = false;
+    } mCaptureParams;
 
     struct 
     {
@@ -286,11 +311,8 @@ protected:
     float2 mLightNearFarPlane = float2(0.01f, 100.0f);
 
     // Below are the parameters in our method
-    uint mLightTopN = 4u; 
-    uint mLightFaceTopN = 24u; // Bug: the program will crash when directly entering the value for this
-    uint mTopN = 4u;
-    uint mPsmCountPerFrame = 24u;
     uint mTotalBinCount = 1u;
+    uint mLightFaceTopN = 24u;
     uint mTemporalReusingLength = 1u;
     uint mCurrFrameReusingStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
@@ -299,13 +321,18 @@ protected:
     uint mLightAgeThreshold = 1u;
     float mAlphaBlendingFactor = 0.1f; // for exponential smoothing function
     float mConfidenceScaler = 3.0f;
+    uint mRestrictedRegionWidth = 4u;
     uint mWarmUpFrameCount = 20u; // this is used for warming up the light face data in our method (e.g. frequency, variance, face direction, ...)
     float mSpotPerspectiveFov = -1.0f;
+    uint mShadowFadeInFrameLength = 60u;
+    PCF_Parameters mPcfParams;
 
     uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
     uint mTemporalReusingFix = (uint)TemporalReusingFix::None;
     uint mFlickerReduction = (uint)FlickerReduction::VarianceCheck;
+    uint mRankingImportance = (uint)RankingImportance::ReSTIR;
+    uint mPlaceForRankingData = (uint)PlacesForRankingData::AfterReusing;
 
     // ISM parameters
     uint mTotalIsmCount = 0u;
@@ -313,10 +340,10 @@ protected:
     float2 mIsmDepthBias = float2(0.0f); 
     uint mIsmPerPointLight = 6u;
     uint mIsmVisTextureSize = 2048u; // max light: 2k*2k -> 128, 4k*4k -> 512 
-    uint mIsmSize = 128u;
-    uint mIsmMipLevels = 3;
-    float mSceneDepthThresholdScale = 0.01f;
-    float mDepthThreshold = 0.0f;
+    uint mIsmSize = 32u;
+    uint mIsmMipLevels = 2;
+    float mSceneDepthThresholdScale = 0.05f;
+    float mLinearDepthThreshold = 0.0f;
     uint mIsmPushMode = (uint)ISMPushSamplingMode::Point;
     uint mHighResIsmSize = 512u;
     uint mHighResIsmMipLevels = 4;
@@ -324,21 +351,21 @@ protected:
     float mBaseTriSize = 0.01f;
     uint mTotalPointSamples = 0;
     uint mExtraPointSamples = uint(30 * 1e6); // unit: Million
-    float mExtraPointsForSamllTriPercentage = 0.2f;
+    float3 mTriAreaClampThreshold = float3(0.0f);
+    uint mNumTriAreaPDFTextures = 1u;
 
     // Global resources
-    Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights
+    Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights 
     Buffer::SharedPtr mpPrevLightSelectionBuffer;
     Buffer::SharedPtr mpLightHistogramBuffer;
     Buffer::SharedPtr mpSortedLightsBuffer;
     Buffer::SharedPtr mpTotalValidPixels;
     Buffer::SharedPtr mpBoundaryVarianceBuffer;
     Buffer::SharedPtr mpFalcorLightIDtoOurs;
+    Buffer::SharedPtr mpPcfPoissonSamplesBuffer;
 
     // Temporal resuing shadow map resources
     std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
-    std::vector<Texture::SharedPtr> mSortedLightsShadowMapsStatic;
-    std::vector<Texture::SharedPtr> mSortedLightsMotionTextures;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
 
     // ISM resources
@@ -346,12 +373,7 @@ protected:
     std::vector<Texture::SharedPtr> mSortedLightsISMsUint;
     std::vector<Texture::SharedPtr> mSortedLightsHighResISMs;
     std::vector<Texture::SharedPtr> mSortedLightsHighResISMsUint;
-    // Below are additional data for pull & push
-    std::vector<Texture::SharedPtr> mSortedIsmRadiusNormal;
-    std::vector<Texture::SharedPtr> mSortedIsmDispVec;
 
-    Texture::SharedPtr mpTriAreaPDFTexture;
-    Texture::SharedPtr mpTriAreaPDFTexOnlyForSmallTri;
     Buffer::SharedPtr mpPointsBuffer;
     Buffer::SharedPtr mpTriVerticesPointsBuffer;
 
@@ -394,7 +416,7 @@ protected:
         GraphicsState::SharedPtr pState;
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
-    } mShadowMapPass;
+    } mShadowMapPassGS, mShadowMapPass;
 
     // Reconstruct PSMs pass
     ComputePass::SharedPtr mpReconstructPSMs;
@@ -410,7 +432,8 @@ protected:
         GraphicsState::SharedPtr pState;
         GraphicsVars::SharedPtr pVars;
         Fbo::SharedPtr pFbo;
-    } mIsmRenderPass;
+        Vao::SharedPtr pVao;
+    } mIsmRenderRaster;
 
     // Semi-preprocessing pass to generate point samples
     ComputePass::SharedPtr mpComputeTriAreaSum;
@@ -418,7 +441,8 @@ protected:
     ComputePass::SharedPtr mpBuildPDFTextureForSmallTris;
     ComputePass::SharedPtr mpPresampleLightForPoint;
     ComputePass::SharedPtr mpPresampleTriangles;
-    ComputePass::SharedPtr mpPresampleNearestLight;
+    //ComputePass::SharedPtr mpPresampleNearestLight;
+    ComputePass::SharedPtr mpComputePointRadius;
 
     ComputePass::SharedPtr mpComputeNumPointSamples;
     ComputePass::SharedPtr mpBuildPointSamplesForISM;
@@ -569,7 +593,9 @@ protected:
 
     /** Global functions 
     */
+    void prepareGpuResourceForRaster(RenderContext* pRenderContext);
     void precomputeIsmPointSamples(RenderContext* pRenderContext);
+    void precomputeIsmPointSamplesCPU(RenderContext* pRenderContext);
     void allocateShadowTextureArrays(RenderContext* pContext);
     void allocateStochasticSmResources(RenderContext* pRenderContext, const RenderData& renderData);
     std::vector<LightShadowMapData> prepareLightShadowMapData();

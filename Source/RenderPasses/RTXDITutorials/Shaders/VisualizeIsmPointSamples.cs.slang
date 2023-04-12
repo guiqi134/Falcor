@@ -13,6 +13,7 @@ cbuffer CB
     uint gStride;
     int gDebugLightID;
     bool gVisualizeFaceSamples;
+    uint gFirstSpotLightID;
 }
 
 static const float3 COLORS[6] = {
@@ -80,7 +81,7 @@ void allPointSamples(uint3 threadID : SV_DispatchThreadID)
             // Project the point to the light face
             float3 lightCenterW = lightShadowData.centerPosW;
             float3 lightToPoint = posW - lightCenterW;
-            uint faceIdx = getClosestFace(normalize(lightToPoint), lightShadowData);
+            uint faceIdx = selectedLightID < gFirstSpotLightID ? getFaceIndex(normalize(lightToPoint)) : 0;
             outputColor = float4(COLORS[faceIdx], 1.0f);
         }
     }

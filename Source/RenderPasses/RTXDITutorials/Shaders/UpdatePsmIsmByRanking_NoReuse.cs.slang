@@ -18,20 +18,21 @@ import ISMHelpers;
 cbuffer CB
 {
     uint gTotalLightFaceCount;
+    uint gTotalLightsCount;
     uint gFirstSpotLightID;
     uint gMaxIsmPerArray;
     uint gLowIsmSize;
     uint gHighIsmSize;
     uint gIterationCount;
-    uint gTemporalReusingLength;
     float gConfidenceScaler;
+    uint gRestrictedRegionWidth;
     bool gCompareToBoundary;
     uint gMaxSupportedShadowMaps1024;
     uint gMaxPsmPerArray;
     bool gUseHighResISM;
+    bool gDisableRankingUpdate;
 
     uint gVisibility;
-    uint gSortingRules;
     uint gFlickerReduction;
 }
 
@@ -41,12 +42,12 @@ Buffer<float> gBoundaryVarianceBuffer;
 RWBuffer<uint> gReusingLightIndexBuffer;
 RWBuffer<uint> gHighResIsmFaceIdxBuffer;
 RWStructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
-RWBuffer<uint> gTotalValidPixels;
 
+RWBuffer<uint> gTotalValidPixels;
 RWBuffer<uint> gShadowMapSizeBuffer;
 RWBuffer<float4> gRecordReusingLightData;
 
-bool flickerReduction(const LightFaceData newLightFaceData, const LightFaceData oldLightFaceData, const uint2 boundarySize, const uint boundary)
+bool flickerReduction(const LightFaceData newLightFaceData, const LightFaceData oldLightFaceData, const uint boundary)
 {
     bool canChange = true;
     if (gFlickerReduction == (uint)FlickerReduction::RegionRestricted)
@@ -54,7 +55,7 @@ bool flickerReduction(const LightFaceData newLightFaceData, const LightFaceData 
         uint prevRanking = newLightFaceData.prevRanking;
         uint currRanking = newLightFaceData.currRanking;
 
-        uint3 limitedRegion = uint3(boundary - boundary.x, boundary, boundary + boundarySize.y);
+        uint3 limitedRegion = uint3(boundary - gRestrictedRegionWidth, boundary, boundary + gRestrictedRegionWidth);
         canChange = !((prevRanking >= limitedRegion.x && prevRanking < limitedRegion.z) && (currRanking >= limitedRegion.x && currRanking < limitedRegion.z));
     }
     else if (gFlickerReduction == (uint)FlickerReduction::VarianceCheck && gIterationCount > 0)
@@ -104,7 +105,7 @@ bool flickerReduction(const LightFaceData newLightFaceData, const LightFaceData 
 [numthreads(1, 1, 1)]
 void main(uint3 threadID: SV_DispatchThreadID)
 {
-    if (threadID.x == 0) return;
+    if (threadID.x != 1) return;
 
     printSetPixel(threadID.xy);
 
@@ -112,11 +113,14 @@ void main(uint3 threadID: SV_DispatchThreadID)
 
     // Initialize the array
     bool highIsmArrayValidMask[HIGH_RES_ISM_COUNT];
-    for (uint i = 0; i < HIGH_RES_ISM_COUNT; i++)
-        highIsmArrayValidMask[i] = true;
+    if (gUseHighResISM)
+    {
+        for (uint i = 0; i < HIGH_RES_ISM_COUNT; i++)
+            highIsmArrayValidMask[i] = true;
+    }
 
     // Process PSM section in the ranking
-    if (gVisibility != (uint)Visibility::AllISM)
+    if (gVisibility != uint(Visibility::AllISM))
     {
         bool psmArrayValidMask[PSM_COUNT];
         uint3 newPsmFaces[PSM_COUNT];
@@ -126,7 +130,9 @@ void main(uint3 threadID: SV_DispatchThreadID)
 
         // Initialize the array
         for (uint i = 0; i < PSM_COUNT; i++)
+        {
             psmArrayValidMask[i] = true;
+        }
 
         for (; rank < PSM_COUNT; rank++)
         {
@@ -179,7 +185,7 @@ void main(uint3 threadID: SV_DispatchThreadID)
                 uint oldFaceIdx = oldLocalLightIDAndFaceIdx.y;
                 LightFaceData oldLightFaceData = gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx];
 
-                if (oldPsmLightFaceID == UINT32_MAX || flickerReduction(newLightFaceData, oldLightFaceData, uint2(PSM_COUNT * 0.5f), PSM_COUNT))
+                if (oldPsmLightFaceID == UINT32_MAX || flickerReduction(newLightFaceData, oldLightFaceData, PSM_COUNT) || gDisableRankingUpdate)
                 {
                     // Only update the index for new PSM light face.
                     gReusingLightIndexBuffer[arrayIdx] = newPsmLightFaceIDs.x;
@@ -193,12 +199,16 @@ void main(uint3 threadID: SV_DispatchThreadID)
                     // Update other variables of new PSM light face (Only for light face)
                     gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapType = uint(ShadowMapType::PSM);
                     gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapSize = arrayIdx < gMaxSupportedShadowMaps1024 ? 1024 : 512;
+                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].typeChanged = true;
+                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].fadeInFrameCount = 1;
 
                     // Clear the shadow map type of old light face
                     if (oldPsmLightFaceID != UINT32_MAX)
                     {
                         gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapType = uint(ShadowMapType::None);
                         gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapSize = 0u;
+                        gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].typeChanged = true;
+                        gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].fadeInFrameCount = 1;
                     }
                 }
                 else
@@ -218,104 +228,105 @@ void main(uint3 threadID: SV_DispatchThreadID)
     }
 
     print("rank = ", rank);
+    print("gUseHighResISM = ", gUseHighResISM);
 
-    // Process High-res ISM section in the ranking
-    if (gUseHighResISM && gVisibility != (uint)Visibility::AllISM && gVisibility != (uint)Visibility::ShadowMap_FullyLit)
-    {
-        uint3 newHighIsmFaces[HIGH_RES_ISM_COUNT];
-        uint currNewHighIsmIdx = 0u;
+    // // Process High-res ISM section in the ranking (NOTE: this part has BUG! If uncommented, the rendering will stick at this pass)
+    // if (gUseHighResISM && gVisibility != (uint)Visibility::AllISM && gVisibility != (uint)Visibility::ShadowMap_FullyLit)
+    // {
+    //     uint3 newHighIsmFaces[HIGH_RES_ISM_COUNT];
+    //     uint currNewHighIsmIdx = 0u;
 
-        print("HIGH_RES_ISM_COUNT = ", HIGH_RES_ISM_COUNT);
+    //     print("HIGH_RES_ISM_COUNT = ", HIGH_RES_ISM_COUNT);
 
-        for (; rank < PSM_COUNT + HIGH_RES_ISM_COUNT; rank++)
-        {
-            uint globalFaceID = gSortedLightsBuffer[rank].x;
-            uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(globalFaceID, gFirstSpotLightID);
-            uint localLightID = localLightIDAndFaceIdx.x;
-            uint faceIdx = localLightIDAndFaceIdx.y;
-            LightFaceData lightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
+    //     for (; rank < PSM_COUNT + HIGH_RES_ISM_COUNT; rank++)
+    //     {
+    //         uint globalFaceID = gSortedLightsBuffer[rank].x;
+    //         uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(globalFaceID, gFirstSpotLightID);
+    //         uint localLightID = localLightIDAndFaceIdx.x;
+    //         uint faceIdx = localLightIDAndFaceIdx.y;
+    //         LightFaceData lightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
 
-            // Rank as a potiential High-res ISM light face
-            if (lightFaceData.shadowMapType != uint(ShadowMapType::HighIsm))
-            {
-                // PSM light cannot be changed
-                if (lightFaceData.shadowMapType != uint(ShadowMapType::PSM))
-                {
-                    newHighIsmFaces[currNewHighIsmIdx] = uint3(globalFaceID, localLightID, faceIdx);
-                    currNewHighIsmIdx++;
-                }
-            }
-            else
-            {
-                uint validMaskIdx = lightFaceData.highResIsmTexArrayIdx;
-                highIsmArrayValidMask[validMaskIdx] = false;
-            }
+    //         // Rank as a potiential High-res ISM light face
+    //         if (lightFaceData.shadowMapType != uint(ShadowMapType::HighIsm))
+    //         {
+    //             // PSM light cannot be changed
+    //             if (lightFaceData.shadowMapType != uint(ShadowMapType::PSM))
+    //             {
+    //                 newHighIsmFaces[currNewHighIsmIdx] = uint3(globalFaceID, localLightID, faceIdx);
+    //                 currNewHighIsmIdx++;
+    //             }
+    //         }
+    //         else
+    //         {
+    //             uint validMaskIdx = lightFaceData.highResIsmTexArrayIdx;
+    //             highIsmArrayValidMask[validMaskIdx] = false;
+    //         }
 
-            // ISM array index should be updated for every face
-            if (gVisibility != (uint)Visibility::ShadowMap_FullyLit)
-            {
-                int globalIsmTexArrayIdx = int(rank);
-                gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].ismTexArrayIdx = globalIsmTexArrayIdx % (int)gMaxIsmPerArray;
-                gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].whichIsmTexArray = uint(globalIsmTexArrayIdx / gMaxIsmPerArray);
-            }
-        }
+    //         // ISM array index should be updated for every face
+    //         if (gVisibility != (uint)Visibility::ShadowMap_FullyLit)
+    //         {
+    //             int globalIsmTexArrayIdx = int(rank);
+    //             gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].ismTexArrayIdx = globalIsmTexArrayIdx % (int)gMaxIsmPerArray;
+    //             gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].whichIsmTexArray = uint(globalIsmTexArrayIdx / gMaxIsmPerArray);
+    //         }
+    //     }
 
-        print("currNewHighIsmIdx = ", currNewHighIsmIdx);
+    //     print("currNewHighIsmIdx = ", currNewHighIsmIdx);
 
-        // See if the new high-res ISM face can be changed
-        currNewHighIsmIdx = 0u;
-        for (uint arrayIdx = 0; arrayIdx < HIGH_RES_ISM_COUNT; arrayIdx++)
-        {
-            if (highIsmArrayValidMask[arrayIdx])
-            {
-                // Get new and old light face
-                uint3 newLightFaceIDs = newHighIsmFaces[currNewHighIsmIdx];
-                uint localLightID = newLightFaceIDs.y;
-                uint faceIdx = newLightFaceIDs.z;
-                LightFaceData newLightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
+    //     // See if the new high-res ISM face can be changed
+    //     currNewHighIsmIdx = 0u;
+    //     for (uint arrayIdx = 0; arrayIdx < HIGH_RES_ISM_COUNT; arrayIdx++)
+    //     {
+    //         if (highIsmArrayValidMask[arrayIdx])
+    //         {
+    //             // Get new and old light face
+    //             uint3 newLightFaceIDs = newHighIsmFaces[currNewHighIsmIdx];
+    //             uint localLightID = newLightFaceIDs.y;
+    //             uint faceIdx = newLightFaceIDs.z;
+    //             LightFaceData newLightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
 
-                print("newLightFaceIDs.x = ", newLightFaceIDs.x);
-                print("newLightFaceData.shadowMapType = ", newLightFaceData.shadowMapType);
-                // print("newLightFaceIDs.highResIsmTexArrayIdx = ", oldLightFaceData.highResIsmTexArrayIdx);
+    //             print("newLightFaceIDs.x = ", newLightFaceIDs.x);
+    //             print("newLightFaceData.shadowMapType = ", newLightFaceData.shadowMapType);
+    //             // print("newLightFaceIDs.highResIsmTexArrayIdx = ", oldLightFaceData.highResIsmTexArrayIdx);
 
-                uint oldLightFaceID = gHighResIsmFaceIdxBuffer[arrayIdx];
-                uint2 oldLocalLightIDAndFaceIdx = oldLightFaceID != UINT32_MAX ? getLocalLightIdAndFaceIdx(oldLightFaceID, gFirstSpotLightID) : uint2(0);
-                uint oldLocalLightID = oldLocalLightIDAndFaceIdx.x;
-                uint oldFaceIdx = oldLocalLightIDAndFaceIdx.y;
-                LightFaceData oldLightFaceData = gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx];
+    //             uint oldLightFaceID = gHighResIsmFaceIdxBuffer[arrayIdx];
+    //             uint2 oldLocalLightIDAndFaceIdx = oldLightFaceID != UINT32_MAX ? getLocalLightIdAndFaceIdx(oldLightFaceID, gFirstSpotLightID) : uint2(0);
+    //             uint oldLocalLightID = oldLocalLightIDAndFaceIdx.x;
+    //             uint oldFaceIdx = oldLocalLightIDAndFaceIdx.y;
+    //             LightFaceData oldLightFaceData = gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx];
 
-                // If the old face becomes a PSM face, then the change must happen
-                bool canChange = oldLightFaceID == UINT32_MAX || oldLightFaceData.shadowMapType == uint(ShadowMapType::PSM) ||
-                                 flickerReduction(newLightFaceData, oldLightFaceData, uint2(HIGH_RES_ISM_COUNT * 0.25f), HIGH_RES_ISM_COUNT);
+    //             // If the old face becomes a PSM face, then the change must happen
+    //             bool canChange = oldLightFaceID == UINT32_MAX || oldLightFaceData.shadowMapType == uint(ShadowMapType::PSM) ||
+    //                              flickerReduction(newLightFaceData, oldLightFaceData, HIGH_RES_ISM_COUNT);
 
-                print("canChange = ", canChange);
+    //             print("canChange = ", canChange);
 
-                if (canChange)
-                {
-                    gHighResIsmFaceIdxBuffer[arrayIdx] = newLightFaceIDs.x;
-                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].highResIsmTexArrayIdx = int(arrayIdx % gMaxIsmPerArray);
-                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].whichHighResIsmTexArray = arrayIdx / gMaxIsmPerArray;
+    //             if (canChange)
+    //             {
+    //                 gHighResIsmFaceIdxBuffer[arrayIdx] = newLightFaceIDs.x;
+    //                 gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].highResIsmTexArrayIdx = int(arrayIdx % gMaxIsmPerArray);
+    //                 gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].whichHighResIsmTexArray = arrayIdx / gMaxIsmPerArray;
 
-                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapType = uint(ShadowMapType::HighIsm);
-                    gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapSize = gHighIsmSize;
+    //                 gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapType = uint(ShadowMapType::HighIsm);
+    //                 gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].shadowMapSize = gHighIsmSize;
 
-                    // Clear the shadow map type of old light face.
-                    // We should avoid the old face that has just changed to the PSM face in previous step
-                    if (oldLightFaceID != UINT32_MAX && oldLightFaceData.shadowMapType != uint(ShadowMapType::PSM))
-                    {
-                        print("oldLightFaceID = ", oldLightFaceID);
-                        print("oldLightFaceData.shadowMapType = ", oldLightFaceData.shadowMapType);
-                        print("oldLightFaceData.highResIsmTexArrayIdx = ", oldLightFaceData.highResIsmTexArrayIdx);
+    //                 // Clear the shadow map type of old light face.
+    //                 // We should avoid the old face that has just changed to the PSM face in previous step
+    //                 if (oldLightFaceID != UINT32_MAX && oldLightFaceData.shadowMapType != uint(ShadowMapType::PSM))
+    //                 {
+    //                     print("oldLightFaceID = ", oldLightFaceID);
+    //                     print("oldLightFaceData.shadowMapType = ", oldLightFaceData.shadowMapType);
+    //                     print("oldLightFaceData.highResIsmTexArrayIdx = ", oldLightFaceData.highResIsmTexArrayIdx);
 
-                        gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapType = uint(ShadowMapType::None);
-                        gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapSize = 0u;
-                    }
-                }
+    //                     gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapType = uint(ShadowMapType::None);
+    //                     gLightShadowDataBuffer[oldLocalLightID].lightFaceData[oldFaceIdx].shadowMapSize = 0u;
+    //                 }
+    //             }
 
-                currNewHighIsmIdx++;
-            }
-        }
-    }
+    //             currNewHighIsmIdx++;
+    //         }
+    //     }
+    // }
 
     print("rank = ", rank);
 
@@ -347,41 +358,40 @@ void main(uint3 threadID: SV_DispatchThreadID)
         }
     }
 
-#if DEBUG_PRINT_MODE
-    // Record size data
-    for (uint r = 0; r < gTotalLightFaceCount; r++)
-    {
-        if (gSortingRules == (uint)SortingRules::LightFaces)
-        {
-            for (uint face = 0; face < gLightShadowDataBuffer[r].numShadowMaps; face++)
-            {
-                uint shadowMapSize = gLightShadowDataBuffer[r].lightFaceData[face].shadowMapSize;
-                if (shadowMapSize > 0)
-                {
-                    gShadowMapSizeBuffer[(uint)log2(shadowMapSize) - 5] += 1;
-                }
-            }
-        }
-        else
-        {
-            uint shadowMapSize = gLightShadowDataBuffer[r].lightFaceData[0].shadowMapSize;
-            if (shadowMapSize > 0)
-            {
-                gShadowMapSizeBuffer[(uint)log2(shadowMapSize) - 5] += 1;
-            }
-        }
-    }
+// #if DEBUG_PRINT_MODE
+//     // Record size data
+//     for (uint r = 0; r < gTotalLightsCount; r++)
+//     {
+//         for (uint face = 0; face < gLightShadowDataBuffer[r].numShadowMaps; face++)
+//         {
+//             uint shadowMapSize = gLightShadowDataBuffer[r].lightFaceData[face].shadowMapSize;
+//             if (shadowMapSize > 0)
+//             {
+//                 gShadowMapSizeBuffer[(uint)log2(shadowMapSize) - 5] += 1;
+//             }
+//         }
+//     }
 
-    // Record reusing list light data
-    for (uint i = 0; i < PSM_COUNT; i++)
-    {
-        uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[i];
-        uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(currLightOrGlobalFaceIdx, gFirstSpotLightID);
-        uint localLightID = localLightIDAndFaceIdx.x;
-        uint faceIdx = localLightIDAndFaceIdx.y;
-        LightFaceData lightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
+//     // Record reusing list light data
+//     for (uint i = 0; i < PSM_COUNT; i++)
+//     {
+//         uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[i];
+//         uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(currLightOrGlobalFaceIdx, gFirstSpotLightID);
+//         uint localLightID = localLightIDAndFaceIdx.x;
+//         uint faceIdx = localLightIDAndFaceIdx.y;
+//         LightFaceData lightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
 
-        gRecordReusingLightData[i] = uint4(localLightID, faceIdx, lightFaceData.frequency, 0);
-    }
-#endif
+//         gRecordReusingLightData[i] = uint4(localLightID, faceIdx, 0, 0);
+//     }
+
+//     for (uint i = 0; i < gTotalLightFaceCount; i++)
+//     {
+//         uint globalFaceID = gSortedLightsBuffer[i].x;
+//         uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(globalFaceID, gFirstSpotLightID);
+//         uint localLightID = localLightIDAndFaceIdx.x;
+//         uint faceIdx = localLightIDAndFaceIdx.y;
+//         LightFaceData lightFaceData = gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx];
+//         gRecordReusingLightData[i].z = lightFaceData.ismTexArrayIdx;
+//     }
+// #endif
 }

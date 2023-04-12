@@ -12,77 +12,77 @@ static const uint kShadowMapsPerPointLight = 6u;
 static const uint kShadowMapsPerSpotLight = 1u;
 static const uint kMinPointSamplesPerTri = 3u;
 
-struct LightFaceData
+struct LightFaceData // size = 124B
 {
-    uint shadowMapType; // 0: None, 1: PSM, 2: ISM, 3: High resolution ISM (!!!)
-    uint shadowMapSize;
-    uint frequency; // number of pixel selected
+    uint shadowMapType = 0; // 0: None, 1: PSM, 2: ISM, 3: High resolution ISM (!!!)
+    uint shadowMapSize = 0;
+    uint frequency = 0; // number of pixel selected
 
     // Used for reducing the flickering by restricting the face ranking change
-    //float weightSum;
-    //float weightSum2;
-    float mean;
-    // float variance;
-    float varianceUnbiased;
+    float mean = 0.0f;
+    float varianceUnbiased = 0.0f;
 
     // View matrices. (Paraboloid projection will only use -Y (index 3) and +Y (index 2) as front and back)
-    float4x4 viewMat;
-    float4x4 normalViewMat;
-    //float4x4 prevViewMat; // previous frame view matrix. This is used for light motion
-
-    // TODO: this actually is the opposite direction of the second row of viewMat(negative z)
-    float3 viewDirection; // Defined in light world space.
-    float3 viewDirectionBase; // six axis-aligned base direction from the start. Defined in light world space.
+    // the opposite direction of the third row of viewMat(negative z) is the view direction
+    float4x4 viewMat = {};
 
     // Variable for indexing into two sorted texture array. (For per-light base, these variables should also be set for each face)
-    uint whichPsmTexArray;
-    int psmTexArrayIdx; // this is also the index in PSM reusing list
-    int staticPsmTexArrayIdx; // since PSM array for static objects are inconsistent with indexing in the reusing list
-    uint whichIsmTexArray;
-    int ismTexArrayIdx;
-    uint whichHighResIsmTexArray;
-    int highResIsmTexArrayIdx;
+    uint whichPsmTexArray = 0;
+    int psmTexArrayIdx = -1; // this is also the index in PSM reusing list
+    uint whichIsmTexArray = 0;
+    int ismTexArrayIdx = -1;
+    uint whichHighResIsmTexArray = 0;
+    int highResIsmTexArrayIdx = -1;
 
     // Temporal related information.
-    uint accumulatedFrames;
-    uint prevRanking; // update frequency depends on temporal resuing length
-    uint currRanking; // updating each frame
-    bool newPsmLightFace; // used for static PSM rendering
-    uint psmAge; // used for motion vector, age since last PSM update
+    uint prevRanking = 0; // update frequency depends on temporal resuing length
+    uint currRanking = 0; // updating each frame
 
+    // For shadow fade in 
+    bool typeChanged = false; // ISM -> PSM
+    uint fadeInFrameCount = 1;
 };
 
-struct LightShadowMapData
+struct LightShadowMapData // size = ?
 {
-    bool isLightValid;
-    //bool isDynamic;
-    float3 centerPosW;
-    float2 nearFarPlane;
-    float lightFrustumSize;
-    uint falcorLightID;
+    float3 centerPosW = float3(0);
+    float2 nearFarPlane = float2(0);
+    float lightFrustumSize = 0.0f;
+    uint falcorLightID = 0;
 
     // Point or spot light
-    uint numShadowMaps;
+    uint numShadowMaps = 0;
 
     // Projection matrix
-    float4x4 persProjMat;
-    float4x4 normalPersProjMat;
-
-    // Face rotation matrix w.r.t. axis-aligned directions. In light world space.
-    float4x4 rotationFromBase;
-
-    // Sum over all pixel's direction select this light. Reset every frame
-    float3 currAvgDirection;
-    float3 accumAvgDirection;
+    float4x4 persProjMat = {};
 
     LightFaceData lightFaceData[6];
 };
 
-
-struct PackedIsmPointSample // size: 10B
+struct PackedIsmPointSample // size: 16B 
 {
-    float16_t3 pos;
+    float3 pos;
     uint packedLightInstanceID;
+};
+
+struct PCF_Parameters
+{
+#ifdef HOST_CODE
+    void setShaderData(const ShaderVar& var)
+    {
+        var["usePCF"] = usePCF;
+        var["usePoisson"] = usePoisson;
+        var["useRotation"] = useRotation;
+        var["kernelRadius"] = kernelRadius;
+        var["numPcfPoissonSamples"] = numPcfPoissonSamples;
+    }
+#endif
+
+    bool usePCF = true;
+    bool usePoisson = false;
+    bool useRotation = false;
+    float kernelRadius = 1.0f;
+    uint numPcfPoissonSamples = 32u;
 };
 
 // How each pixel's visibility is evaluted?
@@ -92,10 +92,6 @@ enum class Visibility : uint
     ShadowMap_FullyLit = 1,
     ShadowMap_ISM = 2,
     AllISM = 3,
-
-    BaselineSM = 4,
-
-    Experiment = 5 // All Shadow Maps
 };
 
 enum class ShadowMapType : uint
@@ -115,9 +111,10 @@ enum class ShadowDepthBias : uint
 
 enum class SortingRules : uint
 {
-    AllPixels = 0,
-    OccludedPixels = 1,
-    LightFaces = 2
+    Light = 0,
+    Light_OccludedPixels = 1,
+    LightFaces = 2,
+    LightFace_OccludedPixels = 3
 };
 
 enum class ShadowOptions : uint
@@ -149,6 +146,21 @@ enum class ISMPushSamplingMode : uint
     Interpolation = 1
 };
 
+// Comparison between different importance for the ranking
+enum class RankingImportance : uint
+{
+    ReSTIR = 0,
+    onlyUniformRIS = 1,
+    onlyEmissivePowerRIS = 2,
+};
+
+// Comparison for different three places to collect sampling data
+enum class PlacesForRankingData : uint
+{
+    AfterRIS = 0,
+    AfterVisibilityCheck = 1,
+    AfterReusing = 2
+};
 
 
 

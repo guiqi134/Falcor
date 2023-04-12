@@ -1,8 +1,10 @@
 import Utils.Debug.PixelDebug;
+import ISMHelpers;
 
 cbuffer PullCB
 {
     float gDepthDiffThreshold;
+    float2 gLightNearFarPlane;
 }
 
 Texture2DArray<float> gIsmInput;
@@ -51,7 +53,7 @@ void main(uint3 threadID : SV_DispatchThreadID)
         }
     }
 
-    print("validPixelCount = ", validPixelCount);
+    // print("validPixelCount = ", validPixelCount);
 
     // Do the occlusion check. TODO: later change to use the radius
     for (uint i = 0; i < 4; i++)
@@ -59,7 +61,13 @@ void main(uint3 threadID : SV_DispatchThreadID)
         if (pixelDepths[i] == -1.0f) continue;
 
         float currPixelDepth = pixelDepths[i];
-        if (currPixelDepth <= frontmostDepth + gDepthDiffThreshold)
+        float currPixelLinearDepth = abs(linearizeDepth(currPixelDepth, gLightNearFarPlane.x, gLightNearFarPlane.y));
+        float frontmostLienarDepth = abs(linearizeDepth(frontmostDepth, gLightNearFarPlane.x, gLightNearFarPlane.y));
+        print("currPixelLinearDepth = ", currPixelLinearDepth);
+        print("frontmostLienarDepth = ", frontmostLienarDepth);
+        print("gDepthDiffThreshold = ", gDepthDiffThreshold);
+
+        if (currPixelLinearDepth <= frontmostLienarDepth + gDepthDiffThreshold)
         {
             depthSum += currPixelDepth;
         }
@@ -69,14 +77,14 @@ void main(uint3 threadID : SV_DispatchThreadID)
         }
     }
 
-    print("validPixelCount = ", validPixelCount);
+    // print("validPixelCount = ", validPixelCount);
 
     float depthAvgOut = 1.0f;
     if (validPixelCount != 0)
     {
         depthAvgOut = depthSum / (float)validPixelCount;
     }
-    print("depthAvgOut = ", depthAvgOut);
+    // print("depthAvgOut = ", depthAvgOut);
 
     gIsmOutput[uint3(threadID.xy, texArrayIndex)] = depthAvgOut;
 }

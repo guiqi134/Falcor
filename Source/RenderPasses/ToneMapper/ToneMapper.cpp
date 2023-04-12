@@ -284,6 +284,29 @@ void ToneMapper::execute(RenderContext* pRenderContext, const RenderData& render
     }
 
     mpToneMapPass->execute(pRenderContext, pFbo);
+
+    // Capture result to output file
+    auto& dict = renderData.getDictionary();
+    bool captureCurrentFrame = dict.keyExists("captureCurrentFrame") ? dict["captureCurrentFrame"] : false;
+    //logInfo(std::format("startCapturing = {}", startCapturing));
+    //logInfo(std::format("startCapturing = {}, outputDir = {}, paramName = {}", dict.keyExists("startCapturing"), dict.keyExists("outputDir"),
+    //    dict.keyExists("paramName")));
+    //logInfo(std::format("pDst->getFormat() = {}", to_string(pDst->getFormat())));
+
+    if (captureCurrentFrame)
+    {
+        std::string outputDir = dict["outputDir"];
+        std::string paramName = dict["paramName"];
+        //logInfo(std::format("outputDir = {}", outputDir));
+
+        auto ext = Bitmap::getFileExtFromResourceFormat(pDst->getFormat());
+        auto format = Bitmap::getFormatFromFileExtension(ext);
+        std::string filename = outputDir + paramName + "." + ext;
+
+        //logInfo(std::format("filename = {}", filename));
+
+        pDst->captureToFile(0, 0, filename, format);
+    }
 }
 
 void ToneMapper::createLuminanceFbo(const Texture::SharedPtr& pSrc)

@@ -53,17 +53,20 @@ void main(uint3 threadId : SV_DispatchThreadID)
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
+    RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 10);
+
     // Get data about the pixel we're shading from our G-buffer
     RAB_Surface surface = RAB_GetGBufferSurface(pixelPosition, false);
 
     // Get the current pixel's reservour.
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex);
+    RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
 
     // Get the light sample
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir); // triangle light + the rest
     float2 lightUV = RTXDI_GetReservoirSampleUV(reservoir);
     RAB_LightInfo lightInfo = RAB_LoadLightInfo(lightIndex, false);
-    RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV);
+    RAB_LightSample lightSample = RAB_SamplePolymorphicLight(lightInfo, surface, lightUV); // shading and ranking reservoir has the same sample
 
     // Shoot a shadow ray and, if it's shadowed, update the visibility
     if (RAB_IsSurfaceValid(surface) && RTXDI_IsValidReservoir(reservoir))
@@ -75,26 +78,46 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         // Evaluate the visiblity for shading reservoir
         uint shadowOption;
-        bool isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, shadowOption);
-        if (!isVisible)
+        uint visMode = !gDisableRankingUpdate && gOnlyIsmForRanking && !gSplitReservoirs ? uint(Visibility::AllISM) : gVisMode;
+        float isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, visMode, rng, shadowOption);
+        if (isVisible == 0.0f)
         {
             RTXDI_StoreVisibilityInReservoir(reservoir, 0, true);
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
 
-        // Also evalute the ISM for ranking reservoir if it is a PSM light
-        // if (shadowOption == (uint)ShadowOptions::PSM && gOnlyIsmForRanking)
-        if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking)
+        // If we are already using ISM to evaluate, then no need to do it again
+        if (shadowOption == uint(ShadowOptions::ISM))
         {
-            // So far, ranking reservoir is the same as shading reservoir. Just copy the data to ranking reservoir
-            RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
-
-            isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, shadowOption);
-            if (!isVisible)
+            if (isVisible == 0.0f)
             {
                 RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
                 RTXDI_StoreReservoir(rankingReservoir, params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
             }
+        }
+        else
+        {
+            // Also evalute the ISM for ranking reservoir, but we need to have:
+            // 1. Ranking is been updated
+            // 2. Light samples are not collected after RIS
+            if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking && gSplitReservoirs
+                && !gDisableRankingUpdate
+                && gPlaceForRankingData != uint(PlacesForRankingData::AfterReusing))
+            {
+                isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption);
+                if (isVisible == 0.0f)
+                {
+                    RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
+                    RTXDI_StoreReservoir(rankingReservoir, params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+                }
+            }
+        }
+
+        // Store each pixel's light ID first for later face statistics computation
+        if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterVisibilityCheck) && !gDisableRankingUpdate)
+        {
+            if (!gSplitReservoirs) rankingReservoir = reservoir;
+            storeLightSampleForRanking(rankingReservoir, params, true, launchIdx, isVisible);
         }
     }
 }

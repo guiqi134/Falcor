@@ -26,16 +26,9 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Common/RTXDITutorialBase.h"
-#include "Tutorial 1/RTXDITutorial1.h"
-#include "Tutorial 2/RTXDITutorial2.h"
-#include "Tutorial 3/RTXDITutorial3.h"
-#include "Tutorial 4/RTXDITutorial4.h"
 #include "Tutorial 5/RTXDITutorial5.h"
-#include "Combined/RTXDICombinedTutorial.h"
-
 
 using namespace Falcor;
-
 
 // This is required for DLL and shader hot-reload to function properly
 extern "C" __declspec(dllexport) const char* getProjDir()
@@ -46,13 +39,7 @@ extern "C" __declspec(dllexport) const char* getProjDir()
 // What passes does this DLL expose?  Register them here
 extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
 {
-    lib.registerPass(RTXDITutorial1::getClassDescription(), RTXDITutorial1::create);
-    lib.registerPass(RTXDITutorial2::getClassDescription(), RTXDITutorial2::create);
-    lib.registerPass(RTXDITutorial3::getClassDescription(), RTXDITutorial3::create);
-    lib.registerPass(RTXDITutorial4::getClassDescription(), RTXDITutorial4::create);
     lib.registerPass(RTXDITutorial5::getClassDescription(), RTXDITutorial5::create);
-
-    lib.registerPass(RTXDICombinedTutorial::getClassDescription(), RTXDICombinedTutorial::create);
 }
 
 

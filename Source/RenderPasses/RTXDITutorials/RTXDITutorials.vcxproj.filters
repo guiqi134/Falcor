@@ -2,58 +2,25 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="RTXDITutorials.cpp" />
-    <ClCompile Include="Tutorial 1\RTXDITutorial1.cpp">
-      <Filter>Tutorials</Filter>
-    </ClCompile>
     <ClCompile Include="Common\RTXDITutorialBase.cpp">
       <Filter>Common Code</Filter>
     </ClCompile>
     <ClCompile Include="Common\RTXDITutorialConstants.cpp">
       <Filter>Common Code</Filter>
     </ClCompile>
-    <ClCompile Include="Tutorial 2\RTXDITutorial2.cpp">
-      <Filter>Tutorials</Filter>
-    </ClCompile>
-    <ClCompile Include="Tutorial 3\RTXDITutorial3.cpp">
-      <Filter>Tutorials</Filter>
-    </ClCompile>
-    <ClCompile Include="Tutorial 4\RTXDITutorial4.cpp">
-      <Filter>Tutorials</Filter>
-    </ClCompile>
-    <ClCompile Include="Tutorial 5\RTXDITutorial5.cpp">
-      <Filter>Tutorials</Filter>
-    </ClCompile>
-    <ClCompile Include="Combined\RTXDICombinedTutorial.cpp">
-      <Filter>Combined</Filter>
-    </ClCompile>
     <ClCompile Include="rtxdi\RTXDI.cpp">
       <Filter>rtxdi</Filter>
     </ClCompile>
+    <ClCompile Include="Tutorial 5\RTXDITutorial5.cpp">
+      <Filter>Common Code</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Tutorial 1\RTXDITutorial1.h">
-      <Filter>Tutorials</Filter>
-    </ClInclude>
     <ClInclude Include="Common\RTXDITutorialBase.h">
       <Filter>Common Code</Filter>
     </ClInclude>
     <ClInclude Include="Common\RTXDITutorialConstants.h">
       <Filter>Common Code</Filter>
-    </ClInclude>
-    <ClInclude Include="Tutorial 2\RTXDITutorial2.h">
-      <Filter>Tutorials</Filter>
-    </ClInclude>
-    <ClInclude Include="Tutorial 3\RTXDITutorial3.h">
-      <Filter>Tutorials</Filter>
-    </ClInclude>
-    <ClInclude Include="Tutorial 4\RTXDITutorial4.h">
-      <Filter>Tutorials</Filter>
-    </ClInclude>
-    <ClInclude Include="Tutorial 5\RTXDITutorial5.h">
-      <Filter>Tutorials</Filter>
-    </ClInclude>
-    <ClInclude Include="Combined\RTXDICombinedTutorial.h">
-      <Filter>Combined</Filter>
     </ClInclude>
     <ClInclude Include="HostDeviceSharedDefinitions.h" />
     <ClInclude Include="rtxdi\RTXDI.h">
@@ -65,6 +32,10 @@
     <ClInclude Include="rtxdi\RtxdiTypes.h">
       <Filter>rtxdi</Filter>
     </ClInclude>
+    <ClInclude Include="PoissonSamples.h" />
+    <ClInclude Include="Tutorial 5\RTXDITutorial5.h">
+      <Filter>Common Code</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">
@@ -73,26 +44,8 @@
     <Filter Include="Shaders\RTXDI">
       <UniqueIdentifier>{c22b5ce0-7a07-4756-bf19-84f2623c4018}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shaders\RTXDI\RISOnly">
-      <UniqueIdentifier>{4d6a936f-6d88-4ac1-a3ef-58bb7a2e23b9}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Shaders\RTXDI\SetupShaders">
       <UniqueIdentifier>{eda01f00-8ff6-4371-a8dd-a669c2c6d74a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shaders\RTXDI\SpatialReuseOnly">
-      <UniqueIdentifier>{b45c94f2-831e-4ccb-99c9-84d3c55d69d7}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shaders\RTXDI\ForMultiplePipes">
-      <UniqueIdentifier>{90d8b2ef-3c95-4d79-a729-95571a9747eb}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shaders\RTXDI\TemporalReuseOnly">
-      <UniqueIdentifier>{c8ed9d13-4fd2-4f28-a3f6-f1e0360a4d30}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shaders\RTXDI\MonteCarloBaseline">
-      <UniqueIdentifier>{4a5583de-e146-485d-ae87-cdf074f434cc}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Shaders\RTXDI\SpatiotemporalReuse">
-      <UniqueIdentifier>{10f45e3c-feb7-435e-9aca-716ef0c5d19d}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shaders\RTXDI\TraceRayEncapsulations">
       <UniqueIdentifier>{d5f9b623-19ab-44c7-8a2b-5dd28599f6fd}</UniqueIdentifier>
@@ -100,38 +53,17 @@
     <Filter Include="Shaders\RTXDI\RTXDI-Bridge">
       <UniqueIdentifier>{f0ed6b13-2790-46bc-a90e-948710b96386}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Tutorials">
-      <UniqueIdentifier>{74e28530-6e40-455f-aab2-37ee8a58d6bc}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Common Code">
       <UniqueIdentifier>{8a079e75-a374-4543-8069-51a4bf9187f3}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Combined">
-      <UniqueIdentifier>{ec0f89f0-558f-459b-9986-8241ab34022c}</UniqueIdentifier>
     </Filter>
     <Filter Include="rtxdi">
       <UniqueIdentifier>{f1aed28e-3a03-43a2-8471-8afc56eef3ef}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\RTXDI\MainShaders">
+      <UniqueIdentifier>{10f45e3c-feb7-435e-9aca-716ef0c5d19d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="Shaders\RTXDI_GenerateCandidates.cs.slang">
-      <Filter>Shaders\RTXDI\ForMultiplePipes</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_Shade.cs.slang">
-      <Filter>Shaders\RTXDI\ForMultiplePipes</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_MonteCarloBaseline.cs.slang">
-      <Filter>Shaders\RTXDI\MonteCarloBaseline</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\BaselineSampling.slangh">
-      <Filter>Shaders\RTXDI\MonteCarloBaseline</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_RISOnly_Shade.cs.slang">
-      <Filter>Shaders\RTXDI\RISOnly</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_RISOnly_GenerateCandidates.cs.slang">
-      <Filter>Shaders\RTXDI\RISOnly</Filter>
-    </ShaderSource>
     <ShaderSource Include="Shaders\RAB_LightInfo.slangh">
       <Filter>Shaders\RTXDI\RTXDI-Bridge</Filter>
     </ShaderSource>
@@ -162,23 +94,11 @@
     <ShaderSource Include="Shaders\RTXDI_PresampleLights.cs.slang">
       <Filter>Shaders\RTXDI\SetupShaders</Filter>
     </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_SpatialReuse.cs.slang">
-      <Filter>Shaders\RTXDI\SpatialReuseOnly</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_SpatiotemporalReuse.cs.slang">
-      <Filter>Shaders\RTXDI\SpatiotemporalReuse</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_TemporalReuse.cs.slang">
-      <Filter>Shaders\RTXDI\TemporalReuseOnly</Filter>
-    </ShaderSource>
     <ShaderSource Include="Shaders\InlineShadowRay.slangh">
       <Filter>Shaders\RTXDI\TraceRayEncapsulations</Filter>
     </ShaderSource>
     <ShaderSource Include="Shaders\StandardShadowRay.slangh">
       <Filter>Shaders\RTXDI\TraceRayEncapsulations</Filter>
-    </ShaderSource>
-    <ShaderSource Include="Shaders\RTXDI_TestCandidateVisibility.cs.slang">
-      <Filter>Shaders\RTXDI\ForMultiplePipes</Filter>
     </ShaderSource>
     <ShaderSource Include="Shaders\ResamplingFunctions.hlsli">
       <Filter>Shaders\RTXDI</Filter>
@@ -191,6 +111,18 @@
     </ShaderSource>
     <ShaderSource Include="Shaders\RtxdiMath.hlsli">
       <Filter>Shaders\RTXDI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RTXDI_GenerateCandidates.cs.slang">
+      <Filter>Shaders\RTXDI\MainShaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RTXDI_Shade.cs.slang">
+      <Filter>Shaders\RTXDI\MainShaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RTXDI_TestCandidateVisibility.cs.slang">
+      <Filter>Shaders\RTXDI\MainShaders</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Shaders\RTXDI_SpatiotemporalReuse.cs.slang">
+      <Filter>Shaders\RTXDI\MainShaders</Filter>
     </ShaderSource>
   </ItemGroup>
   <ItemGroup>

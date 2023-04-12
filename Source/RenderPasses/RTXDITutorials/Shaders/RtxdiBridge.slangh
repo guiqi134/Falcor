@@ -152,6 +152,7 @@ cbuffer SharedCB
     bool gCollectingData;
     bool gShadowRayForRestPixels;
     SamplerState gLinearSampler;
+    SamplerComparisonState gCompareSampler;
     float gSmDepthBias;
     float2 gIsmDepthBias;
     uint2 gScreenSize;
@@ -161,12 +162,18 @@ cbuffer SharedCB
     uint gFirstSpotLightID;
     uint gSortingRules;
     bool gOnlyIsmForRanking;
+    bool gSplitReservoirs;
+    uint gPlaceForRankingData;
+    bool gDisableRankingUpdate;
+    uint gShadowFadeInFrameLength;
+    PCF_Parameters gPcfParams;
 
     int gDebugLightID;
 }
 
 Buffer<uint2> gSortedLightsBuffer;
 Buffer<uint> gFalcorLightIDtoOurs;
+Buffer<float2> gPcfPoissonSamplesBuffer;
 RWBuffer<int> gPrevLightSelectionBuffer; // light ID or light face ID
 RWStructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
 RWBuffer<uint> gShadowOptionsBuffer;
@@ -183,13 +190,13 @@ Texture2DArray<float> gSortedLightsHighResISMs[NUM_ISM_TEXTURE_ARRAYS];
 RWTexture2D<float4> gDebugScreenMotion;
 
 // Global evaluate visiblity functions for two stages in RTXDI
-bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, out uint shadowOption)
+float evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, inout RAB_RandomSamplerState rng, out uint shadowOption)
 {
-    bool isVisible = true;
+    float visibility = 1.0f;
 
     LightShadowMapData lightData = gLightShadowDataBuffer[localLightID];
     // if (gDebugLightID >= 0) lightData = gLightShadowDataBuffer[gDebugLightID];
-    if (gDebugLightID >= 0 && localLightID != gDebugLightID) return false;
+    if (gDebugLightID >= 0 && localLightID != gDebugLightID) return 0.0f;
 
     // Get surface data
     float3 posW = RAB_GetSurfaceWorldPos(surface);
@@ -197,20 +204,23 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
 
     // Compute which face the shading point is in
     float3 lightToShadingW = posW - lightData.centerPosW;
-    uint faceIdx = getClosestFace(normalize(lightToShadingW), lightData);
+    uint faceIdx = localLightID < gFirstSpotLightID ? getFaceIndex(normalize(lightToShadingW)) : 0;
     LightFaceData lightFaceData = lightData.lightFaceData[faceIdx];
-    uint lightShadowMapType = lightData.lightFaceData[gSortingRules == (uint)SortingRules::LightFaces ? faceIdx : 0].shadowMapType;
-    // lightShadowMapType = 1;
+    uint lightShadowMapType = lightFaceData.shadowMapType;
 
-    print("localLightID = ", localLightID);
-    print("lightShadowMapType = ", lightShadowMapType);
-    print("faceIdx = ", faceIdx);
+    // Random rotation for poisson sample
+    float2 rotation = 0.0f;
+    if (gPcfParams.usePoisson && gPcfParams.useRotation)
+    {
+        float angle = sampleNext1D(rng) * M_2PI;
+        rotation = float2(cos(angle), sin(angle));
+    }
 
     // Trace a shadow ray
     if (gVisMode == (uint)Visibility::AllShadowRay)
     {
-        isVisible = RAB_GetVisibility(surface, lightSample);
-        shadowOption = 4;
+        visibility = float(RAB_GetVisibility(surface, lightSample));
+        shadowOption = 5;
     }
     // Evaulate shadow maps
     else if (gVisMode == (uint)Visibility::ShadowMap_FullyLit || gVisMode == (uint)Visibility::ShadowMap_ISM)
@@ -220,8 +230,8 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
         // light has shadow map? ...
         if (lightShadowMapType == uint(ShadowMapType::PSM))
         {
-            isVisible = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightFaceData.whichPsmTexArray], gLinearSampler, gSmDepthBias, faceIdx, gSortingRules,
-                                           gDepthBiasMode, gConstEpsilon);
+            visibility = evaluateShadowMaps(posW, normalW, lightData, gSortedLightsShadowMaps[lightFaceData.whichPsmTexArray], gLinearSampler, gSmDepthBias, faceIdx, gSortingRules,
+                                           gDepthBiasMode, gConstEpsilon, gPcfParams, gCompareSampler, gPcfPoissonSamplesBuffer, rotation);
             shadowOption = 2;
         }
         else
@@ -229,18 +239,16 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
             // Use ISM? Or just fully lit
             if (gVisMode == (uint)Visibility::ShadowMap_ISM)
             {
-                float shadowMapDepth;
-
                 if (lightShadowMapType == uint(ShadowMapType::LowIsm))
                 {
-                    isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
-                                            lightFaceData.ismTexArrayIdx, shadowMapDepth);
+                    visibility = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
+                                            lightFaceData.ismTexArrayIdx, gPcfParams, gCompareSampler, gPcfPoissonSamplesBuffer, rotation);
                     shadowOption = 3;
                 }
                 else if (lightShadowMapType == uint(ShadowMapType::HighIsm))
                 {
-                    isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsHighResISMs[lightFaceData.whichHighResIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
-                                            lightFaceData.highResIsmTexArrayIdx, shadowMapDepth);
+                    visibility = evaluateISM(posW, normalW, lightData, gSortedLightsHighResISMs[lightFaceData.whichHighResIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
+                                            lightFaceData.highResIsmTexArrayIdx, gPcfParams, gCompareSampler, gPcfPoissonSamplesBuffer, rotation);
                     shadowOption = 4;
                 }
             }
@@ -248,20 +256,55 @@ bool evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface
             // Use shadow ray?
             if (gShadowRayForRestPixels)
             {
-                isVisible = RAB_GetVisibility(surface, lightSample);
+                visibility = float(RAB_GetVisibility(surface, lightSample));
                 shadowOption = 5;
             }
         }
     }
     else if (gVisMode == (uint)Visibility::AllISM)
     {
-        float shadowMapDepth;
-        isVisible = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
-                                lightFaceData.ismTexArrayIdx, shadowMapDepth);
+        visibility = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
+                                lightFaceData.ismTexArrayIdx, gPcfParams, gCompareSampler, gPcfPoissonSamplesBuffer, rotation);
         shadowOption = 3;
     }
-
     gShadowOptionsBuffer[bufferIndex] = shadowOption;
 
-    return isVisible;
+    print("lightFaceData.typeChanged = ", lightFaceData.typeChanged);
+    print("lightFaceData.fadeInFrameCount = ", lightFaceData.fadeInFrameCount);
+
+    // Interpolate visibility between PSM and ISM to perform shadow face in
+    if (lightFaceData.typeChanged && lightFaceData.fadeInFrameCount <= gShadowFadeInFrameLength)
+    {
+        if (lightShadowMapType == uint(ShadowMapType::PSM))
+        {
+            // Get the visibility from ISM
+            float visibilityISM = evaluateISM(posW, normalW, lightData, gSortedLightsISMs[lightFaceData.whichIsmTexArray], gLinearSampler, gIsmDepthBias, faceIdx,
+                                    lightFaceData.ismTexArrayIdx, gPcfParams, gCompareSampler, gPcfPoissonSamplesBuffer, rotation);
+
+            float psmWeight = float(lightFaceData.fadeInFrameCount) / float(gShadowFadeInFrameLength);
+            visibility = (1.0f - psmWeight) * visibilityISM + psmWeight * visibility;
+        }
+        else if (lightShadowMapType == uint(ShadowMapType::LowIsm))
+        {
+
+        }
+    }
+
+    return visibility;
+}
+
+void storeLightSampleForRanking(RTXDI_Reservoir rankingReservoir, RTXDI_ResamplingRuntimeParameters params, bool isValidSurface, uint2 launchIdx, float visibility = 1.0)
+{
+    int lightID = -1;
+    uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
+    if (isValidSurface && RTXDI_IsValidReservoir(rankingReservoir))
+    {
+        // Get light ID
+        uint idxInAllLight = RTXDI_GetReservoirLightIndex(rankingReservoir); // triangle + point light index
+        lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex, gFalcorLightIDtoOurs);
+
+        // See if only count for occluded pixels
+        if (gSortingRules == (uint)SortingRules::LightFace_OccludedPixels && visibility == 1.0f) lightID = -1;
+    }
+    gPrevLightSelectionBuffer[bufferIndex] = lightID;
 }

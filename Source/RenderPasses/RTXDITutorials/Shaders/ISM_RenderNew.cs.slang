@@ -24,6 +24,7 @@ cbuffer ismCB
     uint gLaunchWidth;
     uint gFirstSpotLightID;
     uint gIsmSize;
+    bool gUseNewPullPush;
 }
 
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
@@ -32,7 +33,7 @@ StructuredBuffer<PackedIsmPointSample> gPointsBuffer;
 RWBuffer<uint> gPerLightCountingBuffer;
 RWBuffer<uint> gPerFaceCountingBuffer;
 
-// Low-res or High-res ISMs in light ranking order
+// Low-res ISMs in light ranking order
 RWTexture2DArray<uint> gSortedLightsISMsUint[NUM_ISM_TEXTURE_ARRAYS];
 
 [numthreads(16, 16, 1)]
@@ -53,13 +54,12 @@ void renderIsmCS(uint3 threadID: SV_DispatchThreadID)
     print("posW = ", posW);
 
     // Get the sample light info
-    LightShadowMapData lightShadowData = gLightShadowDataBuffer[selectedLightID]; // optimize this!
+    LightShadowMapData lightShadowData = gLightShadowDataBuffer[selectedLightID];
 
     // Project the point to the light face
     float3 lightCenterW = lightShadowData.centerPosW;
     float3 lightToPoint = posW - lightCenterW;
-    // uint faceIdx = getClosestFace(normalize(lightToPoint), lightShadowData); // optimize this!
-    uint faceIdx = getFaceIndex(normalize(lightToPoint)); // optimize this!
+    uint faceIdx = selectedLightID < gFirstSpotLightID ? getFaceIndex(normalize(lightToPoint)) : 0;
     float4x4 lightView = lightShadowData.lightFaceData[faceIdx].viewMat;
     float3 posLightView = mul(float4(posW, 1.0f), lightView).xyz;
     float4 posLightClipping = mul(float4(posLightView, 1.0f), lightShadowData.persProjMat);
@@ -89,7 +89,7 @@ void renderIsmCS(uint3 threadID: SV_DispatchThreadID)
     // Perform depth testing using atomic operation
     uint3 ismTexArrayLoc = uint3(ismTexPixelPos, lightShadowData.lightFaceData[faceIdx].ismTexArrayIdx);
     uint whichTexArray = lightShadowData.lightFaceData[faceIdx].whichIsmTexArray;
-    uint originDepth;
+    // uint originDepth;
     print("ismTexArrayLoc = ", ismTexArrayLoc);
-    InterlockedMin(gSortedLightsISMsUint[whichTexArray][ismTexArrayLoc], asuint(depth), originDepth);
+    InterlockedMin(gSortedLightsISMsUint[whichTexArray][ismTexArrayLoc], asuint(depth));
 }

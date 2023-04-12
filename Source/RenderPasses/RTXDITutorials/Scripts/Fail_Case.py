@@ -1,6 +1,10 @@
-scene = "EmeraldSquare/EmeraldSquare_Dusk.pyscene"
+
+# Define important scene parameters
+scene = "ReSTIRShadowMap/FailCase.pyscene"
+
 currentTime = 0.0
 paused = True
+
 restirPassName = "RTXDITutorial5"
 
 def graph_ImportanceResampling():
@@ -16,25 +20,24 @@ def graph_ImportanceResampling():
     }
     gResamplingParams = {
         "envEmissiveScale" : 1.0,
-        "triEmissiveScale" : 1.0,
+        "triEmissiveScale" : 15.91,
         "useLowerShininess" : True,
-        "ismParaDepthBias" : 0.001,
-        "ismPersDepthBias" : 0.00004,
+        "ismParaDepthBias" : 0.01,
+        "ismPersDepthBias" : 0.0001,
         "ismMipLevels" : 2,
-        "smDepthBias" : 0.000002,
         "ismPushMode" : 1,
-        "baseTriangleSize" : 0.1,
-        "sceneName" : 2,
+        "smDepthBias" : 0.000003,
+        "baseTriangleSize" : 0.006,
         "adaptiveLightNear" : True,
         "temporalReusingLength" : 1,
-        "extraPointSamples" : 100000000,
-        "triAreaClampThreshold" : float2(0.002239, 0.011563),
-        "numPSMs" : 24,
+        "extraPointSamples" : 50000000,
+        "triAreaClampThreshold" : float2(0.002558, 0.079261), # triangle removed scene
+        "numPSMs" : 2,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,
         'autoExposure' : False,
-        'exposureCompensation' : 2.4,
+        'exposureCompensation' : 2.0,
     }
     gAccumParams = {
         'enabled': False,
@@ -57,40 +60,15 @@ def graph_ImportanceResampling():
 
     return tracer
 
-# Create render graph
 ImportanceResampling = graph_ImportanceResampling()
 try: m.addGraph(ImportanceResampling)
 except NameError: None
 
-m.loadScene(scene, buildFlags=(SceneBuilderFlags.DontMergeMaterials | SceneBuilderFlags.DontMergeMeshes))
-# m.loadScene(scene, buildFlags=SceneBuilderFlags.DontMergeMeshes)
+m.loadScene(scene)
 if (paused):
     t.pause()
 t.time = currentTime
-
-# Initial camera.
-camera = [
-    float3( 9.500712, 33.203568, 87.346031 ),
-    float3( 9.008278, 32.750584, 86.602852 ),
-    float3( 0.000456,   1.000000,  0.000688 ) ]
-
 m.scene.camera.animated = False
-m.scene.camera.position = camera[0]
-m.scene.camera.target = camera[1]
-m.scene.camera.up = camera[2]
-m.scene.cameraSpeed = 20
+m.scene.cameraSpeed = 1
+m.scene.camera.focalLength = 35.0
 m.scene.animated = True
-
-# Add other view point
-viewport = [
-    float3( 9.500712, 33.203568, 87.346031 ),
-    float3( 9.008278, 32.750584, 86.602852 ),
-    float3( 0.000456,   1.000000,  0.000688 ) ]
-m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
-
-viewport = [
-    float3(-55.607540, 7.932875, 29.874557),
-    float3(-54.797466, 7.826821, 29.297897),
-    float3(0, 1, 0) ]
-m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
-

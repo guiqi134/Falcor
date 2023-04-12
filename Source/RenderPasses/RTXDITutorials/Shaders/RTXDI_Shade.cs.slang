@@ -44,7 +44,7 @@ RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, e
 Texture2D<PackedHitInfo> gVbuffer;
 
 float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx, bool shadingVisibility,
-            out float3 dif, out float3 spec)
+            RAB_RandomSamplerState rng, out float3 dif, out float3 spec)
 {
     // Make sure this sample would actually contribute.
     if (!RTXDI_IsValidReservoir(reservoir)) return 0;
@@ -63,7 +63,7 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     {
         uint shadowOption;
         if (shadingVisibility)
-            isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, shadowOption);
+            isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, rng, shadowOption);
     }
 
     print("lightIndex = ", lightIndex);
@@ -106,13 +106,14 @@ void main(uint3 threadId : SV_DispatchThreadID)
     const RTXDI_ResamplingRuntimeParameters params = gRtxdiParams;
     uint2 pixelPosition = RTXDI_ReservoirToPixelPos(launchIdx, params);
 
+    RAB_RandomSamplerState rng = RAB_InitRandomSampler(pixelPosition, 11);
+
     // Get our G-buffer for the current pixel
     RAB_Surface surface = RAB_GetGBufferSurface(pixelPosition, false);
     bool isValidSurface = RAB_IsSurfaceValid(surface);
 
     // Load the reservoir with the light sample we need to shade
     RTXDI_Reservoir reservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex);
-    RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
     uint lightIndex = RTXDI_GetReservoirLightIndex(reservoir);
     float2 lightUV  = RTXDI_GetReservoirSampleUV(reservoir);
 
@@ -129,101 +130,78 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, difColor, specColor);
+        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, rng, difColor, specColor);
     }
 
     // Add any directly-visible emission & environment maps, then store our final color
     float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
 
-
-    if (gVisMode != uint(Visibility::AllShadowRay))
-    {
-        // Store each pixel's light ID first for later face statistics computation
-        if (!gOnlyIsmForRanking) rankingReservoir = reservoir;
-        int lightID = -1;
-        uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
-        if (isValidSurface && RTXDI_IsValidReservoir(rankingReservoir))
-        {
-            // Get light ID
-            uint idxInAllLight = RTXDI_GetReservoirLightIndex(rankingReservoir); // triangle + point light index
-            lightID = toLocalLightIndex(idxInAllLight, gTotalLightMeshCount, params.firstPointLight, params.environmentLightIndex, gFalcorLightIDtoOurs);
-            if (gSortingRules == (uint)SortingRules::OccludedPixels)
-            {
-                if (luminance(outColor) != 0.0f && visibility == 0.0f)
-                    lightID = -1;
-            }
-        }
-        gPrevLightSelectionBuffer[bufferIndex] = lightID;
-
-        // Add the direction to the selected light
-        float3 posW = RAB_GetSurfaceWorldPos(surface);
-        float3 lightPosW = gLightShadowDataBuffer[lightID].centerPosW;
-        float3 lightToSurfaceW = normalize(posW - lightPosW);
-        float alpha = 0.1f;
-        gLightShadowDataBuffer[lightID].currAvgDirection += lightToSurfaceW;
-    }
-
-
-
-
-    // Visual debugging
-    if (false)
-    {
-        HitInfo hit = HitInfo(gVbuffer[launchIdx]);
-        const TriangleHit triangleHit = hit.getTriangleHit();
-
-        uint emissiveTriIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
-        print("emissive Triangle index = ", emissiveTriIndex);
-        if (emissiveTriIndex != UINT32_MAX)
-        {
-            print("active triangle index = ", gScene.lightCollection.getActiveTriangleIndex(emissiveTriIndex));
-            print("triangle mesh instance = ", gScene.lightCollection.getLightIdx(emissiveTriIndex));
-            print("triangle flux = ", gScene.lightCollection.fluxData[emissiveTriIndex].flux);
-        }
-
-        int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex, gFalcorLightIDtoOurs);
-
-        // print("localLightID = ", localLightID);
-        // print("light triangle index = ", lightIndex);
-        print("debug light center = ", gLightShadowDataBuffer[gDebugLightID].centerPosW);
-
-        // Debugging mesh lights
-        if (gDebugLightID < gTotalLightMeshCount)
-        {
-            uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightID].instanceID;
-
-            // For pixel has emissive surface
-            if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
-            {
-
-                if (hit.isValid() && hit.getType() == HitType::Triangle)
-                {
-                    // Turn off all other light's emission
-                    if (triangleHit.instanceID.index != debugLightMeshInstanceID)
-                        outColor = float3(0.0f);
-                }
-            }
-            else
-            {
-                if (localLightID != gDebugLightID)
-                {
-                    outColor = float3(0.0f);
-                }
-            }
-        }
-        // Debugging point lights
-        else
-        {
-            if (localLightID != gDebugLightID)
-            {
-                outColor = float3(0.0f);
-            }
-            else
-            {
-                outColor = difColor + specColor;
-            }
-        }
-    }
+    // // Store each pixel's light ID first for later face statistics computation
+    // if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing) && !gDisableRankingUpdate)
+    // {
+    //     RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+    //     if (!gSplitReservoirs) rankingReservoir = reservoir;
+    //     storeLightSampleForRanking(rankingReservoir, params, isValidSurface, launchIdx, visibility);
+    // }
 
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
+
+    // Visual debugging
+    // if (false)
+    // {
+    //     HitInfo hit = HitInfo(gVbuffer[launchIdx]);
+    //     const TriangleHit triangleHit = hit.getTriangleHit();
+
+    //     uint emissiveTriIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+    //     print("emissive Triangle index = ", emissiveTriIndex);
+    //     if (emissiveTriIndex != UINT32_MAX)
+    //     {
+    //         print("active triangle index = ", gScene.lightCollection.getActiveTriangleIndex(emissiveTriIndex));
+    //         print("triangle mesh instance = ", gScene.lightCollection.getLightIdx(emissiveTriIndex));
+    //         print("triangle flux = ", gScene.lightCollection.fluxData[emissiveTriIndex].flux);
+    //     }
+
+    //     int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex, gFalcorLightIDtoOurs);
+
+    //     // print("localLightID = ", localLightID);
+    //     // print("light triangle index = ", lightIndex);
+    //     print("debug light center = ", gLightShadowDataBuffer[gDebugLightID].centerPosW);
+
+    //     // Debugging mesh lights
+    //     if (gDebugLightID < gTotalLightMeshCount)
+    //     {
+    //         uint debugLightMeshInstanceID = gScene.lightCollection.meshData[gDebugLightID].instanceID;
+
+    //         // For pixel has emissive surface
+    //         if (any(gInputEmission[launchIdx].rgb != float3(0.0f)))
+    //         {
+
+    //             if (hit.isValid() && hit.getType() == HitType::Triangle)
+    //             {
+    //                 // Turn off all other light's emission
+    //                 if (triangleHit.instanceID.index != debugLightMeshInstanceID)
+    //                     outColor = float3(0.0f);
+    //             }
+    //         }
+    //         else
+    //         {
+    //             if (localLightID != gDebugLightID)
+    //             {
+    //                 outColor = float3(0.0f);
+    //             }
+    //         }
+    //     }
+    //     // Debugging point lights
+    //     else
+    //     {
+    //         if (localLightID != gDebugLightID)
+    //         {
+    //             outColor = float3(0.0f);
+    //         }
+    //         else
+    //         {
+    //             outColor = difColor + specColor;
+    //         }
+    //     }
+    // }
 }

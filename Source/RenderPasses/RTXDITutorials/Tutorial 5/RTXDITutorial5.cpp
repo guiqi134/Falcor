@@ -85,7 +85,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     checkForSceneUpdates();
 
     // Precompute all the point samples for ISM render. If base triangle size changed, this should be called.
-    if (mFirstPrecompute)
+    if (mFirstPrecompute && mVisibility != Visibility::ShadowMap_FullyLit)
     {
         precomputeIsmPointSamples(pRenderContext);
         mFirstPrecompute = false;
@@ -94,22 +94,18 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
     prepareSurfaceData(pRenderContext, renderData);
 
-    // This is the warm-up stage for getting a stable ranking list at the beginning of our method
-    //mUseOnlyIsmToWarmUp = mRtxdiFrameParams.frameIndex < mLightingParams.maxHistoryLength ? true : false;
-
     // Toggle between different visibility algorithms
-    if (mVisibility != Visibility::BaselineSM || mVisibility != Visibility::AllShadowRay)
+    if (mVisibility != Visibility::AllShadowRay)
     {
         // Do stochastic shadow map passes using last frame ReSTIR sample data
         prepareStochasticShadowMaps(pRenderContext, renderData);
+
+        // Do ReSTIR pass
         runSpatioTemporalReuse(pRenderContext, renderData);
 
-        // Compute statistics for next frame
-        computeRestirStatistics(pRenderContext, renderData);
-    }
-    else if (mVisibility == Visibility::BaselineSM)
-    {
-        runBaselineShadowMap(pRenderContext, renderData);
+        // Compute ReSTIR statistics for next frame
+        if (!mDisableRankingUpdate)
+            computeRestirStatistics(pRenderContext, renderData);
     }
     else 
     {
@@ -119,7 +115,45 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
         runSpatioTemporalReuse(pRenderContext, renderData);
     }
 
-    //pRenderContext->blit(renderData["mvec"]->asTexture()->getSRV(), renderData["debugScreenMotion"]->asTexture()->getRTV());
+    // Capture results for the paper
+    if (mCaptureParams.enabled)
+    {
+        auto& dict = renderData.getDictionary();
+        bool captureCurrentFrame = false;
+
+        if (mCaptureParams.startCapturing)
+        {
+            dict["outputDir"] = mCaptureParams.outputDir;
+            if (mCaptureParams.paramToCapture == uint(CaptureParams::LightFacesTopN))
+            {
+                if (mCaptureParams.frameAccumlated % mCaptureParams.frameStride == 0)
+                {
+                    //logInfo(std::format("Start capturing for PSM = {}", mLightFaceTopN));
+
+                    captureCurrentFrame = true;
+                    dict["paramName"] = std::to_string(mLightFaceTopN) + "PSMs";
+                    mLightFaceTopN += 1;
+
+                    mpUpdatePsmIsmByRanking->addDefine("PSM_COUNT", std::to_string(mLightFaceTopN));
+                }
+                else
+                {
+                    captureCurrentFrame = false;
+                }
+            }
+
+            dict["captureCurrentFrame"] = captureCurrentFrame;
+            mCaptureParams.frameAccumlated++;
+            mCaptureParams.startCapturing = (mCaptureParams.frameAccumlated / mCaptureParams.frameStride) >= mCaptureParams.numCaptures ? false : true;
+        }
+        else
+        {
+            dict["captureCurrentFrame"] = false;
+            //mTopN = mPsmCountPerFrame;
+            //mLightFaceTopN = mPsmCountPerFrame;
+            //mpUpdatePsmIsmByRanking->addDefine("PSM_COUNT", std::to_string(mTopN));
+        }
+    }
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
     if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
@@ -238,6 +272,44 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         calcDiffShadowCoverage(shadowOptionsResult, 1);
     }
 }
+
+// RIS Baseline 
+void RTXDITutorial5::runBasicRISLighting(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    setCurrentFrameRTXDIParameters(renderData);
+    computePDFTextures(pRenderContext, renderData);
+    presampleLights(pRenderContext, renderData);
+
+    // Step 1: Pick M candidate lights per pixel, select 1 and store it in a reseroir
+    {
+        FALCOR_PROFILE("Pick Candidates");
+        auto candidatesVars = mShader.risOnlyInitialCandidates->getRootVar();
+        candidatesVars["InitialCB"]["gRankingImportance"] = mRankingImportance; // Sampling mode to use to pick our candidates
+        candidatesVars["InitialCB"]["gLocalSamples"] = mLightingParams.primLightSamples;        // Number of candidates on emissive triangles
+        setupRTXDIBridgeVars(candidatesVars, renderData);
+        mShader.risOnlyInitialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
+    }
+
+    // Step 2: Take the reservoir and shade the selected sample
+    {
+        FALCOR_PROFILE("Final shading");
+        auto shadeVars = mShader.risOnlyShade->getRootVar();
+        shadeVars["ShadeCB"]["gVisMode"] = uint(mVisibility);
+        shadeVars["gOutputColor"] = renderData["color"]->asTexture();   // Per-pixel output color goes here
+        shadeVars["gInputEmission"] = mResources.emissiveColors;        // Input from prepareSurfaceData() -- contains directly seen emissives
+        setupRTXDIBridgeVars(shadeVars, renderData);
+        mShader.risOnlyShade->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
+    }
+
+    if (mGpuDataToGet.getConverageData)
+    {
+        auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
+        calcDiffShadowCoverage(shadowOptionsResult, 1);
+    }
+}
+
+// TODO: Traditional (fixed) shadow map baseline
+
 
 
 // Renders the GUI used to change options on the fly when running in Mogwai.

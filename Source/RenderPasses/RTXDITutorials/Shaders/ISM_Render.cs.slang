@@ -174,8 +174,8 @@ void renderIsmCS(uint3 threadID: SV_DispatchThreadID)
         float3 posLightNDC = posLightClipping.xyz / posLightClipping.w;
 
         // Also project point (triangle) normal to light view space
-        float4 normalLightClipping = mul(mul(float4(triNormalW, 0.0f), lightShadowData.lightFaceData[faceIdx].normalViewMat), lightShadowData.normalPersProjMat);
-        float3 normalLightNDC = normalLightClipping.xyz / normalLightClipping.w;
+        // float4 normalLightClipping = mul(mul(float4(triNormalW, 0.0f), lightShadowData.lightFaceData[faceIdx].normalViewMat), lightShadowData.normalPersProjMat);
+        // float3 normalLightNDC = normalLightClipping.xyz / normalLightClipping.w;
 
         float3 ismProjCoord = float3(posLightNDC.xy * float2(0.5f, -0.5f) + 0.5f, posLightNDC.z);
 
@@ -216,7 +216,7 @@ void renderIsmCS(uint3 threadID: SV_DispatchThreadID)
         // Write additional data for the frontmost point
         if (asuint(depth) <= gSortedLightsISMsUint[whichTexArray][ismTexArrayLoc])
         {
-            gSortedIsmRadiusNormal[whichTexArray][ismTexArrayLoc] = float4(radiusNDC, normalLightNDC.xy, triNormalW.z);
+            // gSortedIsmRadiusNormal[whichTexArray][ismTexArrayLoc] = float4(radiusNDC, normalLightNDC.xy, triNormalW.z);
         }
     }
 }

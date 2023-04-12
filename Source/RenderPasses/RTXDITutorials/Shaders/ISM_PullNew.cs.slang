@@ -3,7 +3,7 @@ import ISMHelpers;
 
 cbuffer PullCB
 {
-    float gDepthDiffThreshold;
+    float2 gLightNearFarPlane;
 }
 
 Buffer<uint2> gSortedLightsBuffer;
@@ -11,9 +11,9 @@ StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;
 
 Texture2DArray<float> gIsmInput;
 RWTexture2DArray<float> gIsmOutput;
-Texture2DArray<float4> gRadiusNormalInput;
-RWTexture2DArray<float4> gRadiusNormalOuput;
-Texture2DArray<float2> gDispVecInput;
+Texture2DArray<float> gRadiusNormalInput;
+RWTexture2DArray<float> gRadiusNormalOuput;
+Texture2DArray<float2> gDispVecInput; // This is for computing the correct displaced center from texel center
 RWTexture2DArray<float2> gDispVecOutput;
 
 // LT -> LB -> RB -> RT
@@ -31,9 +31,7 @@ struct IsmPixelData
 {
     float depth;
     bool isValid;
-    float radiusNDC;
-    float2 projectedNormal;
-    float normalZ;
+    float radius;
     float2 dispVec;
 };
 
@@ -45,10 +43,17 @@ void main(uint3 threadID : SV_DispatchThreadID)
 {
     // printSetPixel(threadID.xy);
 
-    uint texArrayIndex = threadID.z;
+    // Get texel sizes
+    float3 coarserTexSize;
+    gIsmOutput.GetDimensions(coarserTexSize.x, coarserTexSize.y, coarserTexSize.z);
+    float coarserTexelSize = 1.0f / coarserTexSize.x;
+    float3 finerTexSize;
+    gIsmInput.GetDimensions(finerTexSize.x, finerTexSize.y, finerTexSize.z);
+    float finerTexelSize = 1.0f / finerTexSize.x;
 
+    uint texArrayIndex = threadID.z;
     IsmPixelData finerPixels[4];
-    float2 frontmostDepth = 1.0f; // range from [depth, depth + 2r]
+    float2 frontmostLinearDepth = gLightNearFarPlane.y; // range from [depth, depth + 2r]
     uint validPixelCount = 4;
 
     // Get pixels values and the frontmost pixel. Also check if is valid
@@ -60,15 +65,15 @@ void main(uint3 threadID : SV_DispatchThreadID)
         if (finerPixels[i].depth != 1.0f)
         {
             finerPixels[i].isValid = true;
-            finerPixels[i].radiusNDC = gRadiusNormalInput[inputPixelPos].x;
-            finerPixels[i].projectedNormal = gRadiusNormalInput[inputPixelPos].yz;
-            finerPixels[i].normalZ = gRadiusNormalInput[inputPixelPos].w;
+            finerPixels[i].radius = gRadiusNormalInput[inputPixelPos];
             finerPixels[i].dispVec = gDispVecInput[inputPixelPos].xy;
 
             // Compute the frontmost depth range
-            if (finerPixels[i].depth < frontmostDepth.x)
+            float finerPixelLinearDepth = linearizeDepth(finerPixels[i].depth, gLightNearFarPlane.x, gLightNearFarPlane.y);
+            if (finerPixelLinearDepth < frontmostLinearDepth.x)
             {
-                frontmostDepth = float2(finerPixels[i].depth, finerPixels[i].depth + finerPixels[i].radiusNDC);
+                frontmostLinearDepth.x = finerPixelLinearDepth;
+                frontmostLinearDepth.y = finerPixelLinearDepth + 2.0f * finerPixels[i].radius;
             }
         }
         else
@@ -90,11 +95,11 @@ void main(uint3 threadID : SV_DispatchThreadID)
         if (finerPixels[i].isValid)
         {
             // Occlusion check
-            if (finerPixels[i].depth <= frontmostDepth.y)
+            if (linearizeDepth(finerPixels[i].depth, gLightNearFarPlane.x, gLightNearFarPlane.y) <= frontmostLinearDepth.y)
             {
                 depthSum += finerPixels[i].depth;
-                radiusSum += finerPixels[i].radiusNDC;
-                dispVecSum += coarserCenterToFinerOffset[i] + finerPixels[i].dispVec;
+                radiusSum += finerPixels[i].radius;
+                dispVecSum += finerTexelSize * coarserCenterToFinerOffset[i] + finerPixels[i].dispVec;
             }
             else
             {

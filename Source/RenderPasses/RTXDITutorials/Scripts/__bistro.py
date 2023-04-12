@@ -6,7 +6,7 @@ scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 currentTime = 0.0
 paused = True
 
-restirPassName = "RTXDITutorial5" # RTXDICombinedTutorial
+restirPassName = "RTXDITutorial5"
 
 # Initial camera.  This camera is inconsistent between various Bistro versions,
 #    but seems to give decent (if not identical) views for most recent versions.
@@ -32,12 +32,15 @@ def graph_ImportanceResampling():
         "useLowerShininess" : True,
         "ismParaDepthBias" : 0.01,
         "ismPersDepthBias" : 0.0001,
-        "ismMipLevels" : 3,
+        "ismMipLevels" : 2,
         "ismPushMode" : 1,
-        "smDepthBias" : 0.000002,
+        "smDepthBias" : 0.000003,
         "baseTriangleSize" : 0.006,
         "adaptiveLightNear" : True,
         "temporalReusingLength" : 1,
+        "extraPointSamples" : 100000000,
+        "triAreaClampThreshold" : float2(0.002558, 0.079261), # triangle removed scene
+        "numPSMs" : 24,
     }
     gToneMappingParams = {
         'operator': ToneMapOp.Aces,

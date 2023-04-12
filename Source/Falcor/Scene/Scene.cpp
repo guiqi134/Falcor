@@ -130,6 +130,9 @@ namespace Falcor
         mHas16BitIndices = sceneData.has16BitIndices;
         mHas32BitIndices = sceneData.has32BitIndices;
 
+        logInfo("mHas16BitIndices = " + std::to_string(mHas16BitIndices));
+        logInfo("mHas32BitIndices = " + std::to_string(mHas32BitIndices));
+
         mCurveDesc = std::move(sceneData.curveDesc);
         mCurveBBs = std::move(sceneData.curveBBs);
         mCurveIndexData = std::move(sceneData.curveIndexData);
@@ -389,7 +392,7 @@ namespace Falcor
         {
             throw RuntimeError("Vertex buffer size exceeds 4GB");
         }
-
+         
         Buffer::SharedPtr pStaticBuffer;
         if (vertexCount > 0)
         {
@@ -2337,7 +2340,7 @@ namespace Falcor
         //
         // TODO: Update the draw args if a mesh undergoes animation that flips the winding.
         //
-        // Song: for our project, we need split the rendering of static and dynamic instances
+        // Song: for our project, we need split the rendering of static and dynamic instances (not any more)
 
         mDrawArgs.clear();
 

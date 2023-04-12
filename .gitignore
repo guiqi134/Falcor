@@ -19,3 +19,4 @@ Tools/.packman
 Tests/data
 *.tlog
 /Source/Falcor/dependencies.user.xml
+/Source/Mogwai

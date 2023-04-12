@@ -3,14 +3,16 @@ import Utils.Debug.PixelDebug;
 cbuffer PushCB
 {
     uint gPushMode;
-    float gDepthDiffThreshold;
+    float2 gLightNearFarPlane;
 }
 
 Texture2DArray<float> gIsmInput;
 RWTexture2DArray<float> gIsmOutput;
-Texture2DArray<float4> gRadiusNormalInput;
-RWTexture2DArray<float4> gRadiusNormalOuput;
+Texture2DArray<float> gRadiusNormalInput;
 Texture2DArray<float2> gDispVecInput;
+
+// Redundent variables
+RWTexture2DArray<float> gRadiusNormalOuput;
 RWTexture2DArray<float2> gDispVecOutput;
 
 static const uint2 offsets[4] = {
@@ -25,7 +27,14 @@ static const uint2 offsets[4] = {
 void main(uint3 threadID : SV_DispatchThreadID)
 {
     // printSetPixel(threadID.xy);
-    print("gDepthDiffThreshold = ", gDepthDiffThreshold);
+
+    // Get texel sizes
+    float3 coarserTexSize;
+    gIsmInput.GetDimensions(coarserTexSize.x, coarserTexSize.y, coarserTexSize.z);
+    float coarserTexelSize = 1.0f / coarserTexSize.x;
+    float3 finerTexSize;
+    gIsmOutput.GetDimensions(finerTexSize.x, finerTexSize.y, finerTexSize.z);
+    float finerTexelSize = 1.0f / finerTexSize.x;
 
     uint texArrayIndex = threadID.z;
     uint2 currPixelCoarsePos = threadID.xy / 2;
@@ -71,25 +80,40 @@ void main(uint3 threadID : SV_DispatchThreadID)
         float weightSum = 0.0f;
         for (uint i = 0; i < 4; i++)
         {
-            float coarseDepth = gIsmInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
-            if (coarseDepth == 1.0f) continue;
-            computedDepth += weights[i] * gIsmInput[uint3(leftTopCoarsePos + offsets[i], texArrayIndex)];
-            weightSum += weights[i];
+            uint3 coarsePixelPos = uint3(leftTopCoarsePos + offsets[i], texArrayIndex);
+            float coarseDepth = gIsmInput[coarsePixelPos];
+
+            if (coarseDepth != 1.0f)
+            {
+                // Check if the finer pixel is covered in the coarser circle filter
+                float2 centerCoarseCoord = coarserTexelSize * coarsePixelPos.xy + gDispVecInput[coarsePixelPos];
+                float2 finerPixelCenterCoord = finerTexelSize * (float2(threadID.xy) + float2(0.5f));
+                float difference = distance(centerCoarseCoord, finerPixelCenterCoord);
+
+                // How to compare the above difference in texture-space with the radius defined in object-space???
+
+                computedDepth += weights[i] * coarseDepth;
+                weightSum += weights[i];
+            }
         }
 
         print("weightSum = ", weightSum);
 
         if (weightSum == 0.0f)
+        {
             computedDepth = 1.0f;
+        }
         else
+        {
             computedDepth /= weightSum;
+        }
     }
 
     print("computedDepth = ", computedDepth);
     print("currPixelDepth = ", currPixelDepth);
 
     // Check if the interpolated depth value is valid or occluded
-    if (computedDepth != 1.0f && computedDepth < currPixelDepth)
+    if (computedDepth != 1.0f && (computedDepth + gRadiusNormalInput[uint3(currPixelCoarsePos, texArrayIndex)]) < currPixelDepth)
     {
         gIsmOutput[uint3(threadID.xy, texArrayIndex)] = computedDepth;
     }

@@ -16,6 +16,7 @@ cbuffer presampleCB
     uint gTotalIsmCount;
     uint gTotalHighResIsmCount;
     uint gFirstSpotLightID;
+    uint gNumTriAreaPDFTextures;
 }
 
 RWBuffer<uint> gNumPointsForLight;
@@ -36,22 +37,91 @@ void presampleLight(uint3 threadID: SV_DispatchThreadID)
     InterlockedAdd(gNumPointsForLight[selectedLightID], 1);
 }
 
-enum class TriangleSampleType : uint
-{
-    TriangleThreeVertices = 0,
-    AllTriangles = 1,
-    OnlySmallTriangles = 2
-}
+// Below is for presampling triangle
+#ifndef NUM_AREA_TEXTURES
+#define NUM_AREA_TEXTURES 3
+#endif
 
-Texture2D<float> gTriAreaPDFTexture;
-Texture2D<float> gTriAreaPDFTexOnlyForSmallTri;
+#define RTXDI_TEX2D_LOAD(tex, pos, lod) tex.Load(int3(pos, lod))
+
+Texture2D<float2> gTriAreaPDFTexture[NUM_AREA_TEXTURES];
 Buffer<uint2> gNonEmisInstTriOffsetBuffer;
 Buffer<uint> gLightNumPointsOffsetBuffer;
-Buffer<float> gSampleTypeCdfBuffer;
+Buffer<float> gTexCdfBuffer;
+Buffer<float> gTexCdfByAreaBuffer;
 RWStructuredBuffer<PackedIsmPointSample> gPointsBuffer;
+RWBuffer<uint> gPointToGlobalTriIdxBuffer;
+RWBuffer<uint> gTriPointsCountBuffer;
+RWBuffer<float> gTriMaxDistBuffer;
 
-RWBuffer<uint> gDebugLightID;
 RWBuffer<uint> gTypeCountBuffer;
+
+uint samplePdfMipmap(
+    inout TinyUniformSampleGenerator rng,
+    Texture2D<float2> pdfTexture, // full mip chain starting from unnormalized sampling pdf in mip 0
+    uint2 pdfTextureSize)        // dimensions of pdfTexture at mip 0; must be 16k or less
+{
+    int lastMipLevel = max(0, int(floor(log2(max(pdfTextureSize.x, pdfTextureSize.y)))) - 1);
+
+    uint2 position = uint2(0, 0);
+    float pdf = 1.0;
+    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
+    {
+        position *= 2;
+
+        float4 samples;
+        samples.x = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 0, position.y + 0), mipLevel).x);
+        samples.y = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 0, position.y + 1), mipLevel).x);
+        samples.z = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 1, position.y + 0), mipLevel).x);
+        samples.w = max(0, RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x + 1, position.y + 1), mipLevel).x);
+
+        float weightSum = samples.x + samples.y + samples.z + samples.w;
+        if (weightSum <= 0)
+        {
+            pdf = 0;
+            break;
+        }
+
+        samples /= weightSum;
+
+        float rnd = sampleNext1D(rng);
+
+        int2 selectedOffset;
+
+        if (rnd < samples.x)
+        {
+            pdf *= samples.x;
+        }
+        else
+        {
+            rnd -= samples.x;
+
+            if (rnd < samples.y)
+            {
+                position += uint2(0, 1);
+                pdf *= samples.y;
+            }
+            else
+            {
+                rnd -= samples.y;
+
+                if (rnd < samples.z)
+                {
+                    position += uint2(1, 0);
+                    pdf *= samples.z;
+                }
+                else
+                {
+                    position += uint2(1, 1);
+                    pdf *= samples.w;
+                }
+            }
+        }
+    }
+
+    uint globalTriangleIdx = uint(RTXDI_TEX2D_LOAD(pdfTexture, int2(position.x, position.y), 0).y);
+    return globalTriangleIdx;
+}
 
 [numthreads(16, 16, 1)]
 void presampleTriangle(uint3 threadID : SV_DispatchThreadID)
@@ -66,32 +136,12 @@ void presampleTriangle(uint3 threadID : SV_DispatchThreadID)
     // Create RNG for each point sample
     SampleGenerator sg = SampleGenerator(threadID.xy, 5 * 13);
 
-    // Decide which triangle sampling type we should use
-    uint type = findInterval(gSampleTypeCdfBuffer, sampleNext1D(sg));
-    uint globalTriangleIdx;
-    if (type == uint(TriangleSampleType::TriangleThreeVertices))
-    {
-        globalTriangleIdx = uint(sampleNext1D(sg) * gTotalNonEmissiveTriCount);
-    }
-    else if (type == uint(TriangleSampleType::AllTriangles))
-    {
-        // Sample triangle PDF to get a triangle index
-        uint2 texSize;
-        gTriAreaPDFTexture.GetDimensions(texSize.x, texSize.y);
-        uint2 texelPos;
-        float pdf;
-        samplePdfMipmap(sg, gTriAreaPDFTexture, texSize, texelPos, pdf);
-        globalTriangleIdx = RTXDI_ZCurveToLinearIndex(texelPos);
-    }
-    else
-    {
-        uint2 texSize;
-        gTriAreaPDFTexOnlyForSmallTri.GetDimensions(texSize.x, texSize.y);
-        uint2 texelPos;
-        float pdf;
-        samplePdfMipmap(sg, gTriAreaPDFTexOnlyForSmallTri, texSize, texelPos, pdf);
-        globalTriangleIdx = RTXDI_ZCurveToLinearIndex(texelPos);
-    }
+    // Decide which pdf texture to use and sample triangle PDF to get a triangle index
+    // uint whichPdfTex = findInterval(gTexCdfBuffer, sampleNext1D(sg));
+    uint whichPdfTex = uint(gNumTriAreaPDFTextures * sampleNext1D(sg));
+    uint2 texSize;
+    gTriAreaPDFTexture[whichPdfTex].GetDimensions(texSize.x, texSize.y);
+    uint globalTriangleIdx = samplePdfMipmap(sg, gTriAreaPDFTexture[whichPdfTex], texSize);
 
     // Get instanceID using binary search
     uint id = findInterval(gNonEmisInstTriOffsetBuffer, globalTriangleIdx);
@@ -106,21 +156,21 @@ void presampleTriangle(uint3 threadID : SV_DispatchThreadID)
         triVertices[i] = gScene.vertices[vtxIndices[i]].position;
 
     // Random position on triangle
-    if (type != uint(TriangleSampleType::TriangleThreeVertices))
-    {
-        float3 barycentrics = sample_triangle(sampleNext2D(sg));
-        pointSample.pos = barycentrics.x * triVertices[0] + barycentrics.y * triVertices[1] + barycentrics.z * triVertices[2];
-    }
-    else
-    {
-        pointSample.pos = triVertices[uint(3 * sampleNext1D(sg))];
-    }
+    float3 barycentrics = sample_triangle(sampleNext2D(sg));
+    pointSample.pos = barycentrics.x * triVertices[0] + barycentrics.y * triVertices[1] + barycentrics.z * triVertices[2];
+
+    // Store info for computing point radius later
+    // gPointToGlobalTriIdxBuffer[pointsBufferIdx] = globalTriangleIdx;
+    // InterlockedAdd(gTriPointsCountBuffer[globalTriangleIdx], 1);
+    // float3 triCenter = (triVertices[0] + triVertices[1] + triVertices[2]) / 3.0f;
+    // float maxDist = max(max(length(triVertices[0] - triCenter), length(triVertices[1] - triCenter)), length(triVertices[2] - triCenter));
+    // gTriMaxDistBuffer[globalTriangleIdx] = maxDist;
 
     // Find which light section the thread is in
     uint lightID = findInterval(gLightNumPointsOffsetBuffer, pointsBufferIdx);
     pointSample.selectedLightID = lightID;
+
     gPointsBuffer[pointsBufferIdx] = packIsmPointSample(pointSample);
 
-    gDebugLightID[pointsBufferIdx] = lightID;
-    InterlockedAdd(gTypeCountBuffer[type], 1);
+    InterlockedAdd(gTypeCountBuffer[whichPdfTex], 1);
 }

@@ -81,6 +81,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Store data about our selected light in an intermediate reservoir for later reuse and shading.
     RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex);
 
-    if (gOnlyIsmForRanking)
+    if (gOnlyIsmForRanking && gSplitReservoirs && !gDisableRankingUpdate)
         RTXDI_StoreReservoir(reservoir, params, launchIdx, gOutputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+
+    // Store each pixel's light ID first for later face statistics computation
+    if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterRIS) && !gDisableRankingUpdate)
+    {
+        storeLightSampleForRanking(reservoir, params, RAB_IsSurfaceValid(surface), launchIdx);
+    }
 }
