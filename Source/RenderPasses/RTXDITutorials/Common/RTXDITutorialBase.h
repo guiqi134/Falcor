@@ -255,7 +255,7 @@ protected:
     bool mDisableRankingUpdate = false;
     bool mOnlyIsmForRanking = true;
     bool mSplitReservoirs = true;
-    bool mRenderPsmGS = true;
+    bool mRenderPsmGS = false;
     // Some redundent toggles
     bool mUseNearestPointSamples = false;
     bool mUseReconstructPSMs = false;

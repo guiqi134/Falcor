@@ -2366,15 +2366,16 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             auto shadowVars = mShadowMapPass.pVars->getRootVar();
             shadowVars["shadowMapCB"]["gFirstSpotLightID"] = mTotalLightMeshCount + mTotalPointLightCount;
             shadowVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
-
+            shadowVars["gReusingLightIndexBuffer"] = mpReusingLightIndexBuffer;
+            auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 1, 1, nullptr, kShadowMapFlags);
+            mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, 1);
 
             for (uint pass = 0; pass < mLightFaceTopN; pass++)
             {
                 shadowVars["shadowMapCB"]["gRank"] = pass;
 
                 auto psmTexArraySize = mSortedLightsShadowMaps[0]->getArraySize();
-                auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 1, 1, nullptr, kShadowMapFlags);
-                mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, 1);
+
                 pRenderContext->clearDsv(mShadowMapPass.pFbo->getDepthStencilView().get(), 1.0f, 0);
 
                 mShadowMapPass.pFbo->attachColorTarget(mSortedLightsShadowMaps[0], 0, 0, pass, 1);

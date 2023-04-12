@@ -13,7 +13,6 @@ cbuffer shadowMapCB
 
 Buffer<uint> gReusingLightIndexBuffer;
 StructuredBuffer<LightShadowMapData> gLightShadowDataBuffer; // 0, 1, ..., Max
-Buffer<uint2> gSortedLightsBuffer; // for baseline use
 
 struct GSOut
 {
