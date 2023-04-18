@@ -54,6 +54,10 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     // Update the scene, especially dynamic meshes because they will not be pre-transferred
     mPassData.scene->update(pRenderContext, gpFramework->getGlobalClock().getTime());
 
+    //if (mVisibility == Visibility::AllShadowRay)
+    //{
+    //}
+
     // If we haven't loaded our shaders yet, go ahead and load them.
     if (!mShader.shade) loadShaders();
 
@@ -63,6 +67,9 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     //    mpEmissiveSampler->update(pRenderContext);
     //    mpBaselineShading->getProgram()->addDefines(mpEmissiveSampler->getDefines());
     //}
+
+    //logInfo(std::format("Blas Update Mode = {}, Tlas Update Mode = {}", uint(mPassData.scene->getBlasUpdateMode()), uint(mPassData.scene->getTlasUpdateMode())));
+    
 
     // If needed, allocate an RTXDI context & resources so we can run our lighting code
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
@@ -93,6 +100,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
 
     // Convert our input (standard) Falcor v-buffer into a packed G-buffer format to reduce reuse costs
     prepareSurfaceData(pRenderContext, renderData);
+
+    //mDisableRankingUpdate = mPlaceForRankingData == uint(PlacesForRankingData::EmissivePowerFixed) ? true : mDisableRankingUpdate;
 
     // Toggle between different visibility algorithms
     if (mVisibility != Visibility::AllShadowRay)

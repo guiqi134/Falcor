@@ -2896,6 +2896,7 @@ namespace Falcor
         // - Calculate total compacted buffer size
         // - Compact/clone all BLASes to their final location
 
+        //if (true || mRebuildBlas)
         if (mRebuildBlas)
         {
             // Invalidate any previous TLASes as they won't be valid anymore.
@@ -3416,6 +3417,7 @@ namespace Falcor
         asDesc.inputs = inputs;
 
         // If first time building this TLAS
+        //if (true || tlas.pTlasObject == nullptr)
         if (tlas.pTlasObject == nullptr)
         {
             {
@@ -3487,6 +3489,7 @@ namespace Falcor
     void Scene::setRaytracingShaderData(RenderContext* pContext, const ShaderVar& var, uint32_t rayTypeCount)
     {
         // On first execution or if BLASes need to be rebuilt, create BLASes for all geometries.
+        //if (true || !mBlasDataValid)
         if (!mBlasDataValid)
         {
             initGeomDesc(pContext);
@@ -3499,7 +3502,7 @@ namespace Falcor
         // Note that for DXR 1.1 ray queries, the shader table is not used and the ray type count doesn't matter and can be set to zero.
         //
         auto tlasIt = mTlasCache.find(rayTypeCount);
-        if (tlasIt == mTlasCache.end() || !tlasIt->second.pTlasObject)
+        //if (tlasIt == mTlasCache.end() || !tlasIt->second.pTlasObject)
         {
             // We need a hit entry per mesh right now to pass GeometryIndex()
             buildTlas(pContext, rayTypeCount, true);

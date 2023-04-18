@@ -308,7 +308,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
         {0, "ReSTIR"}, {1, "only Uniform RIS"}, {2, "only Emissive Power RIS"}
     };
     Gui::DropdownList placeForRankingData = {
-        {0, "After RIS"}, {1, "After Visibility Check"}, {2, "After Reusing"}
+        {0, "After RIS"}, {1, "After Visibility Check"}, {2, "After Reusing"}, {3, "Emissive Power Fixed"}
     };
     Gui::DropdownList paramInCapturing = {
         {0, "Light Faces Top N"}, {1, "Number of Point Sampels"}
@@ -490,6 +490,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
         printValues.text(std::format("Sorted light index buffer: \n[{}]", mValuesToPrint.sortedLightIndexArray));
         printValues.text(std::format("Sorted light frequency buffer: \n[{}]", mValuesToPrint.sortedLightFreqArray));
         printValues.text(std::format("Reusing light index buffer: \n[{}]", mValuesToPrint.reusingLightIndexArray));
+        printValues.text(std::format("Light faces sorted by power buffer: \n[{}]", mValuesToPrint.lightFacesSortByPowerArray));
         //printValues.text(std::format("ISM light index buffer: \n[{}]", mValuesToPrint.ismLightIndexArray));
         //printValues.text(std::format("High-res ISM light index buffer: \n[{}]", mValuesToPrint.highIsmLightIndexArray));
 
@@ -1388,6 +1389,7 @@ void RTXDITutorialBase::loadShaders()
     updatePsmIsmPassDefines.add("DEBUG_PRINT_MODE", std::to_string(mEnableGpuDebugPrintMode));
     mpUpdateLightShadowDataCenter = createComputeShader("GeneralLightDataUpdates.cs.slang", dummyDefines, "updateCenterCS", true);
     mpPerFrameGeneralUpdates = createComputeShader("GeneralLightDataUpdates.cs.slang", dummyDefines, "generalUpdates", true);
+    mpUpdatePsmByEmissivePower = createComputeShader("UpdatePsmByEmissivePower.cs.slang", dummyDefines, "main", true);
     mpUpdatePsmIsmByRanking = createComputeShader("UpdatePsmIsmByRanking_NoReuse.cs.slang", updatePsmIsmPassDefines, "main");
     mpUpdateLightFacePrevRanking = createComputeShader("GeneralLightDataUpdates.cs.slang", dummyDefines, "updatePrevRanking", true);
     //mpUpdatePrevViewMatrices = createComputeShader("GeneralLightDataUpdates.cs.slang", dummyDefines, "updatePrevViewMatrices");
@@ -1475,8 +1477,13 @@ std::vector<LightShadowMapData> RTXDITutorialBase::prepareLightShadowMapData()
     std::vector<LightShadowMapData> lightDataArray;
     std::vector<LightShadowMapData> spotLightDataArray;
 
+    std::vector<float2> lightEmissivePower;
+    std::vector<float2> spotLightEmissivePower;
+
     // Get light mesh data from scene
     const auto& meshLights = mPassData.lights->getMeshLights();
+    uint pointLightID = mTotalLightMeshCount;
+    uint spotLightID = mTotalLightMeshCount + mTotalPointLightCount;
 
     for (uint i = 0; i < mTotalLightsCount; i++)
     {
@@ -1545,10 +1552,16 @@ std::vector<LightShadowMapData> RTXDITutorialBase::prepareLightShadowMapData()
             //lightData.isDynamic = mPointLights[pointLightIdx]->hasAnimation();
             lightData.falcorLightID = pointLightIdx;
 
+            float pointEmissivePower = mPointLights[pointLightIdx]->getPower();
+
+            //logInfo(std::format("light intensity = {}, light power = {}", to_string(mPointLights[pointLightIdx]->getIntensity()), pointEmissivePower));
+
             // Point or spot light?
             if (mPointLights[pointLightIdx]->getOpeningAngle() == float(M_PI))
             {
                 lightData.numShadowMaps = kShadowMapsPerPointLight;
+                lightEmissivePower.push_back(float2(pointLightID, pointEmissivePower));
+                pointLightID++;
 
                 // Compute the light space projection matrix
                 //lightData.persProjMat = glm::perspective(glm::radians(90.0f), 1.0f, lightData.nearFarPlane.x, lightData.nearFarPlane.y);
@@ -1575,6 +1588,10 @@ std::vector<LightShadowMapData> RTXDITutorialBase::prepareLightShadowMapData()
 
                 // Spot light has different light frustum size
                 lightData.lightFrustumSize = 2.0f * lightData.nearFarPlane.x * glm::tan(0.5f * openingAngle);
+
+                // Store spot light emissive power
+                spotLightEmissivePower.push_back(float2(spotLightID, pointEmissivePower * float(openingAngle / M_PI)));
+                spotLightID++;
             }
         }
 
@@ -1615,14 +1632,56 @@ std::vector<LightShadowMapData> RTXDITutorialBase::prepareLightShadowMapData()
             spotLightDataArray.push_back(lightData);
         }
     }
-
     logInfo(std::format("lightDataArray size = {}, spotLightDataArray size = {}", lightDataArray.size(), spotLightDataArray.size()));
 
     // Copy spot light data to global array
     for (uint i = 0; i < spotLightDataArray.size(); i++)
+    {
         lightDataArray.push_back(spotLightDataArray[i]);
-
+        lightEmissivePower.push_back(spotLightEmissivePower[i]);
+    }
     logInfo(std::format("lightDataArray size = {}", lightDataArray.size()));
+
+    // Store the faces of light with highest emissive power
+    std::sort(lightEmissivePower.begin(), lightEmissivePower.end(), [](const float2& light1, const float2& light2) { return light1.y > light2.y; });
+
+    //std::string output = "";
+    //for (uint i = 0; i < lightEmissivePower.size(); i++)
+    //{
+    //    output += to_string(lightEmissivePower[i]) + " ";
+    //    output += (i + 1) % 10 == 0 ? "\n" : "";
+    //}
+    //logInfo(std::format("lightEmissivePower sorted = [\n{}\n]", output));
+
+    std::vector<uint> lightFacesSortByPower(mTotalBinCount);
+    uint faceCount = 0;
+    uint lightRank = 0;
+    uint firstSpotLightID = mTotalLightMeshCount + mTotalPointLightCount;
+    while (faceCount <mTotalBinCount)
+    {
+        uint lightID = uint(lightEmissivePower[lightRank].x);
+        uint numShadowMaps = lightDataArray[lightID].numShadowMaps;
+
+        for (uint faceIdx = 0; faceIdx < numShadowMaps; faceIdx++, faceCount++)
+        {
+            if (lightID < firstSpotLightID)
+                lightFacesSortByPower[faceCount] = kShadowMapsPerPointLight * lightID + faceIdx;
+            else
+                lightFacesSortByPower[faceCount] = kShadowMapsPerPointLight * firstSpotLightID + (lightID - firstSpotLightID);
+        }
+
+        lightRank++;
+    }
+
+    std::string output = "";
+    for (uint i = 0; i < lightFacesSortByPower.size(); i++)
+    {
+        output += std::to_string(lightFacesSortByPower[i]) + " ";
+        output += (i + 1) % 10 == 0 ? "\n" : "";
+    }
+    logInfo(std::format("lightFacesSortByPower = [\n{}\n]", output));
+
+    mpLightFaceSortByPowerBuffer = Buffer::createTyped<uint>(mTotalBinCount, kBufferBindFlags, Buffer::CpuAccess::Read, lightFacesSortByPower.data());
 
     return lightDataArray;
 }
@@ -2262,6 +2321,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
 
         // Update corresponding light mesh data for those top N shadow map lights.
         // TODO: seperate into more kernel calls
+        if (mPlaceForRankingData != uint(PlacesForRankingData::EmissivePowerFixed))
         {
             FALCOR_PROFILE("Updates for PSM and ISM faces");
 
@@ -2297,6 +2357,16 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             mpPixelDebug->prepareProgram(mpUpdatePsmIsmByRanking->getProgram(), vars);
             mpUpdatePsmIsmByRanking->execute(pRenderContext, 2, 1); // change back to 1
         }
+        else
+        {
+            auto vars = mpUpdatePsmByEmissivePower->getRootVar();
+            vars["CB"]["gFirstSpotLightID"] = mTotalLightMeshCount + mTotalPointLightCount;
+            vars["CB"]["gLightFaceTopN"] = mLightFaceTopN;
+            vars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
+            vars["gLightFaceSortByPowerBuffer"] = mpLightFaceSortByPowerBuffer;
+            mpPixelDebug->prepareProgram(mpUpdatePsmByEmissivePower->getProgram(), vars);
+            mpUpdatePsmByEmissivePower->execute(pRenderContext, mTotalBinCount, 1);
+        }
 
         // Loop over all faces and copy current ranking to previous. This is only for restricted region method
         if (!mDisableRankingUpdate)
@@ -2315,12 +2385,14 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
     {
         FALCOR_PROFILE("Cubic Shadow Maps");
 
+        auto pReusingLightIndexBuffer = mPlaceForRankingData == uint(PlacesForRankingData::EmissivePowerFixed) ? mpLightFaceSortByPowerBuffer : mpReusingLightIndexBuffer;
+
         if (mRenderPsmGS)
         {
             uint maxSupportedShadowMaps1024 = kMaxSupportedLights1024 * kShadowMapsPerPointLight;
             auto shadowVars = mShadowMapPassGS.pVars->getRootVar();
             shadowVars["shadowMapCB"]["gFirstSpotLightID"] = mTotalLightMeshCount + mTotalPointLightCount;
-            shadowVars["gReusingLightIndexBuffer"] = mpReusingLightIndexBuffer;
+            shadowVars["gReusingLightIndexBuffer"] = pReusingLightIndexBuffer;
             shadowVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
 
             // Compute total rasterization passes
@@ -2366,7 +2438,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             auto shadowVars = mShadowMapPass.pVars->getRootVar();
             shadowVars["shadowMapCB"]["gFirstSpotLightID"] = mTotalLightMeshCount + mTotalPointLightCount;
             shadowVars["gLightShadowDataBuffer"] = mpLightShadowDataBuffer;
-            shadowVars["gReusingLightIndexBuffer"] = mpReusingLightIndexBuffer;
+            shadowVars["gReusingLightIndexBuffer"] = pReusingLightIndexBuffer;
             auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 1, 1, nullptr, kShadowMapFlags);
             mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, 1);
 
@@ -2374,7 +2446,7 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             {
                 shadowVars["shadowMapCB"]["gRank"] = pass;
 
-                auto psmTexArraySize = mSortedLightsShadowMaps[0]->getArraySize();
+                //auto psmTexArraySize = mSortedLightsShadowMaps[0]->getArraySize();
 
                 pRenderContext->clearDsv(mShadowMapPass.pFbo->getDepthStencilView().get(), 1.0f, 0);
 
@@ -2547,6 +2619,15 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             output += (i + 1) % 10 == 0 ? "\n" : "";
         }
         mValuesToPrint.reusingLightIndexArray = output;
+
+        auto lightFacesSortByPower = getDeviceResourceData<uint>(pRenderContext, mpLightFaceSortByPowerBuffer);
+        output = "";
+        for (uint i = 0; i < lightFacesSortByPower.size(); i++)
+        {
+            output += std::to_string(lightFacesSortByPower[i]) + " ";
+            output += (i + 1) % 10 == 0 ? "\n" : "";
+        }
+        mValuesToPrint.lightFacesSortByPowerArray = output;
 
         //auto ismLightIndexArray = getDeviceResourceData<uint>(pRenderContext, mpIsmLightIndexBuffer);
         //output = "";

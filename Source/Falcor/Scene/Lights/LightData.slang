@@ -50,7 +50,7 @@ struct LightData
     float3   posW               = float3(0, 0, 0);  ///< World-space position of the center of a light source
     uint32_t type               = uint(LightType::Point); ///< Type of the light source (see above)
     float3   dirW               = float3(0, -1, 0); ///< World-space orientation of the light source (normalized).
-    float    openingAngle       = float(M_PI);      ///< For point (spot) light: Opening half-angle of a spot light cut-off, pi by default (full sphere).
+    float    openingAngle       = float(M_PI);      ///< For point (spot) light: Opening half-angle of a spot light cut-off, pi by default (full sphere). Song: I don't think this is the half-angle, it seems to be the full-angle
     float3   intensity          = float3(1, 1, 1);  ///< Emitted radiance of th light source
     float    cosOpeningAngle    = -1.f;             ///< For point (spot) light: cos(openingAngle), -1 by default because openingAngle is pi by default
     float    cosSubtendedAngle  = 0.9999893f;       ///< For distant light; cosine of the half-angle subtended by the light. Default corresponds to the sun as viewed from earth

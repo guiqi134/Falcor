@@ -92,7 +92,7 @@ viewport = [
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
 
 viewport = [
-    float3(-12.666439, 2.530612, -39.123089),
-    float3(-13.606641, 2.555843, -38.783409),
+    float3(-92.211182, -1.413139, -37.098988),
+    float3(-91.277931, -1.436587, -37.457447),
     float3(0, 1, 0) ]
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])

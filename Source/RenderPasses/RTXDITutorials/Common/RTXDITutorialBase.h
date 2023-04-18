@@ -312,7 +312,7 @@ protected:
 
     // Below are the parameters in our method
     uint mTotalBinCount = 1u;
-    uint mLightFaceTopN = 24u;
+    uint mLightFaceTopN = 10u;
     uint mTemporalReusingLength = 1u;
     uint mCurrFrameReusingStartIdx = 0u;
     uint mShadowMapSize = 1 << 10;
@@ -367,6 +367,7 @@ protected:
     // Temporal resuing shadow map resources
     std::vector<Texture::SharedPtr> mSortedLightsShadowMaps;
     Buffer::SharedPtr mpReusingLightIndexBuffer;
+    Buffer::SharedPtr mpLightFaceSortByPowerBuffer;
 
     // ISM resources
     std::vector<Texture::SharedPtr> mSortedLightsISMs;
@@ -404,6 +405,7 @@ protected:
     ComputePass::SharedPtr mpUpdateLightShadowDataCenter;
     ComputePass::SharedPtr mpPerFrameGeneralUpdates;
     ComputePass::SharedPtr mpUpdatePsmIsmByRanking;
+    ComputePass::SharedPtr mpUpdatePsmByEmissivePower;
     ComputePass::SharedPtr mpUpdateLightFacePrevRanking;
     ComputePass::SharedPtr mpRotateLightFaces;
     //ComputePass::SharedPtr mpUpdatePrevViewMatrices;
@@ -494,6 +496,7 @@ protected:
         std::string ismLightIndexArray;
         std::string highIsmLightIndexArray;
         std::string lightRankingAcrossFrames;
+        std::string lightFacesSortByPowerArray;
 
         std::string shadowMapSizeCount;
         uint64_t totalSmTexSize;

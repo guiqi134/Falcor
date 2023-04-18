@@ -88,9 +88,14 @@ viewport = [
     float3( 0.000456,   1.000000,  0.000688 ) ]
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
 
-viewport = [
-    float3(-55.607540, 7.932875, 29.874557),
-    float3(-54.797466, 7.826821, 29.297897),
+viewport2 = [
+    float3(4.695141, 1.320251, 3.350114),
+    float3(5.669813, 1.354105, 3.571178),
     float3(0, 1, 0) ]
-m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
+m.scene.addViewpoint(viewport2[0], viewport2[1], viewport2[2])
 
+viewport3 = [
+    float3(-35.645020, 1.631449, 74.611137),
+    float3(-36.392250, 1.593515, 73.947655),
+    float3(0, 1, 0) ]
+m.scene.addViewpoint(viewport3[0], viewport3[1], viewport3[2])

@@ -58,36 +58,6 @@ VSOut vsMain(VSIn vIn)
     return vsOut;
 }
 
-// [maxvertexcount(3)]
-// void gsMain(triangle VSOut gsIn[3], uint gsInstanceID : SV_GSInstanceID, uint primitiveID : SV_PrimitiveID, inout TriangleStream<GSOut> outStream)
-// {
-//     // printSetPixel(uint2(gsIn[0].instanceID.index, primitiveID));
-
-//     // // Ignore emissive triangles. TODO: build the VAO for non-emissive triangles
-//     // bool isAnalyticLight = true;
-//     // if (isAnalyticLight)
-//     // {
-//     //     GeometryInstanceData instance = gScene.getGeometryInstance(gsIn[0].instanceID);
-//     //     uint materialID = gScene.getMaterialID(gsIn[0].instanceID);
-//     //     if (gScene.materials.isBasicMaterial(materialID))
-//     //     {
-//     //         float16_t3 emissive = gScene.materials.getBasicMaterialData(materialID).emissive;
-
-//     //         // Some objects have emissive textures (e.g. the train in Subway), so we cannot just ignore them
-//     //         if (!gScene.materials.isEmissiveTextured(materialID) && any(emissive != float16_t3(0)))
-//     //             return;
-//     //     }
-//     // }
-
-//     GSOut gsOut;
-//     for (uint v = 0; v < 3; v++)
-//     {
-//         gsOut.vsOut = gsIn[v];
-//         outStream.Append(gsOut);
-//     }
-//     outStream.RestartStrip();
-// }
-
 PSOut psMain(VSOut psIn, uint triangleIndex: SV_PrimitiveID)
 {
     // printSetPixel(uint2(psIn.vsOut.posH.xy));

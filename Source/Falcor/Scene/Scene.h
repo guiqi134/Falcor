@@ -1280,6 +1280,7 @@ namespace Falcor
         // Raytracing data
         UpdateMode mTlasUpdateMode = UpdateMode::Rebuild;   ///< How the TLAS should be updated when there are changes in the scene.
         UpdateMode mBlasUpdateMode = UpdateMode::Refit;     ///< How the BLAS should be updated when there are changes to meshes.
+        //UpdateMode mBlasUpdateMode = UpdateMode::Rebuild;     ///< How the BLAS should be updated when there are changes to meshes.
 
         std::vector<RtInstanceDesc> mInstanceDescs; ///< Shared between TLAS builds to avoid reallocating CPU memory.
 
@@ -1319,6 +1320,7 @@ namespace Falcor
             bool hasDynamicCurve = false;                   ///< Whether the BLAS contains an animated curve cache, which means the BLAS may need to be updated.
             bool useCompaction = false;                     ///< Whether the BLAS should be compacted after build.
             UpdateMode updateMode = UpdateMode::Refit;      ///< Update mode this BLAS was created with.
+            //UpdateMode updateMode = UpdateMode::Rebuild;      ///< Update mode this BLAS was created with.
 
             bool hasDynamicGeometry() const
             {
