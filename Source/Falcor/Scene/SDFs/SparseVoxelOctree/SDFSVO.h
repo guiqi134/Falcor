@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "Scene/SDFs/SDFGrid.h"
 #include "Core/API/Buffer.h"
 #include "Core/API/Texture.h"
+#include "Core/Pass/ComputePass.h"
 
 namespace Falcor
 {
@@ -38,12 +39,12 @@ namespace Falcor
     class FALCOR_API SDFSVO : public SDFGrid
     {
     public:
-        using SharedPtr = std::shared_ptr<SDFSVO>;
+        struct SharedData;
 
-        /** Create a new, empty SDFSVO.
-            \return SDFSVO object, or nullptr if errors occurred.
-        */
-        static SharedPtr create();
+        static ref<SDFSVO> create(ref<Device> pDevice) { return make_ref<SDFSVO>(pDevice); }
+
+        /// Create an empty SDFSVO.
+        SDFSVO(ref<Device> pDevice);
 
         uint32_t getSVOIndexBitCount() const { return mSVOIndexBitCount; }
 
@@ -54,7 +55,7 @@ namespace Falcor
 
         virtual void createResources(RenderContext* pRenderContext, bool deleteScratchData = true) override;
 
-        virtual const Buffer::SharedPtr& getAABBBuffer() const override { return spSDFSVOGridUnitAABBBuffer; }
+        virtual const ref<Buffer>& getAABBBuffer() const override;
         virtual uint32_t getAABBCount() const override { return 1; }
 
         virtual void setShaderData(const ShaderVar& var) const override;
@@ -63,8 +64,6 @@ namespace Falcor
         virtual void setValuesInternal(const std::vector<float>& cornerValues) override;
 
     private:
-        SDFSVO() = default;
-
         // CPU data.
         std::vector<int8_t> mValues;
 
@@ -75,27 +74,25 @@ namespace Falcor
         uint32_t mSVOIndexBitCount = 0;
 
         // GPU Data.
-        Buffer::SharedPtr mpSVOBuffer;
-
-        // Resources shared among all SDFSVOs.
-        static Buffer::SharedPtr spSDFSVOGridUnitAABBBuffer;
+        ref<Buffer> mpSVOBuffer;
+        std::shared_ptr<SharedData> mpSharedData; ///< Shared data among all instances.
 
         // Compute passes used to build the SVO.
-        ComputePass::SharedPtr mpCountSurfaceVoxelsPass;
-        ComputePass::SharedPtr mpBuildFinestLevelFromDistanceTexturePass;
-        ComputePass::SharedPtr mpBuildLevelFromDistanceTexturePass;
-        ComputePass::SharedPtr mpSortLocationCodesPass;
-        ComputePass::SharedPtr mpWriteSVOOffsetsPass;
-        ComputePass::SharedPtr mpBuildOctreePass;
+        ref<ComputePass> mpCountSurfaceVoxelsPass;
+        ref<ComputePass> mpBuildFinestLevelFromDistanceTexturePass;
+        ref<ComputePass> mpBuildLevelFromDistanceTexturePass;
+        ref<ComputePass> mpSortLocationCodesPass;
+        ref<ComputePass> mpWriteSVOOffsetsPass;
+        ref<ComputePass> mpBuildOctreePass;
 
         // Scratch data used for building.
-        Texture::SharedPtr mpSDFGridTexture;
-        Buffer::SharedPtr mpSurfaceVoxelCounter;
-        Buffer::SharedPtr mpSurfaceVoxelCounterStagingBuffer;
-        Buffer::SharedPtr mpVoxelCountPerLevelBuffer;
-        Buffer::SharedPtr mpVoxelCountPerLevelStagingBuffer;
-        Buffer::SharedPtr mpHashTableBuffer;
-        Buffer::SharedPtr mpLocationCodesBuffer;
-        GpuFence::SharedPtr mpReadbackFence;
+        ref<Texture> mpSDFGridTexture;
+        ref<Buffer> mpSurfaceVoxelCounter;
+        ref<Buffer> mpSurfaceVoxelCounterStagingBuffer;
+        ref<Buffer> mpVoxelCountPerLevelBuffer;
+        ref<Buffer> mpVoxelCountPerLevelStagingBuffer;
+        ref<Buffer> mpHashTableBuffer;
+        ref<Buffer> mpLocationCodesBuffer;
+        ref<GpuFence> mpReadbackFence;
     };
 }

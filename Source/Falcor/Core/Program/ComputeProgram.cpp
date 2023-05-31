@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,44 +25,50 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "ComputeProgram.h"
+#include "ProgramManager.h"
+#include "Core/ObjectPython.h"
+#include "Core/API/ComputeContext.h"
+#include "Core/State/ComputeState.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-    ComputeProgram::SharedPtr ComputeProgram::createFromFile(const std::filesystem::path& path, const std::string& csEntry, const DefineList& programDefines, Shader::CompilerFlags flags, const std::string& shaderModel)
-    {
-        Desc d(path);
-        if (!shaderModel.empty()) d.setShaderModel(shaderModel);
-        d.setCompilerFlags(flags);
-        d.csEntry(csEntry);
-        return create(d, programDefines);
-    }
-
-    ComputeProgram::SharedPtr ComputeProgram::create(const Desc& desc, const DefineList& programDefines)
-    {
-        auto pProg = SharedPtr(new ComputeProgram(desc, programDefines));
-        registerProgramForReload(pProg);
-        return pProg;
-    }
-
-    ComputeProgram::ComputeProgram(const Desc& desc, const DefineList& programDefines)
-        : Program(desc, programDefines)
-    {
-    }
-
-    void ComputeProgram::dispatchCompute(
-        ComputeContext* pContext,
-        ComputeVars* pVars,
-        uint3 const& threadGroupCount)
-    {
-        auto pState = ComputeState::create();
-        pState->setProgram(std::static_pointer_cast<ComputeProgram>(shared_from_this()));
-        pContext->dispatch(pState.get(), pVars, threadGroupCount);
-    }
-
-    FALCOR_SCRIPT_BINDING(ComputeProgram)
-    {
-        pybind11::class_<ComputeProgram, ComputeProgram::SharedPtr>(m, "ComputeProgram");
-    }
+ref<ComputeProgram> ComputeProgram::createFromFile(
+    ref<Device> pDevice,
+    const std::filesystem::path& path,
+    const std::string& csEntry,
+    const DefineList& programDefines,
+    Shader::CompilerFlags flags,
+    const std::string& shaderModel
+)
+{
+    Desc d(path);
+    if (!shaderModel.empty())
+        d.setShaderModel(shaderModel);
+    d.setCompilerFlags(flags);
+    d.csEntry(csEntry);
+    return create(pDevice, d, programDefines);
 }
+
+ref<ComputeProgram> ComputeProgram::create(ref<Device> pDevice, const Desc& desc, const DefineList& programDefines)
+{
+    return ref<ComputeProgram>(new ComputeProgram(pDevice, desc, programDefines));
+}
+
+ComputeProgram::ComputeProgram(ref<Device> pDevice, const Desc& desc, const DefineList& programDefines)
+    : Program(pDevice, desc, programDefines)
+{}
+
+void ComputeProgram::dispatchCompute(ComputeContext* pContext, ComputeVars* pVars, const uint3& threadGroupCount)
+{
+    auto pState = ComputeState::create(mpDevice);
+    pState->setProgram(ref<ComputeProgram>(this));
+    pContext->dispatch(pState.get(), pVars, threadGroupCount);
+}
+
+FALCOR_SCRIPT_BINDING(ComputeProgram)
+{
+    pybind11::class_<ComputeProgram, ref<ComputeProgram>>(m, "ComputeProgram");
+}
+} // namespace Falcor

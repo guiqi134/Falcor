@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,14 +27,7 @@
  **************************************************************************/
 #include "WhittedRayTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
-
-const RenderPass::Info WhittedRayTracer::kInfo { "WhittedRayTracer", "Simple Whitted ray tracer." };
-
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
-    return PROJECT_DIR;
-}
+#include "RenderGraph/RenderPassStandardFlags.h"
 
 namespace
 {
@@ -91,15 +84,15 @@ namespace
     };
 };
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary & lib)
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    lib.registerPass(WhittedRayTracer::kInfo, WhittedRayTracer::create);
+    registry.registerClass<RenderPass, WhittedRayTracer>();
     ScriptBindings::registerBinding(WhittedRayTracer::registerBindings);
 }
 
 void WhittedRayTracer::registerBindings(pybind11::module& m)
 {
-    pybind11::class_<WhittedRayTracer, RenderPass, WhittedRayTracer::SharedPtr> pass(m, "WhittedRayTracer");
+    pybind11::class_<WhittedRayTracer, RenderPass, ref<WhittedRayTracer>> pass(m, "WhittedRayTracer");
 
     pybind11::enum_<RayConeMode> rayConeMode(m, "RayConeMode");
     rayConeMode.value("Combo", RayConeMode::Combo);
@@ -111,13 +104,8 @@ void WhittedRayTracer::registerBindings(pybind11::module& m)
     rayConeFilterMode.value("AnisotropicWhenRefraction", RayFootprintFilterMode::AnisotropicWhenRefraction);
 }
 
-WhittedRayTracer::SharedPtr WhittedRayTracer::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new WhittedRayTracer(dict));
-}
-
-WhittedRayTracer::WhittedRayTracer(const Dictionary& dict)
-    : RenderPass(kInfo)
+WhittedRayTracer::WhittedRayTracer(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     // Parse dictionary.
     for (const auto& [key, value] : dict)
@@ -132,9 +120,8 @@ WhittedRayTracer::WhittedRayTracer(const Dictionary& dict)
     }
 
     // Create a sample generator.
-    mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
-
 }
 
 Dictionary WhittedRayTracer::getScriptingDictionary()
@@ -175,7 +162,7 @@ void WhittedRayTracer::execute(RenderContext* pRenderContext, const RenderData& 
     {
         for (auto it : kOutputChannels)
         {
-            Texture* pDst = renderData[it.name]->asTexture().get();
+            Texture* pDst = renderData.getTexture(it.name).get();
             if (pDst) pRenderContext->clearTexture(pDst);
         }
         return;
@@ -214,7 +201,7 @@ void WhittedRayTracer::execute(RenderContext* pRenderContext, const RenderData& 
     {
         if (!desc.texname.empty())
         {
-            var[desc.texname] = renderData[desc.name]->asTexture();
+            var[desc.texname] = renderData.getTexture(desc.name);
         }
     };
     for (auto channel : kInputChannels) bind(channel);
@@ -233,19 +220,19 @@ void WhittedRayTracer::renderUI(Gui::Widgets& widget)
     dirty |= widget.var("Max bounces", mMaxBounces, 0u, 10u);
     widget.tooltip("Maximum path length for indirect illumination.\n0 = direct only\n1 = one indirect bounce etc.", true);
 
-    uint32_t modeIndex = static_cast<uint32_t>(mTexLODMode);
-    if (widget.dropdown("Texture LOD mode", kTexLODModeList, modeIndex))
+    uint32_t texLODModeIndex = static_cast<uint32_t>(mTexLODMode);
+    if (widget.dropdown("Texture LOD mode", kTexLODModeList, texLODModeIndex))
     {
-        setTexLODMode(TexLODMode(modeIndex));
+        setTexLODMode(TexLODMode(texLODModeIndex));
         dirty = true;
     }
     widget.tooltip("The texture level-of-detail mode to use.");
     if (mTexLODMode == TexLODMode::RayCones)
     {
-        uint32_t modeIndex = static_cast<uint32_t>(mRayConeMode);
-        if (widget.dropdown("Ray cone mode", kRayConeModeList, modeIndex))
+        uint32_t rayConeModeIndex = static_cast<uint32_t>(mRayConeMode);
+        if (widget.dropdown("Ray cone mode", kRayConeModeList, rayConeModeIndex))
         {
-            setRayConeMode(RayConeMode(modeIndex));
+            setRayConeMode(RayConeMode(rayConeModeIndex));
             dirty = true;
         }
         widget.tooltip("The variant of ray cones to use.");
@@ -285,7 +272,7 @@ void WhittedRayTracer::renderUI(Gui::Widgets& widget)
     }
 }
 
-void WhittedRayTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void WhittedRayTracer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     // Clear data for previous scene.
     // After changing scene, the raytracing program should to be recreated.
@@ -306,7 +293,9 @@ void WhittedRayTracer::setScene(RenderContext* pRenderContext, const Scene::Shar
 
         // Create ray tracing program.
         RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderFile);
+        desc.addTypeConformances(mpScene->getTypeConformances());
         desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
         desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
         desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
@@ -319,7 +308,7 @@ void WhittedRayTracer::setScene(RenderContext* pRenderContext, const Scene::Shar
         sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("scatterClosestHit", "scatterAnyHit"));
         sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("", "shadowAnyHit"));
 
-        mTracer.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
     }
 }
 
@@ -329,11 +318,10 @@ void WhittedRayTracer::prepareVars()
 
     // Configure program.
     mTracer.pProgram->addDefines(mpSampleGenerator->getDefines());
-    mTracer.pProgram->setTypeConformances(mpScene->getTypeConformances());
 
     // Create program variables for the current program.
     // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-    mTracer.pVars = RtProgramVars::create(mTracer.pProgram, mTracer.pBindingTable);
+    mTracer.pVars = RtProgramVars::create(mpDevice, mTracer.pProgram, mTracer.pBindingTable);
 
     // Bind utility classes into shared data.
     auto var = mTracer.pVars->getRootVar();

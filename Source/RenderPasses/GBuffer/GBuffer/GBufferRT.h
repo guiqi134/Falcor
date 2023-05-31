@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -38,19 +38,21 @@ using namespace Falcor;
 class GBufferRT : public GBuffer
 {
 public:
-    using SharedPtr = std::shared_ptr<GBufferRT>;
+    FALCOR_PLUGIN_CLASS(GBufferRT, "GBufferRT", "Ray traced G-buffer generation pass.");
 
-    static const Info kInfo;
+    static ref<GBufferRT> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<GBufferRT>(pDevice, dict); }
 
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    GBufferRT(ref<Device> pDevice, const Dictionary& dict);
 
     RenderPassReflection reflect(const CompileData& compileData) override;
     void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     void renderUI(Gui::Widgets& widget) override;
     Dictionary getScriptingDictionary() override;
-    void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
 private:
+    void parseDictionary(const Dictionary& dict) override;
+
     void executeRaytrace(RenderContext* pRenderContext, const RenderData& renderData);
     void executeCompute(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -58,12 +60,9 @@ private:
     void setShaderData(const ShaderVar& var, const RenderData& renderData);
     void recreatePrograms();
 
-    GBufferRT(const Dictionary& dict);
-    void parseDictionary(const Dictionary& dict) override;
-
     // Internal state
     bool mComputeDOF = false;           ///< Flag indicating if depth-of-field is computed for the current frame.
-    SampleGenerator::SharedPtr mpSampleGenerator;
+    ref<SampleGenerator> mpSampleGenerator;
 
     // UI variables
     TexLODMode mLODMode = TexLODMode::Mip0;
@@ -73,9 +72,9 @@ private:
     // Ray tracing resources
     struct
     {
-        RtProgram::SharedPtr pProgram;
-        RtProgramVars::SharedPtr pVars;
+        ref<RtProgram> pProgram;
+        ref<RtProgramVars> pVars;
     } mRaytrace;
 
-    ComputePass::SharedPtr mpComputePass;
+    ref<ComputePass> mpComputePass;
 };

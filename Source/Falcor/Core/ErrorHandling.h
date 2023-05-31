@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,38 +26,43 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "Framework.h"
-
+#include "Macros.h"
 #include <string>
 
 namespace Falcor
 {
-    /** Enable/disable showing a message box when reporting an error.
-    */
-    FALCOR_API void setShowMessageBoxOnError(bool enable);
+/**
+ * Enable/disable showing a message box when reporting an error.
+ */
+FALCOR_API void setShowMessageBoxOnError(bool enable);
 
-    /** Return if showing a message box when reporting an error is enabled/disabled.
-    */
-    FALCOR_API bool getShowMessageBoxOnError();
+/**
+ * Return if showing a message box when reporting an error is enabled/disabled.
+ */
+FALCOR_API bool getShowMessageBoxOnError();
 
-    /** Report an error by logging it and showing a message box with the option to abort,
-        continue or enter the debugger (if one is attached).
-        If message boxes are disabled, this will terminate the application after logging the error.
-        \param msg Error message.
-    */
-    FALCOR_API void reportError(const std::string& msg);
+/**
+ * Report an error by logging it and showing a message box with the option to abort,
+ * continue or enter the debugger (if one is attached).
+ * If message boxes are disabled, this will terminate the application after logging the error.
+ * @param msg Error message.
+ */
+FALCOR_API void reportError(const std::string& msg);
 
-    /** Report an error by logging it and showing a message box with the option to abort,
-        retry or enter the debugger (if one is attached).
-        If message boxes are disabled, this will terminate the application after logging the error.
-        \param msg Error message.
-    */
-    FALCOR_API void reportErrorAndAllowRetry(const std::string& msg);
+/**
+ * Report an error by logging it and showing a message box with the option to abort,
+ * retry or enter the debugger (if one is attached).
+ * If message boxes are disabled, this will terminate the application after logging the error.
+ * @param msg Error message.
+ */
+FALCOR_API void reportErrorAndAllowRetry(const std::string& msg);
 
-    /** Report a fatal error by logging it and showing a message box with the option to abort
-        or enter the debugger (if one is attached).
-        If message boxes are disabled, this will terminate the application after logging the error.
-        \param msg Error message.
-    */
-    FALCOR_API void reportFatalError(const std::string& msg);
-}
+/**
+ * Report a fatal error by logging it and showing a message box with the option to abort
+ * or enter the debugger (if one is attached).
+ * If message boxes are disabled, this will terminate the application after logging the error.
+ * @param msg Error message.
+ * @param showStackTrace Show a stack trace after the message.
+ */
+[[noreturn]] FALCOR_API void reportFatalError(const std::string& msg, bool showStackTrace = true);
+} // namespace Falcor

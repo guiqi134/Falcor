@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,18 +27,11 @@
  **************************************************************************/
 #include "MinimalPathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
 
-const RenderPass::Info MinimalPathTracer::kInfo { "MinimalPathTracer", "Minimal path tracer." };
-
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(MinimalPathTracer::kInfo, MinimalPathTracer::create);
+    registry.registerClass<RenderPass, MinimalPathTracer>();
 }
 
 namespace
@@ -68,18 +61,13 @@ namespace
     const char kUseImportanceSampling[] = "useImportanceSampling";
 }
 
-MinimalPathTracer::SharedPtr MinimalPathTracer::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new MinimalPathTracer(dict));
-}
-
-MinimalPathTracer::MinimalPathTracer(const Dictionary& dict)
-    : RenderPass(kInfo)
+MinimalPathTracer::MinimalPathTracer(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     parseDictionary(dict);
 
     // Create a sample generator.
-    mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 }
 
@@ -130,7 +118,7 @@ void MinimalPathTracer::execute(RenderContext* pRenderContext, const RenderData&
     {
         for (auto it : kOutputChannels)
         {
-            Texture* pDst = renderData[it.name]->asTexture().get();
+            Texture* pDst = renderData.getTexture(it.name).get();
             if (pDst) pRenderContext->clearTexture(pDst);
         }
         return;
@@ -184,7 +172,7 @@ void MinimalPathTracer::execute(RenderContext* pRenderContext, const RenderData&
     {
         if (!desc.texname.empty())
         {
-            var[desc.texname] = renderData[desc.name]->asTexture();
+            var[desc.texname] = renderData.getTexture(desc.name);
         }
     };
     for (auto channel : kInputChannels) bind(channel);
@@ -221,7 +209,7 @@ void MinimalPathTracer::renderUI(Gui::Widgets& widget)
     }
 }
 
-void MinimalPathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void MinimalPathTracer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     // Clear data for previous scene.
     // After changing scene, the raytracing program should to be recreated.
@@ -242,6 +230,7 @@ void MinimalPathTracer::setScene(RenderContext* pRenderContext, const Scene::Sha
 
         // Create ray tracing program.
         RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderFile);
         desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
@@ -277,7 +266,7 @@ void MinimalPathTracer::setScene(RenderContext* pRenderContext, const Scene::Sha
             sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::SDFGrid), desc.addHitGroup("", "", "sdfGridIntersection"));
         }
 
-        mTracer.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
     }
 }
 
@@ -292,7 +281,7 @@ void MinimalPathTracer::prepareVars()
 
     // Create program variables for the current program.
     // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-    mTracer.pVars = RtProgramVars::create(mTracer.pProgram, mTracer.pBindingTable);
+    mTracer.pVars = RtProgramVars::create(mpDevice, mTracer.pProgram, mTracer.pBindingTable);
 
     // Bind utility classes into shared data.
     auto var = mTracer.pVars->getRootVar();

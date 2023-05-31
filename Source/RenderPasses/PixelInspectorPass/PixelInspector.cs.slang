@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -104,8 +104,7 @@ bool loadShadingData(const float3 viewDir, const ITextureSampler lod, inout Shad
         v.coneTexLODValue = 0.f;
 
         // Prepare shading data.
-        // Set 'useNormalMap' parameter to false as normal mapping has already been applied when generating the G-buffer.
-        sd = gScene.materials.prepareShadingData(v, materialID, viewDir, lod, false);
+        sd = gScene.materials.prepareShadingData(v, materialID, viewDir, lod);
 
         return true;
     }
@@ -129,14 +128,14 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     if (loadShadingData(viewDir, lod, sd))
     {
-        let bsdf = gScene.materials.getBSDF(sd, lod);
-        let bsdfProperties = bsdf.getProperties(sd);
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        let bsdfProperties = mi.getProperties(sd);
 
         // Store geometry data.
         data.posW = sd.posW;
-        data.normal = sd.N;
-        data.tangent = sd.T;
-        data.bitangent = sd.B;
+        data.normal = sd.frame.N;
+        data.tangent = sd.frame.T;
+        data.bitangent = sd.frame.B;
         data.faceNormal = sd.faceN;
         data.view = sd.V;
         data.texCoord = sd.uv;
@@ -148,9 +147,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
         data.opacity = sd.opacity;
         data.IoR = sd.IoR;
 
-        // Store BSDF properties.
+        // Store material instance properties.
         data.emission = bsdfProperties.emission;
         data.roughness = bsdfProperties.roughness;
+        data.guideNormal = bsdfProperties.guideNormal;
         data.diffuseReflectionAlbedo = bsdfProperties.diffuseReflectionAlbedo;
         data.diffuseTransmissionAlbedo = bsdfProperties.diffuseTransmissionAlbedo;
         data.specularReflectionAlbedo = bsdfProperties.specularReflectionAlbedo;

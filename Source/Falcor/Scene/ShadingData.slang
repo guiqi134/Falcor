@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,9 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-import Rendering.Materials.IBxDF;
 import Scene.Material.MaterialData;
+import Scene.HitInfo;
 import Utils.Geometry.GeometryHelpers;
+import Utils.Math.ShadingFrame;
 
 /** This struct holds information needed for shading a hit point.
 
@@ -39,26 +40,26 @@ import Utils.Geometry.GeometryHelpers;
     - Index of refraction of the surrounding medium.
 
     Based on a ShadingData struct, the material system can be queried
-    for a BSDF instance at the hit using `gScene.materials.getBSDF()`.
-    The BSDF has interfaces for sampling and evaluation, as well as for
+    for a material instance at the hit using `gScene.materials.getMaterialInstance()`.
+    The material instance has interfaces for sampling and evaluation, as well as for
     querying its properties at the hit.
 */
 struct ShadingData
 {
     // Geometry data
     float3  posW;                   ///< Shading hit position in world space.
-    float3  V;                      ///< Direction to the eye at shading hit.
-    float3  N;                      ///< Shading normal at shading hit.
-    float3  T;                      ///< Shading tangent at shading hit.
-    float3  B;                      ///< Shading bitangent at shading hit.
+    float3  V;                      ///< View direction, -incident direction (-ray.dir)
     float2  uv;                     ///< Texture mapping coordinates.
+
+    ShadingFrame frame;             ///< Smooth interpolated shading frame in world space at the shading point. The normal is *not* automatically flipped for backfacing hits.
     float3  faceN;                  ///< Face normal in world space, always on the front-facing side.
-    bool    frontFacing;            ///< True if primitive seen from the front-facing side.
+    float4  tangentW;               ///< Geometric tangent (xyz) and sign (w) in world space. This is used for orthogonalization. Not normalized, but it is guaranteed to be nonzero and sign (w) is +-1.0.
+    bool    frontFacing;            ///< True if primitive seen from the front-facing side, i.e., dot(V, faceN) >= 0.0.
     float   curveRadius;            ///< Curve cross-sectional radius. Valid only for geometry generated from curves.
 
     // Material data
     MaterialHeader mtl;             ///< Material header data.
-    uint    materialID;             ///< Material ID at shading location.    
+    uint    materialID;             ///< Material ID at shading location.
     float   opacity;                ///< Opacity value in [0,1]. This is used for alpha testing.
     float   IoR;                    ///< Index of refraction for the medium on the front-facing side (i.e. "outside" the material at the hit).
 
@@ -76,21 +77,11 @@ struct ShadingData
         return computeRayOrigin(posW, (frontFacing == viewside) ? faceN : -faceN);
     }
 
-    /** Transform vector from the local surface frame to world space.
-        \param[in] v Vector in local space.
-        \return Vector in world space.
+    /** Returns the oriented face normal.
+        \return Face normal flipped to the same side as the view vector.
     */
-    float3 fromLocal(float3 v)
+    float3 getOrientedFaceNormal()
     {
-        return T * v.x + B * v.y + N * v.z;
-    }
-
-    /** Transform vector from world space to the local surface frame.
-        \param[in] v Vector in world space.
-        \return Vector in local space.
-    */
-    float3 toLocal(float3 v)
-    {
-        return float3(dot(v, T), dot(v, B), dot(v, N));
+        return frontFacing ? faceN : -faceN;
     }
 };

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,12 +26,14 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "Utils/Math/AABB.h"
 #include "EmissiveLightSampler.h"
 #include "LightBVH.h"
 #include "LightBVHBuilder.h"
 #include "LightBVHSamplerSharedDefinitions.slang"
+#include "Core/Macros.h"
+#include "Utils/Math/AABB.h"
 #include "Scene/Lights/LightCollection.h"
+#include <memory>
 
 namespace Falcor
 {
@@ -49,9 +51,6 @@ namespace Falcor
     class FALCOR_API LightBVHSampler : public EmissiveLightSampler
     {
     public:
-        using SharedPtr = std::shared_ptr<LightBVHSampler>;
-        using SharedConstPtr = std::shared_ptr<const LightBVHSampler>;
-
         /** LightBVHSampler configuration.
             Note if you change options, please update FALCOR_SCRIPT_BINDING in LightBVHSampler.cpp
         */
@@ -67,16 +66,18 @@ namespace Falcor
             bool        useUniformTriangleSampling = true;  ///< Use uniform sampling to select a triangle within the sampled leaf node.
 
             SolidAngleBoundMethod solidAngleBoundMethod = SolidAngleBoundMethod::Sphere; ///< Method to use to bound the solid angle subtended by a cluster.
-        };
 
-        virtual ~LightBVHSampler() = default;
+            // Note: Empty constructor needed for clang due to the use of the nested struct constructor in the parent constructor.
+            Options() {}
+        };
 
         /** Creates a LightBVHSampler for a given scene.
             \param[in] pRenderContext The render context.
             \param[in] pScene The scene.
             \param[in] options The options to override the default behavior.
         */
-        static SharedPtr create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options = Options());
+        LightBVHSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options = Options());
+        virtual ~LightBVHSampler() = default;
 
         /** Updates the sampler to the current frame.
             \param[in] pRenderContext The render context.
@@ -103,20 +104,15 @@ namespace Falcor
         */
         const Options& getOptions() const { return mOptions; }
 
-        /** Returns the light BVH acceleration structure.
-            \return Light BVH object or nullptr if BVH is not valid.
-        */
-        LightBVH::SharedConstPtr getBVH() const;
-
     protected:
-        LightBVHSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options);
-
-        // Configuration
-        Options                         mOptions;               ///< Current configuration options.
+        /// Configuration options.
+        Options mOptions;
 
         // Internal state
-        LightBVHBuilder::SharedPtr      mpBVHBuilder;           ///< The light BVH builder.
-        LightBVH::SharedPtr             mpBVH;                  ///< The light BVH.
-        bool                            mNeedsRebuild = true;   ///< Trigger rebuild on the next call to update(). We should always build on the first call, so the initial value is true.
+        std::unique_ptr<LightBVHBuilder> mpBVHBuilder;
+        std::unique_ptr<LightBVH> mpBVH;
+
+        /// Trigger rebuild on the next call to update(). We should always build on the first call, so the initial value is true.
+        bool mNeedsRebuild = true;
     };
 }

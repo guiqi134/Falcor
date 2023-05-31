@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,9 +26,10 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 __exported import Rendering.Materials.IMaterial;
-__exported import Rendering.Materials.StandardBSDF;
+__exported import Rendering.Materials.StandardMaterialInstance;
 import Scene.Material.BasicMaterialData;
 import Scene.Material.ShadingUtils;
+import Scene.Scene;
 
 /** Implementation of Falcor's standard surface material.
 
@@ -39,15 +40,14 @@ import Scene.Material.ShadingUtils;
     Double-sided materials are supported by mirroring the BSDF around the
     shading normal. This is possible because the material is not layered.
 */
-struct StandardMaterial : IMaterial
+struct StandardMaterial : MaterialBase, IMaterial
 {
-    MaterialHeader header;
     BasicMaterialData data;
 
-    // Specify that the associated `BSDF` type is `StandardBSDF`.
-    typedef StandardBSDF BSDF;
+    // Specify that the associated `BSDF` type is `StandardMaterialInstance`.
+    typedef StandardMaterialInstance MaterialInstance;
 
-    StandardBSDF setupBSDF(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod)
+    StandardMaterialInstance setupMaterialInstance(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
     {
         SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
 
@@ -92,25 +92,36 @@ struct StandardMaterial : IMaterial
             d.metallic = getMetallic(d.diffuse, d.specular);
         }
 #endif
-        StandardBSDF bsdf = {};
-        bsdf.data = d;
+
+        // DEMO21
+        if (Scene::kDiffuseAlbedoMultiplier != 1.f)
+        {
+            d.diffuse = saturate(d.diffuse * Scene::kDiffuseAlbedoMultiplier);
+        }
+
+        // Compute final shading frame.
+        ShadingFrame sf = sd.frame;
+        if (isNormalMappingEnabled(hints))
+        {
+            float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
+            sf = computeShadingFrameFromNormalMap(sd, data.getNormalMapType(), encodedNormal);
+        }
+        flipShadingNormal(sd, sf);
+        if (isAdjustShadingNormalEnabled(hints))
+        {
+            adjustShadingNormal(sd, sf);
+        }
 
         // Sample the emissive texture.
         // The standard material supports uniform emission over the hemisphere.
         // Note that the material is only emissive on the front-facing side.
+        float3 emission = {};
         if (sd.frontFacing)
         {
-            bsdf.emission = ms.sampleTexture(data.texEmissive, s, sd.uv, float4(data.emissive, 1), lod).rgb * data.emissiveFactor;
+            emission = ms.sampleTexture(data.texEmissive, s, sd.uv, float4(data.emissive, 1), lod).rgb * data.emissiveFactor;
         }
 
-        return bsdf;
-    }
-
-    void modifyTangentSpace(const MaterialSystem ms, const float4 tangentW, const ITextureSampler lod, inout ShadingData sd)
-    {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
-        applyNormalMap(sd, data.getNormalMapType(), encodedNormal, tangentW);
+        return StandardMaterialInstance(sf, d, emission);
     }
 
     float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod)

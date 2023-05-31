@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,12 +25,44 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
+#include "RtAccelerationStructurePostBuildInfoPool.h"
+#include "RtAccelerationStructure.h"
+#include "Device.h"
+#include "CopyContext.h"
+#include "GFXAPI.h"
 
 namespace Falcor
 {
-    RtAccelerationStructurePostBuildInfoPool::SharedPtr RtAccelerationStructurePostBuildInfoPool::create(const Desc& desc)
-    {
-        return SharedPtr(new RtAccelerationStructurePostBuildInfoPool(desc));
-    }
+ref<RtAccelerationStructurePostBuildInfoPool> RtAccelerationStructurePostBuildInfoPool::create(Device* pDevice, const Desc& desc)
+{
+    return ref<RtAccelerationStructurePostBuildInfoPool>(new RtAccelerationStructurePostBuildInfoPool(pDevice, desc));
 }
+
+RtAccelerationStructurePostBuildInfoPool::RtAccelerationStructurePostBuildInfoPool(Device* pDevice, const Desc& desc) : mDesc(desc)
+{
+    gfx::IQueryPool::Desc queryPoolDesc = {};
+    queryPoolDesc.count = desc.elementCount;
+    queryPoolDesc.type = getGFXAccelerationStructurePostBuildQueryType(desc.queryType);
+    FALCOR_GFX_CALL(pDevice->getGfxDevice()->createQueryPool(queryPoolDesc, mpGFXQueryPool.writeRef()));
+}
+
+RtAccelerationStructurePostBuildInfoPool::~RtAccelerationStructurePostBuildInfoPool() {}
+
+uint64_t RtAccelerationStructurePostBuildInfoPool::getElement(CopyContext* pContext, uint32_t index)
+{
+    if (mNeedFlush)
+    {
+        pContext->flush(true);
+        mNeedFlush = false;
+    }
+    uint64_t result = 0;
+    FALCOR_GFX_CALL(mpGFXQueryPool->getResult(index, 1, &result));
+    return result;
+}
+
+void RtAccelerationStructurePostBuildInfoPool::reset(CopyContext* pContext)
+{
+    FALCOR_GFX_CALL(mpGFXQueryPool->reset());
+    mNeedFlush = true;
+}
+} // namespace Falcor

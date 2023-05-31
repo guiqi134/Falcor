@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,6 @@
  **************************************************************************/
 #include "SideBySidePass.h"
 
-const RenderPass::Info SideBySidePass::kInfo { "SideBySidePass", "Allows the user to compare two inputs side-by-side." };
-
 namespace
 {
     const std::string kImageLeftBound = "imageLeftBound";
@@ -37,35 +35,30 @@ namespace
     const std::string kSplitShader = "RenderPasses/DebugPasses/SideBySidePass/SideBySide.ps.slang";
 }
 
-SideBySidePass::SideBySidePass()
-    : ComparisonPass(kInfo)
+SideBySidePass::SideBySidePass(ref<Device> pDevice, const Dictionary& dict)
+    : ComparisonPass(pDevice)
 {
     createProgram();
-}
 
-SideBySidePass::SharedPtr SideBySidePass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new SideBySidePass());
     for (const auto& [key, value] : dict)
     {
-        if (key == kImageLeftBound) pPass->mImageLeftBound = value;
-        else if (!pPass->parseKeyValuePair(key, value))
+        if (key == kImageLeftBound) mImageLeftBound = value;
+        else if (!parseKeyValuePair(key, value))
         {
             logWarning("Unknown field '{}' in a SideBySidePass dictionary.", key);
         }
     }
-    return pPass;
 }
 
 void SideBySidePass::createProgram()
 {
     // Create our shader that splits the screen.
-    mpSplitShader = FullScreenPass::create(kSplitShader);
+    mpSplitShader = FullScreenPass::create(mpDevice, kSplitShader);
 }
 
 void SideBySidePass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    mpSplitShader["GlobalCB"]["gLeftBound"] = mImageLeftBound;
+    mpSplitShader->getRootVar()["GlobalCB"]["gLeftBound"] = mImageLeftBound;
     ComparisonPass::execute(pRenderContext, renderData);
 }
 

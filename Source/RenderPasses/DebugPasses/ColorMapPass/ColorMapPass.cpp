@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,8 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ColorMapPass.h"
-
-const RenderPass::Info ColorMapPass::kInfo { "ColorMapPass", "Pass that applies a color map to the input." };
 
 namespace
 {
@@ -64,8 +62,8 @@ void ColorMapPass::registerScriptBindings(pybind11::module& m)
     colorMap.value("Inferno", ColorMap::Inferno);
 }
 
-ColorMapPass::ColorMapPass(const Dictionary& dict)
-    : RenderPass(kInfo)
+ColorMapPass::ColorMapPass(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     for (const auto& [key, value] : dict)
     {
@@ -77,13 +75,7 @@ ColorMapPass::ColorMapPass(const Dictionary& dict)
         else logWarning("Unknown field '{}' in a ColorMapPass dictionary.", key);
     }
 
-    mpFbo = Fbo::create();
-}
-
-ColorMapPass::SharedPtr ColorMapPass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new ColorMapPass(dict));
-    return pPass;
+    mpFbo = Fbo::create(mpDevice);
 }
 
 Dictionary ColorMapPass::getScriptingDictionary()
@@ -107,14 +99,14 @@ RenderPassReflection ColorMapPass::reflect(const CompileData& compileData)
 
 void ColorMapPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& inputTexture = renderData[kInput]->asTexture();
-    const auto& outputTexture = renderData[kOutput]->asTexture();
+    const auto& inputTexture = renderData.getTexture(kInput);
+    const auto& outputTexture = renderData.getTexture(kOutput);
 
     FormatType inputType = inputTexture ? getFormatType(inputTexture->getFormat()) : FormatType::Float;
 
     if (mAutoRange && inputTexture)
     {
-        if (!mpAutoRanging) mpAutoRanging = std::make_unique<AutoRanging>();
+        if (!mpAutoRanging) mpAutoRanging = std::make_unique<AutoRanging>(mpDevice);
 
         if (auto minMax = mpAutoRanging->getMinMax(pRenderContext, inputTexture, mChannel))
         {
@@ -126,8 +118,8 @@ void ColorMapPass::execute(RenderContext* pRenderContext, const RenderData& rend
 
             // Smoothly shrink the auto range when the the range of the input shrinks.
             double alpha = 0.01;
-            mAutoMinValue = glm::lerp(mAutoMinValue, minValue, alpha);
-            mAutoMaxValue = glm::lerp(mAutoMaxValue, maxValue, alpha);
+            mAutoMinValue = math::lerp(mAutoMinValue, minValue, alpha);
+            mAutoMaxValue = math::lerp(mAutoMaxValue, maxValue, alpha);
 
             mMinValue = (float)mAutoMinValue;
             mMaxValue = (float)mAutoMaxValue;
@@ -162,7 +154,7 @@ void ColorMapPass::execute(RenderContext* pRenderContext, const RenderData& rend
 
     if (!mpColorMapPass || mRecompile)
     {
-        mpColorMapPass = FullScreenPass::create(kShaderFile, defines);
+        mpColorMapPass = FullScreenPass::create(mpDevice, kShaderFile, defines);
         mRecompile = false;
     }
 
@@ -170,8 +162,9 @@ void ColorMapPass::execute(RenderContext* pRenderContext, const RenderData& rend
     params.minValue = mMinValue;
     params.maxValue = mMaxValue;
 
-    mpColorMapPass["gTexture"] = inputTexture;
-    mpColorMapPass["StaticCB"]["gParams"].setBlob(params);
+    auto var = mpColorMapPass->getRootVar();
+    var["gTexture"] = inputTexture;
+    var["StaticCB"]["gParams"].setBlob(params);
     mpFbo->attachColorTarget(outputTexture, 0);
     mpColorMapPass->getState()->setFbo(mpFbo);
     mpColorMapPass->execute(pRenderContext, mpFbo);
@@ -186,14 +179,14 @@ void ColorMapPass::renderUI(Gui::Widgets& widget)
     widget.var("Max Value", mMaxValue);
 }
 
-ColorMapPass::AutoRanging::AutoRanging()
+ColorMapPass::AutoRanging::AutoRanging(ref<Device> pDevice)
 {
-    mpParallelReduction = ComputeParallelReduction::create();
-    mpReductionResult = Buffer::create(32, ResourceBindFlags::None, Buffer::CpuAccess::Read);
-    mpFence = GpuFence::create();
+    mpParallelReduction = std::make_unique<ParallelReduction>(pDevice);
+    mpReductionResult = Buffer::create(pDevice, 32, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+    mpFence = GpuFence::create(pDevice);
 }
 
-std::optional<std::pair<double, double>> ColorMapPass::AutoRanging::getMinMax(RenderContext* pRenderContext, const Texture::SharedPtr& texture, uint32_t channel)
+std::optional<std::pair<double, double>> ColorMapPass::AutoRanging::getMinMax(RenderContext* pRenderContext, const ref<Texture>& texture, uint32_t channel)
 {
     FALCOR_ASSERT(pRenderContext);
     FALCOR_ASSERT(texture);
@@ -230,13 +223,13 @@ std::optional<std::pair<double, double>> ColorMapPass::AutoRanging::getMinMax(Re
     switch (formatType)
     {
     case FormatType::Uint:
-        mpParallelReduction->execute<uint4>(pRenderContext, texture, ComputeParallelReduction::Type::MinMax, nullptr, mpReductionResult);
+        mpParallelReduction->execute<uint4>(pRenderContext, texture, ParallelReduction::Type::MinMax, nullptr, mpReductionResult);
         break;
     case FormatType::Sint:
-        mpParallelReduction->execute<int4>(pRenderContext, texture, ComputeParallelReduction::Type::MinMax, nullptr, mpReductionResult);
+        mpParallelReduction->execute<int4>(pRenderContext, texture, ParallelReduction::Type::MinMax, nullptr, mpReductionResult);
         break;
     default:
-        mpParallelReduction->execute<float4>(pRenderContext, texture, ComputeParallelReduction::Type::MinMax, nullptr, mpReductionResult);
+        mpParallelReduction->execute<float4>(pRenderContext, texture, ParallelReduction::Type::MinMax, nullptr, mpReductionResult);
         break;
     }
 

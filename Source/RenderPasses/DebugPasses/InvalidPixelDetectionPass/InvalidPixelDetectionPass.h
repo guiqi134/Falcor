@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,19 +27,19 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
+#include "Core/Pass/FullScreenPass.h"
 
 using namespace Falcor;
 
 class InvalidPixelDetectionPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<InvalidPixelDetectionPass>;
+    FALCOR_PLUGIN_CLASS(InvalidPixelDetectionPass, "InvalidPixelDetectionPass", "Pass that marks all NaN pixels red and Inf pixels green in an image.");
 
-    static const Info kInfo;
+    static ref<InvalidPixelDetectionPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<InvalidPixelDetectionPass>(pDevice, dict); }
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    InvalidPixelDetectionPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
@@ -47,10 +47,8 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
 
 private:
-    InvalidPixelDetectionPass();
-
-    FullScreenPass::SharedPtr mpInvalidPixelDetectPass;
-    Fbo::SharedPtr mpFbo;
+    ref<FullScreenPass> mpInvalidPixelDetectPass;
+    ref<Fbo> mpFbo;
     ResourceFormat mFormat = ResourceFormat::Unknown;
     bool mReady = false;
 };

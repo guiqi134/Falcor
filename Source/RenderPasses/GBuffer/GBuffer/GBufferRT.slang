@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@ __exported import Utils.Timing.GpuTimer;
 __exported import Utils.Math.Ray;
 import Utils.Math.MathHelpers;
 import Utils.Sampling.SampleGenerator;
+import Utils.Debug.PixelDebug;
 import Rendering.Materials.TexLODTypes;
 import Rendering.Materials.TexLODHelpers;
 import GBufferHelpers;
@@ -50,12 +51,14 @@ RWTexture2D<float>  gDepth;
 RWTexture2D<float2> gLinearZ;
 RWTexture2D<float4> gMotionVectorW;
 RWTexture2D<float4> gNormalWRoughnessMaterialID;
+RWTexture2D<float4> gGuideNormalW;
 RWTexture2D<float4> gDiffOpacity;
 RWTexture2D<float4> gSpecRough;
 RWTexture2D<float4> gEmissive;
 RWTexture2D<float4> gViewW;
 RWTexture2D<uint>   gTime;
 RWTexture2D<float>  gDisocclusion;
+RWTexture2D<float>  gMask;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -157,6 +160,11 @@ struct GBufferRT
         }
     }
 
+    bool evalModifyNormal(const HitType hitType)
+    {
+        return true;
+    }
+
     void writeHit(uint2 pixel, float3 rayOrigin, float3 rayDir, const HitInfo hit, float hitT)
     {
         uint materialID = 0;
@@ -227,29 +235,33 @@ struct GBufferRT
         // Prepare shading data.
         ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
+        bool modifyNormal = evalModifyNormal(hit.getType());
+        uint hints = !modifyNormal ? (uint)MaterialInstanceHints::DisableNormalMapping : 0;
         if (kAdjustShadingNormals && (hit.getType() == HitType::Triangle || hit.getType() == HitType::DisplacedTriangle))
         {
-            adjustShadingNormal(sd, v);
+            hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
         }
 
-        if (hit.getType() == HitType::Triangle || hit.getType() == HitType::DisplacedTriangle || hit.getType() == HitType::Curve || hit.getType() == HitType::SDFGrid)
+        if (hit.getType() != HitType::None && hit.getType() != HitType::Volume)
         {
             // Compute motion vector in screen and world space.
             float2 pixelPos = pixel + float2(0.5f, 0.5f);
-            float4 prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
+            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
+
             motionVector = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
             motionVectorW = float4(prevPosW - sd.posW, 0.f);
 
             // Compute disocclusion.
             // Do the occlusion masking in linearZ space
-            float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
             disocclusion = prevPosH.w - curPosH.w;
         }
 
-        // Create BSDF instance.
-        let bsdf = gScene.materials.getBSDF(sd, lod);
+        // Create material instance and query its properties.
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
 
-        const GBufferData gbuf = prepareGBufferData(sd, bsdf);
+        const GBufferData gbuf = prepareGBufferData(sd, v, mi, bsdfProperties);
 
         // GBuffer channels
         if (is_valid(gPosW))                gPosW[pixel]                = gbuf.posW;
@@ -263,21 +275,23 @@ struct GBufferRT
 
         // GBufferRT channels
         if (is_valid(gMotionVectorW))       gMotionVectorW[pixel]       = motionVectorW;
+        if (is_valid(gGuideNormalW))        gGuideNormalW[pixel]        = gbuf.guideNormalW;
         if (is_valid(gDiffOpacity))         gDiffOpacity[pixel]         = gbuf.diffuseOpacity;
         if (is_valid(gSpecRough))           gSpecRough[pixel]           = gbuf.specRough;
         if (is_valid(gEmissive))            gEmissive[pixel]            = gbuf.emissive;
         if (is_valid(gDisocclusion))        gDisocclusion[pixel]        = disocclusion;
+        if (is_valid(gMask))                gMask[pixel]                = 1.0f;
 
         if (is_valid(gLinearZ))
         {
-            float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
             float curLinearZ = curPosH.w;
 
             // TODO: Improve computation of derivatives:
             float3 ddxPosW = computeDdxPosW(sd.posW, sd.faceN, invFrameDim);
             float3 ddyPosW = computeDdyPosW(sd.posW, sd.faceN, invFrameDim);
-            float4 curPosH_dx = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
-            float4 curPosH_dy = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float4 curPosH_dx = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW + ddxPosW, 1.f));
+            float4 curPosH_dy = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW + ddxPosW, 1.f));
             float ddxLinearZ = abs(curPosH_dx.w - curLinearZ);
             float ddyLinearZ = abs(curPosH_dy.w - curLinearZ);
             float dLinearZ = max(ddxLinearZ, ddyLinearZ);
@@ -287,15 +301,18 @@ struct GBufferRT
         // Output a depth buffer similar to raster (NDC).
         if (is_valid(gDepth))
         {
-            float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
             gDepth[pixel] = curPosH.z / curPosH.w;
         }
 
-        // Output a buffer that packs normal and roughness estimation.
+        // Output a buffer that packs guide normal and roughness estimation.
         if (is_valid(gNormalWRoughnessMaterialID))
         {
-            float2 octNormal = ndir_to_oct_unorm(sd.N);
-            float roughness = bsdf.getProperties(sd).roughness;
+            float3 normal = bsdfProperties.guideNormal;
+            if (sd.mtl.getMaterialType() == MaterialType::Hair) normal = sd.frame.T;
+
+            float2 octNormal = ndir_to_oct_unorm(normal);
+            float roughness = bsdfProperties.roughness;
             float materialID = 0.f;
             gNormalWRoughnessMaterialID[pixel] = float4(octNormal, roughness, materialID);
         }
@@ -313,7 +330,7 @@ struct GBufferRT
         float3 worldPos = rayOrigin + normalize(rayDir) * kEnvMapDepth; // Hit on env map
 
         float2 pixelPos = pixel + float2(0.5f, 0.5f);
-        float4 prevPosH = mul(float4(worldPos, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
+        float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(worldPos, 1.f));
         return calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
     }
 
@@ -332,6 +349,7 @@ struct GBufferRT
         if (is_valid(gTexC))                        gTexC[pixel]                        = {};
         if (is_valid(gTexGrads))                    gTexGrads[pixel]                    = {};
         if (is_valid(gMotionVector))                gMotionVector[pixel]                = mvec;
+        if (is_valid(gMaterialData))                gMaterialData[pixel]                = {};
 
         // GBufferRT channels
         if (is_valid(gVBuffer))                     gVBuffer[pixel]                     = {};
@@ -339,10 +357,12 @@ struct GBufferRT
         if (is_valid(gLinearZ))                     gLinearZ[pixel]                     = float2(kEnvMapDepth, 0.f);
         if (is_valid(gMotionVectorW))               gMotionVectorW[pixel]               = {};
         if (is_valid(gNormalWRoughnessMaterialID))  gNormalWRoughnessMaterialID[pixel]  = float4(octNormal, roughness, materialID);
+        if (is_valid(gGuideNormalW))                gGuideNormalW[pixel]                = {};
         if (is_valid(gDiffOpacity))                 gDiffOpacity[pixel]                 = {};
         if (is_valid(gSpecRough))                   gSpecRough[pixel]                   = {};
         if (is_valid(gEmissive))                    gEmissive[pixel]                    = {};
         if (is_valid(gDisocclusion))                gDisocclusion[pixel]                = 0.f;
+        if (is_valid(gMask))                        gMask[pixel]                        = 0.0f;
     }
 
     void writeAux(uint2 pixel, const Ray ray)

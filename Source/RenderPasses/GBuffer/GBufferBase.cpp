@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,30 +30,28 @@
 #include "GBuffer/GBufferRT.h"
 #include "VBuffer/VBufferRaster.h"
 #include "VBuffer/VBufferRT.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
+#include "Utils/SampleGenerators/DxSamplePattern.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(GBufferRaster::kInfo, GBufferRaster::create);
-    lib.registerPass(GBufferRT::kInfo, GBufferRT::create);
-    lib.registerPass(VBufferRaster::kInfo, VBufferRaster::create);
-    lib.registerPass(VBufferRT::kInfo, VBufferRT::create);
-
-    Falcor::ScriptBindings::registerBinding(GBufferBase::registerBindings);
-}
-
-void GBufferBase::registerBindings(pybind11::module& m)
+static void registerBindings(pybind11::module& m)
 {
     pybind11::enum_<GBufferBase::SamplePattern> samplePattern(m, "SamplePattern");
     samplePattern.value("Center", GBufferBase::SamplePattern::Center);
     samplePattern.value("DirectX", GBufferBase::SamplePattern::DirectX);
     samplePattern.value("Halton", GBufferBase::SamplePattern::Halton);
     samplePattern.value("Stratified", GBufferBase::SamplePattern::Stratified);
+}
+
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
+{
+    registry.registerClass<RenderPass, GBufferRaster>();
+    registry.registerClass<RenderPass, GBufferRT>();
+    registry.registerClass<RenderPass, VBufferRaster>();
+    registry.registerClass<RenderPass, VBufferRT>();
+
+    Falcor::ScriptBindings::registerBinding(registerBindings);
 }
 
 namespace
@@ -184,7 +182,7 @@ void GBufferBase::execute(RenderContext* pRenderContext, const RenderData& rende
     dict[Falcor::kRenderPassGBufferAdjustShadingNormals] = mAdjustShadingNormals;
 }
 
-void GBufferBase::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void GBufferBase::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
     mFrameCount = 0;
@@ -202,7 +200,7 @@ void GBufferBase::setScene(RenderContext* pRenderContext, const Scene::SharedPtr
     }
 }
 
-static CPUSampleGenerator::SharedPtr createSamplePattern(GBufferBase::SamplePattern type, uint32_t sampleCount)
+static ref<CPUSampleGenerator> createSamplePattern(GBufferBase::SamplePattern type, uint32_t sampleCount)
 {
     switch (type)
     {
@@ -236,11 +234,11 @@ void GBufferBase::updateSamplePattern()
     if (mpSampleGenerator) mSampleCount = mpSampleGenerator->getSampleCount();
 }
 
-Texture::SharedPtr GBufferBase::getOutput(const RenderData& renderData, const std::string& name) const
+ref<Texture> GBufferBase::getOutput(const RenderData& renderData, const std::string& name) const
 {
     // This helper fetches the render pass output with the given name and verifies it has the correct size.
     FALCOR_ASSERT(mFrameDim.x > 0 && mFrameDim.y > 0);
-    auto pTex = renderData[name]->asTexture();
+    auto pTex = renderData.getTexture(name);
     if (pTex && (pTex->getWidth() != mFrameDim.x || pTex->getHeight() != mFrameDim.y))
     {
         throw RuntimeError("GBufferBase: Pass output '{}' has mismatching size. All outputs must be of the same size.", name);

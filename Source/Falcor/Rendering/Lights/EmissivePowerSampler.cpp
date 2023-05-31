@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,23 +25,15 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "EmissivePowerSampler.h"
-#include <glm/gtc/constants.hpp>
-#include <glm/gtx/io.hpp>
+#include "Utils/Timing/Profiler.h"
 #include <algorithm>
-#include <numeric>
 
 namespace Falcor
 {
-    EmissivePowerSampler::SharedPtr EmissivePowerSampler::create(RenderContext* pRenderContext, Scene::SharedPtr pScene)
-    {
-        return SharedPtr(new EmissivePowerSampler(pRenderContext, pScene));
-    }
-
     bool EmissivePowerSampler::update(RenderContext* pRenderContext)
     {
-        FALCOR_PROFILE("EmissivePowerSampler::update");
+        FALCOR_PROFILE(pRenderContext, "EmissivePowerSampler::update");
 
         bool samplerChanged = false;;
 
@@ -56,7 +48,7 @@ namespace Falcor
         {
             // Get global list of emissive triangles.
             FALCOR_ASSERT(mpLightCollection);
-            const auto& triangles = mpLightCollection->getMeshLightTriangles();
+            const auto& triangles = mpLightCollection->getMeshLightTriangles(pRenderContext);
 
             const size_t numTris = triangles.size();
             std::vector<float> weights(numTris);
@@ -79,7 +71,7 @@ namespace Falcor
         var["_emissivePower"]["triangleAliasTable"] = mTriangleTable.fullTable;
     }
 
-    EmissivePowerSampler::EmissivePowerSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene)
+    EmissivePowerSampler::EmissivePowerSampler(RenderContext* pRenderContext, ref<Scene> pScene)
         : EmissiveLightSampler(EmissiveLightSamplerType::Power, pScene)
     {
         // Make sure the light collection is created.
@@ -170,7 +162,7 @@ namespace Falcor
         {
             float(sum),
             N,
-            Buffer::createTyped<uint2>(N),
+            Buffer::createTyped<uint2>(mpScene->getDevice(), N),
         };
 
         result.fullTable->setBlob(&fullTable[0], 0, N * sizeof(uint2));

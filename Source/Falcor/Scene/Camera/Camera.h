@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,31 +27,31 @@
  **************************************************************************/
 #pragma once
 #include "CameraData.slang"
-#include "Scene/Animation/Animatable.h"
-#include "Utils/SampleGenerators/CPUSampleGenerator.h"
-#include "Core/API/ParameterBlock.h"
+#include "Core/Macros.h"
+#include "Utils/Math/Vector.h"
+#include "Utils/Math/Matrix.h"
 #include "Utils/Math/AABB.h"
+#include "Utils/Math/Ray.h"
+#include "Utils/SampleGenerators/CPUSampleGenerator.h"
+#include "Utils/UI/Gui.h"
+#include "Scene/Animation/Animatable.h"
+#include <string>
 
 namespace Falcor
 {
-    struct BoundingBox;
-    class ParameterBlock;
-    class Gui;
+    struct ShaderVar;
 
     /** Camera class.
     */
     class FALCOR_API Camera : public Animatable
     {
     public:
-        using SharedPtr = std::shared_ptr<Camera>;
-        using SharedConstPtr = std::shared_ptr<const Camera>;
-
         // Default dimensions of full frame cameras and 35mm film
-        static const float kDefaultFrameHeight;
+        static constexpr float kDefaultFrameHeight = 24.f;
 
-        /** Create a new camera object.
-        */
-        static SharedPtr create(const std::string& name = "");
+        static ref<Camera> create(const std::string& name = "") { return make_ref<Camera>(name); }
+
+        Camera(const std::string& name);
         ~Camera() = default;
 
         /** Name the camera.
@@ -174,11 +174,11 @@ namespace Falcor
             \param[in] pGenerator Sample generator. This may be nullptr.
             \param[in] scale Jitter scale. This should normally be 1.0 / frameDim.
         */
-        void setPatternGenerator(const CPUSampleGenerator::SharedPtr& pGenerator, const float2& scale);
+        void setPatternGenerator(const ref<CPUSampleGenerator>& pGenerator, const float2& scale);
 
         /** Get the bound pattern generator
         */
-        const CPUSampleGenerator::SharedPtr& getPatternGenerator() const { return mJitterPattern.pGenerator; }
+        const ref<CPUSampleGenerator>& getPatternGenerator() const { return mJitterPattern.pGenerator; }
 
         /** Set the camera's jitter.
             \param[in] jitterX Subpixel offset along X axis divided by screen width (positive value shifts the image right).
@@ -194,37 +194,46 @@ namespace Falcor
         */
         float computeScreenSpacePixelSpreadAngle(const uint32_t winHeightPixels) const;
 
+        /** Computes a camera ray for a given pixel assuming a pinhole camera model.
+            The camera jitter is taken into account to compute the sample position on the image plane.
+            \param[in] pixel Pixel coordinates with origin in top-left.
+            \param[in] frameDim Image plane dimensions in pixels.
+            \param[in] applyJitter True if jitter should be applied else false.
+            \return Returns the camera ray.
+        */
+        Ray computeRayPinhole(uint2 pixel, uint2 frameDim, bool applyJitter) const;
+
         /** Get the view matrix.
         */
-        const glm::mat4& getViewMatrix() const;
+        const float4x4 getViewMatrix() const;
 
         /** Get the previous frame view matrix, which possibly includes the previous frame's camera jitter.
         */
-        const glm::mat4& getPrevViewMatrix() const;
+        const float4x4 getPrevViewMatrix() const;
 
         /** Get the projection matrix.
         */
-        const glm::mat4& getProjMatrix() const;
+        const float4x4 getProjMatrix() const;
 
         /** Get the view-projection matrix.
         */
-        const glm::mat4& getViewProjMatrix() const;
+        const float4x4 getViewProjMatrix() const;
 
         /** Get the view-projection matrix, without jittering.
         */
-        const glm::mat4& getViewProjMatrixNoJitter() const;
+        const float4x4 getViewProjMatrixNoJitter() const;
 
         /** Get the inverse of the view-projection matrix.
         */
-        const glm::mat4& getInvViewProjMatrix() const;
+        const float4x4 getInvViewProjMatrix() const;
 
         /** Set the persistent projection matrix and sets camera to use the persistent matrix instead of calculating the matrix from its other settings.
         */
-        void setProjectionMatrix(const glm::mat4& proj);
+        void setProjectionMatrix(const float4x4& proj);
 
         /** Set the persistent view matrix and sets camera to use the persistent matrix instead of calculating the matrix from its other settings.
         */
-        void setViewMatrix(const glm::mat4& view);
+        void setViewMatrix(const float4x4& view);
 
         /** Enable or disable usage of persistent projection matrix
             \param[in] persistent whether to set it persistent
@@ -245,7 +254,7 @@ namespace Falcor
         */
         const CameraData& getData() const { calculateCameraParameters(); return mData; }
 
-        void updateFromAnimation(const glm::mat4& transform) override;
+        void updateFromAnimation(const float4x4& transform) override;
 
         /** Render the UI
         */
@@ -275,15 +284,15 @@ namespace Falcor
 
         std::string getScript(const std::string& cameraVar);
 
+        void dumpProperties();
     private:
-        Camera(const std::string& name);
         Changes mChanges = Changes::None;
 
         mutable bool mDirty = true;
         mutable bool mEnablePersistentProjMat = false;
         mutable bool mEnablePersistentViewMat = false;
-        mutable glm::mat4 mPersistentProjMat;
-        mutable glm::mat4 mPersistentViewMat;
+        mutable float4x4 mPersistentProjMat;
+        mutable float4x4 mPersistentViewMat;
 
         std::string mName;
         bool mPreserveHeight = true;    ///< If true, preserve frame height on change of aspect ratio. Otherwise, preserve width.
@@ -301,7 +310,7 @@ namespace Falcor
 
         struct
         {
-            CPUSampleGenerator::SharedPtr pGenerator;
+            ref<CPUSampleGenerator> pGenerator;
             float2 scale;
         } mJitterPattern;
 

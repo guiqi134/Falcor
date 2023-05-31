@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -52,12 +52,14 @@ struct GBufferPSOut
 
 // GBufferRaster channels
 RasterizerOrderedTexture2D<PackedHitInfo> gVBuffer;
+RasterizerOrderedTexture2D<float4> gGuideNormalW;
 RasterizerOrderedTexture2D<float4> gDiffOpacity;
 RasterizerOrderedTexture2D<float4> gSpecRough;
 RasterizerOrderedTexture2D<float4> gEmissive;
 RasterizerOrderedTexture2D<float4> gViewW;
 RasterizerOrderedTexture2D<float2> gPosNormalFwidth;
 RasterizerOrderedTexture2D<float2> gLinearZAndDeriv;
+RasterizerOrderedTexture2D<float>  gMask;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -89,14 +91,16 @@ GBufferPSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID, float3 bar
     const float3 viewDir = normalize(gScene.camera.getPosition() - v.posW);
     ShadingData sd = gScene.materials.prepareShadingData(v, vsOut.materialID, viewDir, lod);
 
+    uint hints = 0;
 #if ADJUST_SHADING_NORMALS
-    adjustShadingNormal(sd, v);
+    hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
 #endif
 
-    // Create BSDF instance.
-    let bsdf = gScene.materials.getBSDF(sd, lod);
+    // Create material instance and query its properties.
+    let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+    let bsdfProperties = mi.getProperties(sd);
 
-    const GBufferData gbuf = prepareGBufferData(sd, bsdf);
+    const GBufferData gbuf = prepareGBufferData(sd, v, mi, bsdfProperties);
 
     const float4 texGrads = float4(ddx(sd.uv), ddy(sd.uv));
     const float2 mvec = computeMotionVector(vsOut, ipos);
@@ -115,14 +119,17 @@ GBufferPSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID, float3 bar
 
     // Store UAV outputs.
     if (is_valid(gViewW))           gViewW[ipos]        = float4(sd.V, 0.f);
+    if (is_valid(gGuideNormalW))    gGuideNormalW[ipos] = gbuf.guideNormalW;
     if (is_valid(gDiffOpacity))     gDiffOpacity[ipos]  = gbuf.diffuseOpacity;
     if (is_valid(gSpecRough))       gSpecRough[ipos]    = gbuf.specRough;
     if (is_valid(gEmissive))        gEmissive[ipos]     = gbuf.emissive;
+    if (is_valid(gMask))            gMask[ipos]         = 1.f;
 
-    // Length of derivatives of position and normal
+    // Length of derivatives of position and guide normal.
+    // This is a feature guide for the SVGF denoiser pass.
     if (is_valid(gPosNormalFwidth))
     {
-        gPosNormalFwidth[ipos] = float2(length(fwidth(sd.posW)), length(fwidth(sd.N)));
+        gPosNormalFwidth[ipos] = float2(length(fwidth(sd.posW)), length(fwidth(bsdfProperties.guideNormal)));
     }
 
     // Linear z and its derivative

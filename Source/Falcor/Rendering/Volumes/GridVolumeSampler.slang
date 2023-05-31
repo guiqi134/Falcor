@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -76,8 +76,8 @@ struct GridVolumeSampler
         \param[out] rayDirIndex Ray direction in index space (non-normalized!).
     */
     void transformRayToIndexSpace(const GridVolume gridVolume, const Grid densityGrid, const float3 rayOriginWorld, const float3 rayDirWorld, out float3 rayOriginIndex, out float3 rayDirIndex) {
-        rayOriginIndex = mul(float4(rayOriginWorld, 1.f), gridVolume.data.invTransform).xyz;
-        rayDirIndex = mul(float4(rayDirWorld, 0.f), gridVolume.data.invTransform).xyz;
+        rayOriginIndex = mul(gridVolume.data.invTransform, float4(rayOriginWorld, 1.f)).xyz;
+        rayDirIndex = mul(gridVolume.data.invTransform, float4(rayDirWorld, 0.f)).xyz;
 #if GRID_VOLUME_SAMPLER_USE_BRICKEDGRID
         // NanoVDB allows for negative indices, while textures require positive indices.
         // Thus, we simply translate the index-space box, matching a shift we do at grid conversion time on the host.
@@ -126,7 +126,7 @@ struct GridVolumeSampler
     float stepDDA(const float3 rayOrigin, const float3 invRayDir, const float3 pos, const int mip)
     {
         const float dim = 8 << mip;
-        const float3 tofs = invRayDir * (((invRayDir >= 0.f) ? dim + 0.5f : -0.5f) - rayOrigin);
+        const float3 tofs = invRayDir * (select(invRayDir >= 0.f, dim + 0.5f, -0.5f) - rayOrigin);
         const float3 tmax = floor(pos * (1.f / dim)) * dim * invRayDir + tofs;
         return min(tmax.x, min(tmax.y, tmax.z));
     }

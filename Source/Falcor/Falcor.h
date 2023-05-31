@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,11 +28,18 @@
 #pragma once
 
 // Core
-#include "Core/Framework.h"
-#include "Core/Sample.h"
-#include "Core/Window.h"
+#include "Core/Macros.h"
+#include "Core/Version.h"
+#include "Core/FalcorConfig.h"
+#include "Core/Assert.h"
+#include "Core/ErrorHandling.h"
+#include "Core/Errors.h"
+
+// Core/Platform
+#include "Core/Platform/OS.h"
 
 // Core/API
+#include "Core/API/Common.h"
 #include "Core/API/BlendState.h"
 #include "Core/API/Buffer.h"
 #include "Core/API/ComputeContext.h"
@@ -62,9 +69,6 @@
 #include "Core/API/VAO.h"
 #include "Core/API/VertexLayout.h"
 
-// Core/BufferTypes
-#include "Core/BufferTypes/VariablesBufferUI.h"
-
 // Core/Platform
 #include "Core/Platform/OS.h"
 #include "Core/Platform/ProgressBar.h"
@@ -72,37 +76,18 @@
 // Core/Program
 #include "Core/Program/ComputeProgram.h"
 #include "Core/Program/GraphicsProgram.h"
-#include "Core/Program/CUDAProgram.h"
 #include "Core/Program/Program.h"
 #include "Core/Program/ProgramReflection.h"
 #include "Core/Program/ProgramVars.h"
 #include "Core/Program/ProgramVersion.h"
 #include "Core/Program/RtProgram.h"
-#include "Core/Program/ShaderLibrary.h"
 
 // Core/State
 #include "Core/State/ComputeState.h"
 #include "Core/State/GraphicsState.h"
 
-// RenderGraph
-#include "RenderGraph/RenderGraph.h"
-#include "RenderGraph/RenderGraphImportExport.h"
-#include "RenderGraph/RenderGraphIR.h"
-#include "RenderGraph/RenderGraphUI.h"
-#include "RenderGraph/RenderPass.h"
-#include "RenderGraph/RenderPassLibrary.h"
-#include "RenderGraph/RenderPassReflection.h"
-#include "RenderGraph/RenderPassStandardFlags.h"
-#include "RenderGraph/RenderPassHelpers.h"
-#include "RenderGraph/ResourceCache.h"
-#include "RenderGraph/BasePasses/ComputePass.h"
-#include "RenderGraph/BasePasses/RasterPass.h"
-#include "RenderGraph/BasePasses/RasterScenePass.h"
-#include "RenderGraph/BasePasses/FullScreenPass.h"
-
 // Scene
 #include "Scene/Scene.h"
-#include "Scene/Importer.h"
 #include "Scene/Camera/Camera.h"
 #include "Scene/Camera/CameraController.h"
 #include "Scene/Lights/Light.h"
@@ -114,48 +99,26 @@
 #include "Scene/Animation/AnimationController.h"
 
 // Utils
-#include "Utils/Math/AABB.h"
-#include "Utils/BinaryFileStream.h"
-#include "Utils/CryptoUtils.h"
+#include "Utils/StringFormatters.h"
+#include "Utils/Math/Common.h"
+#include "Utils/Math/Vector.h"
 #include "Utils/Logger.h"
-#include "Utils/NumericRange.h"
-#include "Utils/StringUtils.h"
-#include "Utils/TermColor.h"
-#include "Utils/Threading.h"
-#include "Utils/Algorithm/DirectedGraph.h"
-#include "Utils/Algorithm/DirectedGraphTraversal.h"
-#include "Utils/Algorithm/ParallelReduction.h"
-#include "Utils/Image/Bitmap.h"
-#include "Utils/Image/ImageIO.h"
-#include "Utils/Image/TextureManager.h"
-#include "Utils/Image/ImageProcessing.h"
-#include "Utils/Math/CubicSpline.h"
-#include "Utils/Math/FalcorMath.h"
-#include "Utils/Scripting/Dictionary.h"
-#include "Utils/Perception/Experiment.h"
-#include "Utils/Perception/SingleThresholdMeasurement.h"
-#include "Utils/SampleGenerators/DxSamplePattern.h"
-#include "Utils/SampleGenerators/HaltonSamplePattern.h"
-#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
-#include "Utils/SampleGenerators/CPUSampleGenerator.h"
-#include "Utils/Scripting/Scripting.h"
-#include "Utils/Scripting/Console.h"
-#include "Utils/Timing/CpuTimer.h"
-#include "Utils/Timing/Clock.h"
-#include "Utils/Timing/FrameRate.h"
+#include "Utils/UI/InputTypes.h"
 #include "Utils/Timing/Profiler.h"
-#include "Utils/Timing/ProfilerUI.h"
-#include "Utils/Timing/TimeReport.h"
-#include "Utils/UI/Font.h"
-#include "Utils/UI/Gui.h"
-#include "Utils/UI/PixelZoom.h"
-#include "Utils/UI/TextRenderer.h"
-#include "Utils/UI/InputState.h"
-#include "Utils/Video/VideoEncoder.h"
-#include "Utils/Video/VideoEncoderUI.h"
-#include "Utils/Debug/DebugConsole.h"
-#include "Utils/Debug/PixelDebug.h"
 
-#define FALCOR_MAJOR_VERSION 5
-#define FALCOR_REVISION 1
-#define FALCOR_VERSION_STRING "5.1"
+#include <fmt/format.h> // TODO C++20: Replace with <format>
+#include <fstd/span.h>  // TODO C++20: Replace with <span>
+
+#include <memory>
+#include <iostream>
+#include <locale>
+#include <codecvt>
+#include <string>
+#include <string_view>
+#include <vector>
+#include <algorithm>
+#include <filesystem>
+#include <variant>
+
+#include <cstdint>
+#include <cmath>

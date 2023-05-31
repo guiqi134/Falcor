@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -47,16 +47,24 @@ void testTemplatedVectorLoad16()
     uint idx = 0;
 
     // Test templated load of uint16_t types with 1-4 components.
-    uint16_t1 u1 = data.Load<uint16_t1>(idx); idx += 2;
-    uint16_t2 u2 = data.Load<uint16_t2>(idx); idx += 4;
-    uint16_t3 u3 = data.Load<uint16_t3>(idx); idx += 6;
-    uint16_t4 u4 = data.Load<uint16_t4>(idx); idx += 8;
+    uint16_t1 u1 = data.Load<uint16_t1>(idx);
+    idx += 2;
+    uint16_t2 u2 = data.Load<uint16_t2>(idx);
+    idx += 4;
+    uint16_t3 u3 = data.Load<uint16_t3>(idx);
+    idx += 6;
+    uint16_t4 u4 = data.Load<uint16_t4>(idx);
+    idx += 8;
 
     // Test templated load of float16_t types with 1-4 components.
-    float16_t1 f1 = data.Load<float16_t1>(idx); idx += 2;
-    float16_t2 f2 = data.Load<float16_t2>(idx); idx += 4;
-    float16_t3 f3 = data.Load<float16_t3>(idx); idx += 6;
-    float16_t4 f4 = data.Load<float16_t4>(idx); idx += 8;
+    float16_t1 f1 = data.Load<float16_t1>(idx);
+    idx += 2;
+    float16_t2 f2 = data.Load<float16_t2>(idx);
+    idx += 4;
+    float16_t3 f3 = data.Load<float16_t3>(idx);
+    idx += 6;
+    float16_t4 f4 = data.Load<float16_t4>(idx);
+    idx += 8;
 
     idx = 0;
 
@@ -82,4 +90,44 @@ void testTemplatedVectorLoad16()
     result[idx++] = asuint16(f4.y);
     result[idx++] = asuint16(f4.z);
     result[idx++] = asuint16(f4.w);
+}
+
+[numthreads(1, 1, 1)]
+void testTemplatedMatrixLoad16_2x4()
+{
+    float16_t2x4 m = data.Load<float16_t2x4>(0);
+
+    uint idx = 0;
+
+    // Write results.
+    result[idx++] = asuint16(m[0][0]);
+    result[idx++] = asuint16(m[0][1]);
+    result[idx++] = asuint16(m[0][2]);
+    result[idx++] = asuint16(m[0][3]);
+    result[idx++] = asuint16(m[1][0]);
+    result[idx++] = asuint16(m[1][1]);
+    result[idx++] = asuint16(m[1][2]);
+    result[idx++] = asuint16(m[1][3]);
+}
+
+[numthreads(1, 1, 1)]
+void testTemplatedMatrixLoad16_4x3()
+{
+    float16_t4x3 m = data.Load<float16_t4x3>(0);
+
+    uint idx = 0;
+
+    // Write results.
+    result[idx++] = asuint16(m[0][0]);
+    result[idx++] = asuint16(m[0][1]);
+    result[idx++] = asuint16(m[0][2]);
+    result[idx++] = asuint16(m[1][0]);
+    result[idx++] = asuint16(m[1][1]);
+    result[idx++] = asuint16(m[1][2]);
+    result[idx++] = asuint16(m[2][0]);
+    result[idx++] = asuint16(m[2][1]);
+    result[idx++] = asuint16(m[2][2]);
+    result[idx++] = asuint16(m[3][0]);
+    result[idx++] = asuint16(m[3][1]);
+    result[idx++] = asuint16(m[3][2]);
 }

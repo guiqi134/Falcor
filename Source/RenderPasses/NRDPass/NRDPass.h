@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,24 +27,20 @@
  **************************************************************************/
 #pragma once
 
-#if FALCOR_D3D12_AVAILABLE
-
 #include <Falcor.h>
 #include "Core/API/Shared/D3D12DescriptorSet.h"
 #include "Core/API/Shared/D3D12RootSignature.h"
+#include "Core/API/Shared/D3D12ConstantBufferView.h"
+#include "RenderGraph/RenderPassHelpers.h"
 
-#if FALCOR_ENABLE_NRD
-#include <NRD/Include/NRD.h>
-#endif
+#include <NRD.h>
 
 using namespace Falcor;
 
 class NRDPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<NRDPass>;
-
-    static const Info kInfo;
+    FALCOR_PLUGIN_CLASS(NRDPass, "NRD", "NRD denoiser.");
 
     enum class DenoisingMethod : uint32_t
     {
@@ -55,23 +51,23 @@ public:
         SpecularDeltaMv
     };
 
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    static ref<NRDPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<NRDPass>(pDevice, dict); }
+
+    NRDPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
 private:
-    NRDPass(const Dictionary& dict);
-
-    Scene::SharedPtr mpScene;
-    uint2 mScreenSize;
+    ref<Scene> mpScene;
+    uint2 mScreenSize{};
     uint32_t mFrameIndex = 0;
+    RenderPassHelpers::IOSize  mOutputSizeSelection = RenderPassHelpers::IOSize::Default; ///< Selected output size.
 
-#if FALCOR_ENABLE_NRD
     void reinit();
     void createPipelines();
     void createResources();
@@ -91,24 +87,22 @@ private:
     nrd::RelaxDiffuseSettings mRelaxDiffuseSettings = {};
     nrd::ReblurSettings mReblurSettings = {};
 
-    std::vector<Falcor::Sampler::SharedPtr> mpSamplers;
-    std::vector<Falcor::D3D12DescriptorSet::Layout> mCBVSRVUAVdescriptorSetLayouts;
-    Falcor::D3D12DescriptorSet::SharedPtr mpSamplersDescriptorSet;
-    std::vector<Falcor::D3D12RootSignature::SharedPtr> mpRootSignatures;
-    std::vector<ComputePass::SharedPtr> mpPasses;
-    std::vector<ProgramKernels::SharedConstPtr> mpCachedProgramKernels;
-    std::vector<ComputeStateObject::SharedPtr> mpCSOs;
-    std::vector<Falcor::Texture::SharedPtr> mpPermanentTextures;
-    std::vector<Falcor::Texture::SharedPtr> mpTransientTextures;
-    Falcor::Buffer::SharedPtr mpConstantBuffer;
+    std::vector<ref<Sampler>> mpSamplers;
+    std::vector<D3D12DescriptorSetLayout> mCBVSRVUAVdescriptorSetLayouts;
+    ref<D3D12DescriptorSet> mpSamplersDescriptorSet;
+    std::vector<ref<D3D12RootSignature>> mpRootSignatures;
+    std::vector<ref<ComputePass>> mpPasses;
+    std::vector<ref<const ProgramKernels>> mpCachedProgramKernels;
+    std::vector<ref<ComputeStateObject>> mpCSOs;
+    std::vector<ref<Texture>> mpPermanentTextures;
+    std::vector<ref<Texture>> mpTransientTextures;
+    ref<Buffer> mpConstantBuffer;
+    ref<D3D12ConstantBufferView> mpCBV;
 
-    glm::mat4x4 mPrevViewMatrix;
-    glm::mat4x4 mPrevProjMatrix;
+    float4x4 mPrevViewMatrix;
+    float4x4 mPrevProjMatrix;
 
     // Additional classic Falcor compute pass and resources for packing radiance and hitT for NRD.
-    ComputePass::SharedPtr mpPackRadiancePassRelax;
-    ComputePass::SharedPtr mpPackRadiancePassReblur;
-#endif // FALCOR_ENABLE_NRD
+    ref<ComputePass> mpPackRadiancePassRelax;
+    ref<ComputePass> mpPackRadiancePassReblur;
 };
-
-#endif // FALCOR_D3D12_AVAILABLE

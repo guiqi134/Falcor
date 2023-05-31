@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -39,9 +39,7 @@ namespace Falcor
     class Marker2DSet
     {
     public:
-        using SharedPtr = std::shared_ptr<Marker2DSet>;
-
-        static SharedPtr create(uint32_t maxMarkerCount);
+        Marker2DSet(ref<Device> pDevice, uint32_t maxMarkerCount) : mpDevice(pDevice), mMaxMarkerCount(maxMarkerCount) {}
 
         /** Resets the marker index to the first position. This will allow the next add-calls to add markers from the beginning again.
         */
@@ -113,6 +111,18 @@ namespace Falcor
         */
         void addVector(const float2& posA, const float2& posB, const float lineWidth, const float arrowHeight, const float4& color);
 
+        /** Add a circle sector. Can also be cut by setting the minRadius to a value larger than zero.
+            \param[in] pos The center position of the circle sector as if it was a full circle.
+            \param[in] rotation The rotation of the circle sector.
+            \param[in] angle The angle of the sircle sector.
+            \param[in] minRadius The minimum radius where it si going to cut at. Everything with a lower radius than this will not be seen.
+            \param[in] maxRadius The maximum radius of the circle sector.
+            \param[in] color Color of the circle sector.
+            \param[in] borderColorXYZThicknessW Border color in the x, y, and z components and its thickness in the w component.
+            \param[in] excludeBorderFlags Flags for which borders should be excluded from rendering.
+        */
+        void addCircleSector(const float2& pos, const float rotation, const float angle, const float minRadius, const float maxRadius, const float4& color, const float4& borderColorXYZThicknessW, ExcludeBorderFlags excludeBorderFlags);
+
         /** Retrive the list of marker objects.
             \return The list of markers.
         */
@@ -120,16 +130,13 @@ namespace Falcor
 
         /** Get the buffer that holds all markers in this set.
         */
-        Buffer::SharedPtr getBuffer() const { return mpMarkerBuffer; }
+        ref<Buffer> getBuffer() const { return mpMarkerBuffer; }
 
         /** Set shader data.
         */
         void setShaderData(const ShaderVar& var);
 
     protected:
-
-        Marker2DSet(uint32_t maxMarkerCount) : mMaxMarkerCount(maxMarkerCount) {}
-
         /** Adds a Marker2D object to the buffer. Throws a runtime error when marker count exceeds the maximum marker count.
         */
         void addMarker(const Marker2DDataBlob& newMarker);
@@ -139,9 +146,10 @@ namespace Falcor
         void updateBuffer();
 
     private:
+        ref<Device>                     mpDevice;
         uint32_t                        mMaxMarkerCount;
         std::vector<Marker2DDataBlob>   mMarkers;
-        Buffer::SharedPtr               mpMarkerBuffer;
+        ref<Buffer>                     mpMarkerBuffer;
         bool                            mDirtyBuffer = false;
     };
 }

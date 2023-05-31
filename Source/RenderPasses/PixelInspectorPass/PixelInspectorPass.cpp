@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -29,23 +29,9 @@
 #include "PixelInspectorData.slang"
 #include "RenderGraph/RenderPassHelpers.h"
 
-const RenderPass::Info PixelInspectorPass::kInfo
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    "PixelInspectorPass",
-
-    "Inspect geometric and material properties at a given pixel.\n"
-    "Left-mouse click on a pixel to select it.\n"
-};
-
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(PixelInspectorPass::kInfo, PixelInspectorPass::create);
+    registry.registerClass<RenderPass, PixelInspectorPass>();
 }
 
 namespace
@@ -68,22 +54,15 @@ namespace
     const char kOutputChannel[] = "gPixelDataBuffer";
 }
 
-PixelInspectorPass::SharedPtr PixelInspectorPass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new PixelInspectorPass);
-}
-
-PixelInspectorPass::PixelInspectorPass()
-    : RenderPass(kInfo)
+PixelInspectorPass::PixelInspectorPass(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     for (auto it : kInputChannels)
     {
         mAvailableInputs[it.name] = false;
     }
 
-    mpProgram = ComputeProgram::createFromFile(kShaderFile, "main", Program::DefineList(), Shader::CompilerFlags::TreatWarningsAsErrors);
-    mpState = ComputeState::create();
-    mpState->setProgram(mpProgram);
+    mpState = ComputeState::create(mpDevice);
 }
 
 RenderPassReflection PixelInspectorPass::reflect(const CompileData& compileData)
@@ -108,12 +87,14 @@ void PixelInspectorPass::execute(RenderContext* pRenderContext, const RenderData
 
     if (!mpVars)
     {
-        mpVars = ComputeVars::create(mpProgram->getReflector());
-        mpPixelDataBuffer = Buffer::createStructured(mpProgram.get(), kOutputChannel, 1);
+        mpVars = ComputeVars::create(mpDevice, mpProgram->getReflector());
+        mpPixelDataBuffer = Buffer::createStructured(mpDevice, mpProgram.get(), kOutputChannel, 1);
     }
 
+    auto var = mpVars->getRootVar();
+
     // Bind the scene.
-    mpVars["gScene"] = mpScene->getParameterBlock();
+    var["gScene"] = mpScene->getParameterBlock();
 
     if (mpScene->getCamera()->getApertureRadius() > 0.f)
     {
@@ -123,37 +104,37 @@ void PixelInspectorPass::execute(RenderContext* pRenderContext, const RenderData
 
     const float2 cursorPosition = mUseContinuousPicking ? mCursorPosition : mSelectedCursorPosition;
     const uint2 resolution = renderData.getDefaultTextureDims();
-    mSelectedPixel = glm::min((uint2)(cursorPosition * ((float2)resolution)), resolution - 1u);
+    mSelectedPixel = min((uint2)(cursorPosition * ((float2)resolution)), resolution - 1u);
 
     // Fill in the constant buffer.
-    mpVars["PerFrameCB"]["gResolution"] = resolution;
-    mpVars["PerFrameCB"]["gSelectedPixel"] = mSelectedPixel;
+    var["PerFrameCB"]["gResolution"] = resolution;
+    var["PerFrameCB"]["gSelectedPixel"] = mSelectedPixel;
 
     // Bind all input buffers.
     for (auto it : kInputChannels)
     {
         if (mAvailableInputs[it.name])
         {
-            Texture::SharedPtr pSrc = renderData[it.name]->asTexture();
-            mpVars[it.texname] = pSrc;
+            ref<Texture> pSrc = renderData.getTexture(it.name);
+            var[it.texname] = pSrc;
 
             // If the texture has a different resolution, we need to scale the sampling coordinates accordingly.
             const uint2 srcResolution = uint2(pSrc->getWidth(), pSrc->getHeight());
-            const bool needsScaling = mScaleInputsToWindow && srcResolution != resolution;
+            const bool needsScaling = mScaleInputsToWindow && any(srcResolution != resolution);
             const uint2 scaledCoord = (uint2)(((float2)(srcResolution * mSelectedPixel)) / ((float2)resolution));
-            mpVars["PerFrameCB"][std::string(it.texname) + "Coord"] = needsScaling ? scaledCoord : mSelectedPixel;
+            var["PerFrameCB"][std::string(it.texname) + "Coord"] = needsScaling ? scaledCoord : mSelectedPixel;
 
-            mIsInputInBounds[it.name] = glm::all(glm::lessThanEqual(mSelectedPixel, srcResolution));
+            mIsInputInBounds[it.name] = all(mSelectedPixel <= srcResolution);
         }
         else
         {
-            mpVars->setTexture(it.texname, nullptr);
+            var[it.texname].setTexture(nullptr);
         }
     }
 
     // Bind the output buffer.
     FALCOR_ASSERT(mpPixelDataBuffer);
-    mpVars[kOutputChannel] = mpPixelDataBuffer;
+    var[kOutputChannel] = mpPixelDataBuffer;
 
     // Run the inspector program.
     pRenderContext->dispatch(mpState.get(), mpVars.get(), { 1u, 1u, 1u });
@@ -284,6 +265,10 @@ void PixelInspectorPass::renderUI(Gui::Widgets& widget)
             materialGroup.var("Roughness", pixelData.roughness, 0.f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
         });
 
+        displayedData |= displayValues(requiredInputs, { "GuideNormal" }, [&materialGroup](PixelData& pixelData) {
+            materialGroup.var("GuideNormal", pixelData.guideNormal, 0.f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
+        });
+
         displayedData |= displayValues(requiredInputs, { "DiffuseReflectionAlbedo" }, [&materialGroup](PixelData& pixelData) {
             materialGroup.var("DiffuseReflectionAlbedo", pixelData.diffuseReflectionAlbedo, 0.f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
         });
@@ -338,8 +323,7 @@ void PixelInspectorPass::renderUI(Gui::Widgets& widget)
             {
                 auto instanceData = mpScene->getGeometryInstance(pixelData.instanceID);
                 uint32_t matrixID = instanceData.globalMatrixID;
-                glm::mat4 M = mpScene->getAnimationController()->getGlobalMatrices()[matrixID];
-                M = glm::transpose(M); // Note glm is column-major, but we display the matrix using standard mathematical notation.
+                float4x4 M = mpScene->getAnimationController()->getGlobalMatrices()[matrixID];
 
                 visGroup.text("Transform:");
                 visGroup.matrix("##mat", M);
@@ -359,16 +343,23 @@ void PixelInspectorPass::renderUI(Gui::Widgets& widget)
     }
 }
 
-void PixelInspectorPass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void PixelInspectorPass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
+    mpProgram = nullptr;
     mpVars = nullptr;
     mpPixelDataBuffer = nullptr;
 
     if (mpScene)
     {
-        mpProgram->addDefines(mpScene->getSceneDefines());
-        mpProgram->setTypeConformances(mpScene->getTypeConformances());
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderFile).csEntry("main");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+        desc.setCompilerFlags(Shader::CompilerFlags::TreatWarningsAsErrors);
+
+        mpProgram = ComputeProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+        mpState->setProgram(mpProgram);
     }
 }
 

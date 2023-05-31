@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,34 +26,50 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+
+#include "BrickedGrid.h"
+#include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Core/API/Buffer.h"
+#include "Utils/Math/AABB.h"
+#include "Utils/Math/Matrix.h"
+#include "Utils/UI/Gui.h"
+
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4244 4267)
+#endif
 #include <nanovdb/NanoVDB.h>
 #include <nanovdb/util/GridHandle.h>
 #include <nanovdb/util/HostBuffer.h>
+#ifdef _MSC_VER
 #pragma warning(pop)
-#include "BrickedGrid.h"
+#endif
 
 #include <filesystem>
+#include <memory>
+#include <string>
 
 namespace Falcor
 {
+    struct ShaderVar;
+
     /** Voxel grid based on NanoVDB.
     */
-    class FALCOR_API Grid
+    class FALCOR_API Grid : public Object
     {
     public:
-        using SharedPtr = std::shared_ptr<Grid>;
-
         /** Create a sphere voxel grid.
+            \param[in] pDevice GPU device.
             \param[in] radius Radius of the sphere in world units.
             \param[in] voxelSize Size of a voxel in world units.
             \param[in] blendRange Range in voxels to blend from 0 to 1 (starting at surface inwards).
             \return A new grid.
         */
-        static SharedPtr createSphere(float radius, float voxelSize, float blendRange = 2.f);
+        static ref<Grid> createSphere(ref<Device> pDevice, float radius, float voxelSize, float blendRange = 2.f);
 
         /** Create a box voxel grid.
+            \param[in] pDevice GPU device.
             \param[in] width Width of the box in world units.
             \param[in] height Height of the box in world units.
             \param[in] depth Depth of the box in world units.
@@ -61,15 +77,16 @@ namespace Falcor
             \param[in] blendRange Range in voxels to blend from 0 to 1 (starting at surface inwards).
             \return A new grid.
         */
-        static SharedPtr createBox(float width, float height, float depth, float voxelSize, float blendRange = 2.f);
+        static ref<Grid> createBox(ref<Device> pDevice, float width, float height, float depth, float voxelSize, float blendRange = 2.f);
 
         /** Create a grid from a file.
             Currently only OpenVDB and NanoVDB grids of type float are supported.
+            \param[in] pDevice GPU device.
             \param[in] path File path of the grid. Can also include a full path or relative path from a data directory.
             \param[in] gridname Name of the grid to load.
             \return A new grid, or nullptr if the grid failed to load.
         */
-        static SharedPtr createFromFile(const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromFile(ref<Device> pDevice, const std::filesystem::path& path, const std::string& gridname);
 
         /** Render the UI.
         */
@@ -120,24 +137,26 @@ namespace Falcor
 
         /** Get the (affine) NanoVDB transformation matrix.
         */
-        glm::mat4 getTransform() const;
+        float4x4 getTransform() const;
 
         /** Get the inverse (affine) NanoVDB transformation matrix.
         */
-        glm::mat4 getInvTransform() const;
+        float4x4 getInvTransform() const;
 
     private:
-        Grid(nanovdb::GridHandle<nanovdb::HostBuffer> gridHandle);
+        Grid(ref<Device> pDevice, nanovdb::GridHandle<nanovdb::HostBuffer> gridHandle);
 
-        static SharedPtr createFromNanoVDBFile(const std::filesystem::path& path, const std::string& gridname);
-        static SharedPtr createFromOpenVDBFile(const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromNanoVDBFile(ref<Device>, const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromOpenVDBFile(ref<Device>, const std::filesystem::path& path, const std::string& gridname);
+
+        ref<Device> mpDevice;
 
         // Host data.
         nanovdb::GridHandle<nanovdb::HostBuffer> mGridHandle;
         nanovdb::FloatGrid* mpFloatGrid;
         nanovdb::FloatGrid::AccessorType mAccessor;
         // Device data.
-        Buffer::SharedPtr mpBuffer;
+        ref<Buffer> mpBuffer;
         BrickedGrid mBrickedGrid;
 
         friend class SceneCache;

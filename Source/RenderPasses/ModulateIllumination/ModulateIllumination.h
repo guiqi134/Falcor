@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,17 +27,19 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderPassHelpers.h"
 
 using namespace Falcor;
 
 class ModulateIllumination : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ModulateIllumination>;
+    FALCOR_PLUGIN_CLASS(ModulateIllumination, "ModulateIllumination", "Modulate illumination pass.");
 
-    static const Info kInfo;
+    static ref<ModulateIllumination> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<ModulateIllumination>(pDevice, dict); }
 
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    ModulateIllumination(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -46,11 +48,10 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
 
 private:
-    ModulateIllumination(const Dictionary& dict);
+    uint2                      mFrameDim = { 0, 0 };
+    RenderPassHelpers::IOSize  mOutputSizeSelection = RenderPassHelpers::IOSize::Default; ///< Selected output size.
 
-    uint2                   mFrameDim = { 0, 0 };
-
-    ComputePass::SharedPtr  mpModulateIlluminationPass;
+    ref<ComputePass>        mpModulateIlluminationPass;
 
     bool                    mUseEmission = true;
     bool                    mUseDiffuseReflectance = true;

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,8 +25,11 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "BSDFIntegrator.h"
+#include "Core/Assert.h"
+#include "Core/Errors.h"
+#include "Core/API/RenderContext.h"
+#include "Utils/Logger.h"
 
 namespace Falcor
 {
@@ -40,28 +43,26 @@ namespace Falcor
         const uint2 kGridSize = { 512, 512 };
     }
 
-    BSDFIntegrator::SharedPtr BSDFIntegrator::create(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+    BSDFIntegrator::BSDFIntegrator(ref<Device> pDevice, const ref<Scene>& pScene)
+        : mpDevice(pDevice)
+        , mpScene(pScene)
     {
-        return SharedPtr(new BSDFIntegrator(pRenderContext, pScene));
-    }
-
-    BSDFIntegrator::BSDFIntegrator(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
-        : mpScene(pScene)
-    {
+        checkArgument(mpScene != nullptr, "'pDevice' must be a valid device");
         checkArgument(pScene != nullptr, "'pScene' must be a valid scene");
 
         // Create programs.
         Program::Desc desc;
         desc.setShaderModel("6_6");
+        desc.addShaderModules(pScene->getShaderModules());
         desc.addShaderLibrary(kShaderFile);
         desc.addTypeConformances(pScene->getTypeConformances());
         auto defines = pScene->getSceneDefines();
         Program::Desc descFinal = desc;
 
         desc.csEntry("mainIntegration");
-        mpIntegrationPass = ComputePass::create(desc, defines);
+        mpIntegrationPass = ComputePass::create(mpDevice, desc, defines);
         descFinal.csEntry("mainFinal");
-        mpFinalPass = ComputePass::create(descFinal, defines);
+        mpFinalPass = ComputePass::create(mpDevice, descFinal, defines);
 
         // Compute number of intermediate results.
         uint3 groupSize = mpIntegrationPass->getThreadGroupSize();
@@ -74,20 +75,20 @@ namespace Falcor
         FALCOR_ASSERT(finalGroupSize.x == 256 && finalGroupSize.y == 1 && finalGroupSize.z == 1);
         FALCOR_ASSERT(finalGroupSize.x == mResultCount);
 
-        mpFence = GpuFence::create();
+        mpFence = GpuFence::create(mpDevice);
     }
 
-    float3 BSDFIntegrator::integrateIsotropic(RenderContext* pRenderContext, const uint32_t materialID, float cosTheta)
+    float3 BSDFIntegrator::integrateIsotropic(RenderContext* pRenderContext, const MaterialID materialID, float cosTheta)
     {
         std::vector<float> cosThetas(1, cosTheta);
         auto results = integrateIsotropic(pRenderContext, materialID, cosThetas);
         return results[0];
     }
 
-    std::vector<float3> BSDFIntegrator::integrateIsotropic(RenderContext* pRenderContext, const uint32_t materialID, const std::vector<float>& cosThetas)
+    std::vector<float3> BSDFIntegrator::integrateIsotropic(RenderContext* pRenderContext, const MaterialID materialID, const std::vector<float>& cosThetas)
     {
         FALCOR_ASSERT(mpScene);
-        checkArgument(materialID < mpScene->getMaterialCount(), "'materialID' is out of range");
+        checkArgument(materialID.get() < mpScene->getMaterialCount(), "'materialID' is out of range");
         checkArgument(!cosThetas.empty(), "'cosThetas' array is empty");
 
         CpuTimer timer;
@@ -99,7 +100,7 @@ namespace Falcor
 
         if (!mpCosThetaBuffer || mpCosThetaBuffer->getElementCount() < gridCount)
         {
-            mpCosThetaBuffer = Buffer::createStructured(sizeof(float), gridCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, cosThetas.data(), false);
+            mpCosThetaBuffer = Buffer::createStructured(mpDevice, sizeof(float), gridCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, cosThetas.data(), false);
         }
         else
         {
@@ -110,12 +111,12 @@ namespace Falcor
         uint32_t elemCount = gridCount * mResultCount;
         if (!mpResultBuffer || mpResultBuffer->getElementCount() < elemCount)
         {
-            mpResultBuffer = Buffer::createStructured(sizeof(float3), elemCount, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+            mpResultBuffer = Buffer::createStructured(mpDevice, sizeof(float3), elemCount, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         }
         if (!mpFinalResultBuffer || mpFinalResultBuffer->getElementCount() < gridCount)
         {
-            mpFinalResultBuffer = Buffer::createStructured(sizeof(float3), gridCount, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-            mpStagingBuffer = Buffer::createStructured(sizeof(float3), gridCount, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
+            mpFinalResultBuffer = Buffer::createStructured(mpDevice, sizeof(float3), gridCount, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+            mpStagingBuffer = Buffer::createStructured(mpDevice, sizeof(float3), gridCount, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
         }
 
         // Execute GPU passes.
@@ -141,18 +142,18 @@ namespace Falcor
         return output;
     }
 
-    void BSDFIntegrator::integrationPass(RenderContext* pRenderContext, const uint32_t materialID, const uint32_t gridCount) const
+    void BSDFIntegrator::integrationPass(RenderContext* pRenderContext, const MaterialID materialID, const uint32_t gridCount) const
     {
         FALCOR_ASSERT(mpIntegrationPass);
         auto var = mpIntegrationPass->getRootVar()[kParameterBlock];
         var["gridSize"] = kGridSize;
         var["gridCount"] = gridCount;
         var["resultCount"] = mResultCount;
-        var["materialID"] = materialID;
+        var["materialID"] = materialID.getSlang();
         var["cosThetas"] = mpCosThetaBuffer;
         var["results"] = mpResultBuffer;
 
-        mpIntegrationPass["gScene"] = mpScene->getParameterBlock();
+        mpIntegrationPass->getRootVar()["gScene"] = mpScene->getParameterBlock();
         mpIntegrationPass->execute(pRenderContext, uint3(kGridSize, gridCount));
     }
 

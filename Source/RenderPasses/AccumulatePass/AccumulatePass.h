@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,8 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderPassHelpers.h"
 
 using namespace Falcor;
 
@@ -42,19 +44,18 @@ using namespace Falcor;
 class AccumulatePass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<AccumulatePass>;
+    FALCOR_PLUGIN_CLASS(AccumulatePass, "AccumulatePass", "Temporal accumulation.");
 
-    static const Info kInfo;
+    static ref<AccumulatePass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<AccumulatePass>(pDevice, dict); }
 
+    AccumulatePass(ref<Device> pDevice, const Dictionary& dict);
     virtual ~AccumulatePass() = default;
-
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
     virtual void onHotReload(HotReloadFlags reloaded) override;
@@ -72,31 +73,37 @@ public:
         SingleCompensated,      ///< Compensated summation (Kahan summation) in single precision.
     };
 
+    enum class OverflowMode : uint32_t
+    {
+        Stop,   ///< Stop accumulation and retain accumulated image.
+        Reset,  ///< Reset accumulation.
+        EMA,    ///< Switch to exponential moving average accumulation.
+    };
+
 protected:
-    AccumulatePass(const Dictionary& dict);
     void prepareAccumulation(RenderContext* pRenderContext, uint32_t width, uint32_t height);
-    void accumulate(RenderContext* pRenderContext, const Texture::SharedPtr& pSrc, const Texture::SharedPtr& pDst);
+    void accumulate(RenderContext* pRenderContext, const ref<Texture>& pSrc, const ref<Texture>& pDst);
 
     // Internal state
-    Scene::SharedPtr            mpScene;                        ///< The current scene (or nullptr if no scene).
-    std::map<Precision, ComputeProgram::SharedPtr> mpProgram;   ///< Accumulation programs, one per mode.
-    ComputeVars::SharedPtr      mpVars;                         ///< Program variableTes.
-    ComputeState::SharedPtr     mpState;
+    ref<Scene>                  mpScene;                        ///< The current scene (or nullptr if no scene).
+    std::map<Precision, ref<ComputeProgram>> mpProgram;         ///< Accumulation programs, one per mode.
+    ref<ComputeVars>            mpVars;                         ///< Program variables.
+    ref<ComputeState>           mpState;
     FormatType                  mSrcType;                       ///< Format type of the source that gets accumulated.
 
     uint32_t                    mFrameCount = 0;                ///< Number of accumulated frames. This is reset upon changes.
     uint2                       mFrameDim = { 0, 0 };           ///< Current frame dimension in pixels.
-    Texture::SharedPtr          mpLastFrameSum;                 ///< Last frame running sum. Used in Single and SingleKahan mode.
-    Texture::SharedPtr          mpLastFrameCorr;                ///< Last frame running compensation term. Used in SingleKahan mode.
-    Texture::SharedPtr          mpLastFrameSumLo;               ///< Last frame running sum (lo bits). Used in Double mode.
-    Texture::SharedPtr          mpLastFrameSumHi;               ///< Last frame running sum (hi bits). Used in Double mode.
+    ref<Texture>                mpLastFrameSum;                 ///< Last frame running sum. Used in Single and SingleKahan mode.
+    ref<Texture>                mpLastFrameCorr;                ///< Last frame running compensation term. Used in SingleKahan mode.
+    ref<Texture>                mpLastFrameSumLo;               ///< Last frame running sum (lo bits). Used in Double mode.
+    ref<Texture>                mpLastFrameSumHi;               ///< Last frame running sum (hi bits). Used in Double mode.
 
     // UI variables
     bool                        mEnabled = true;                ///< True if accumulation is enabled.
-    bool                        mAutoReset = true;              ///< Reset accumulation automatically upon scene changes, refresh flags, and/or subframe count.
+    bool                        mAutoReset = true;              ///< Reset accumulation automatically upon scene changes and refresh flags.
     Precision                   mPrecisionMode = Precision::Single;
-    uint32_t                    mSubFrameCount = 0;             ///< Number of frames to accumulate before reset. Useful for generating references.
-    uint32_t                    mMaxAccumulatedFrames = 0;      ///< Number of frames to accumulate before weights become constant. Useful for noise comparisons.
+    uint32_t                    mMaxFrameCount = 0;             ///< Maximum number of frames to accumulate before triggering overflow. 0 means infinite accumulation.
+    OverflowMode                mOverflowMode = OverflowMode::Stop; ///< What to do after maximum number of frames are accumulated.
 
     ResourceFormat              mOutputFormat = ResourceFormat::Unknown;                    ///< Output format (uses default when set to ResourceFormat::Unknown).
     RenderPassHelpers::IOSize   mOutputSizeSelection = RenderPassHelpers::IOSize::Default;  ///< Selected output size.

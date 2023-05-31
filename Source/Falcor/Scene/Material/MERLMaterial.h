@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,6 +31,8 @@
 
 namespace Falcor
 {
+    class MERLFile;
+
     /** Class representing a measured material from the MERL BRDF database.
 
         For details refer to:
@@ -41,34 +43,29 @@ namespace Falcor
     class FALCOR_API MERLMaterial : public Material
     {
     public:
-        using SharedPtr = std::shared_ptr<MERLMaterial>;
+        static ref<MERLMaterial> create(ref<Device> pDevice, const std::string& name, const std::filesystem::path& path) { return make_ref<MERLMaterial>(pDevice, name, path); }
 
-        /** Create a new MERL material.
-            \param[in] name The material name.
-            \param[in] path Path of BRDF file to load.
-            \return A new object, or throws an exception if creation failed.
-        */
-        static SharedPtr create(const std::string& name, const std::filesystem::path& path);
+        MERLMaterial(ref<Device> pDevice, const std::string& name, const std::filesystem::path& path);
+        MERLMaterial(ref<Device> pDevice, const MERLFile& merlFile);
 
         bool renderUI(Gui::Widgets& widget) override;
         Material::UpdateFlags update(MaterialSystem* pOwner) override;
-        bool isEqual(const Material::SharedPtr& pOther) const override;
+        bool isEqual(const ref<Material>& pOther) const override;
         MaterialDataBlob getDataBlob() const override { return prepareDataBlob(mData); }
+        Program::ShaderModuleList getShaderModules() const override;
+        Program::TypeConformanceList getTypeConformances() const override;
+
+        int getBufferCount() const override { return 1; }
 
     protected:
-        MERLMaterial(const std::string& name, const std::filesystem::path& path);
-
-        bool loadBRDF(const std::filesystem::path& path);
-        void prepareData(const int dims[3], const std::vector<double>& data);
-        void prepareAlbedoLUT(RenderContext* pRenderContext);
-        void computeAlbedoLUT(RenderContext* pRenderContext);
+        void init(const MERLFile& merlFile);
 
         std::filesystem::path mPath;        ///< Full path to the BRDF loaded.
         std::string mBRDFName;              ///< This is the file basename without extension.
 
         MERLMaterialData mData;             ///< Material parameters.
-        Buffer::SharedPtr mpBRDFData;       ///< GPU buffer holding all BRDF data as float3 array.
-        Texture::SharedPtr mpAlbedoLUT;     ///< Precomputed albedo lookup table.
-        Sampler::SharedPtr mpLUTSampler;    ///< Sampler for accessing the LUT texture.
+        ref<Buffer> mpBRDFData;             ///< GPU buffer holding all BRDF data as float3 array.
+        ref<Texture> mpAlbedoLUT;           ///< Precomputed albedo lookup table.
+        ref<Sampler> mpLUTSampler;          ///< Sampler for accessing the LUT texture.
     };
 }

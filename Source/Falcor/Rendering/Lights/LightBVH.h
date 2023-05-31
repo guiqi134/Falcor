@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,11 +27,14 @@
  **************************************************************************/
 #pragma once
 #include "LightBVHTypes.slang"
+#include "Core/Macros.h"
+#include "Core/API/Buffer.h"
 #include "Scene/Lights/LightCollection.h"
 #include "Utils/Math/AABB.h"
 #include "Utils/Math/Vector.h"
 #include "Utils/UI/Gui.h"
-#include <limits>
+#include <functional>
+#include <memory>
 #include <vector>
 
 namespace Falcor
@@ -54,9 +57,6 @@ namespace Falcor
     class FALCOR_API LightBVH
     {
     public:
-        using SharedPtr = std::shared_ptr<LightBVH>;
-        using SharedConstPtr = std::shared_ptr<const LightBVH>;
-
         struct NodeLocation
         {
             uint32_t nodeIndex;
@@ -72,10 +72,11 @@ namespace Falcor
         */
         using NodeFunction = std::function<bool(const NodeLocation& location)>;
 
-        /** Creates an empty LightBVH object. Use a LightBVHBuilder to build the BVH.
+        /** Constructor.
+            \param[in] pDevice GPU device.
             \param[in] pLightCollection The light collection around which the BVH will be built.
         */
-        static SharedPtr create(const LightCollection::SharedConstPtr& pLightCollection);
+        LightBVH(ref<Device> pDevice, const ref<const LightCollection>& pLightCollection);
 
         /** Refit all the BVH nodes to the underlying geometry, without changing the hierarchy.
             The BVH needs to have been built before trying to refit it.
@@ -110,20 +111,18 @@ namespace Falcor
         /** Is the BVH valid.
             \return true if the BVH is ready for use.
         */
-        virtual bool isValid() const { return mIsValid; }
+        bool isValid() const { return mIsValid; }
 
         /** Render the UI. This default implementation just shows the stats.
         */
-        virtual void renderUI(Gui::Widgets& widget);
+        void renderUI(Gui::Widgets& widget);
 
         /** Bind the light BVH into a shader variable.
             \param[in] var The shader variable to set the data into.
         */
-        virtual void setShaderData(ShaderVar const& var) const;
+        void setShaderData(const ShaderVar& var) const;
 
     protected:
-        LightBVH(const LightCollection::SharedConstPtr& pLightCollection);
-
         void finalize();
         void computeStats();
         void updateNodeIndices();
@@ -134,7 +133,7 @@ namespace Falcor
 
         /** Invalidate the BVH.
         */
-        virtual void clear();
+        void clear();
 
         struct RefitEntryInfo
         {
@@ -143,10 +142,11 @@ namespace Falcor
         };
 
         // Internal state
-        const LightCollection::SharedConstPtr mpLightCollection;
+        ref<Device>                           mpDevice;
+        ref<const LightCollection>            mpLightCollection;
 
-        ComputePass::SharedPtr                mLeafUpdater;             ///< Compute pass for refitting the leaf nodes.
-        ComputePass::SharedPtr                mInternalUpdater;         ///< Compute pass for refitting internal nodes.
+        ref<ComputePass>                      mLeafUpdater;             ///< Compute pass for refitting the leaf nodes.
+        ref<ComputePass>                      mInternalUpdater;         ///< Compute pass for refitting internal nodes.
 
         // CPU resources
         mutable std::vector<PackedNode>       mNodes;                   ///< CPU-side copy of packed BVH nodes.
@@ -158,10 +158,10 @@ namespace Falcor
         mutable bool                          mIsCpuDataValid = false;  ///< Indicates whether the CPU-side data matches the GPU buffers.
 
         // GPU resources
-        Buffer::SharedPtr                     mpBVHNodesBuffer;         ///< Buffer holding all BVH nodes.
-        Buffer::SharedPtr                     mpTriangleIndicesBuffer;  ///< Triangle indices sorted by leaf node. Each leaf node refers to a contiguous array of triangle indices.
-        Buffer::SharedPtr                     mpTriangleBitmasksBuffer; ///< Array containing the per triangle bit pattern retracing the tree traversal to reach the triangle: 0=left child, 1=right child.
-        Buffer::SharedPtr                     mpNodeIndicesBuffer;      ///< Buffer holding all node indices sorted by tree depth. This is used for BVH refit.
+        ref<Buffer>                           mpBVHNodesBuffer;         ///< Buffer holding all BVH nodes.
+        ref<Buffer>                           mpTriangleIndicesBuffer;  ///< Triangle indices sorted by leaf node. Each leaf node refers to a contiguous array of triangle indices.
+        ref<Buffer>                           mpTriangleBitmasksBuffer; ///< Array containing the per triangle bit pattern retracing the tree traversal to reach the triangle: 0=left child, 1=right child.
+        ref<Buffer>                           mpNodeIndicesBuffer;      ///< Buffer holding all node indices sorted by tree depth. This is used for BVH refit.
 
         friend LightBVHBuilder;
     };

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -37,11 +37,6 @@ void Falcor::Marker2DSet::addMarker(const Marker2DDataBlob& newMarker)
 
     mMarkers.push_back(newMarker);
     mDirtyBuffer = true;
-}
-
-Falcor::Marker2DSet::SharedPtr Falcor::Marker2DSet::create(uint32_t maxMarkerCount)
-{
-    return SharedPtr(new Marker2DSet(maxMarkerCount));
 }
 
 void Falcor::Marker2DSet::clear()
@@ -143,10 +138,26 @@ void Falcor::Marker2DSet::addArrowFromTwoTris(const float2& startPos, const floa
     addMarker(markerBlob);
 }
 
+void Falcor::Marker2DSet::addCircleSector(const float2& pos, const float rotation, const float angle, const float minRadius, const float maxRadius, const float4& color, const float4& borderColorXYZThicknessW, ExcludeBorderFlags excludeBorderFlags)
+{
+    Marker2DDataBlob markerBlob;
+    markerBlob.type = SDF2DShapeType::CircleSector;
+    CircleSectorMarker2DData* pMarker = reinterpret_cast<CircleSectorMarker2DData*>(markerBlob.payload.data);
+    pMarker->position = pos;
+    pMarker->rotation = rotation;
+    pMarker->angle = angle * 0.5f;
+    pMarker->maxRadius = maxRadius;
+    pMarker->minRadius = minRadius;
+    pMarker->color = color;
+    pMarker->borderColor = borderColorXYZThicknessW;
+    pMarker->excludeBorders = uint32_t(excludeBorderFlags);
+    addMarker(markerBlob);
+}
+
 void Falcor::Marker2DSet::setShaderData(const ShaderVar& var)
 {
     updateBuffer();
-    
+
     var["markers"] = mpMarkerBuffer;
     var["markerCount"] = (uint32_t)mMarkers.size();
 }
@@ -165,11 +176,11 @@ void Falcor::Marker2DSet::updateBuffer()
         // Create a new buffer if it does not exist or if the size is too small for the markers.
         else if (!mpMarkerBuffer || mpMarkerBuffer->getElementCount() < (uint32_t)mMarkers.size())
         {
-            mpMarkerBuffer = Buffer::createStructured(sizeof(Marker2DDataBlob), (uint32_t)mMarkers.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, mMarkers.data(), false);
+            mpMarkerBuffer = Buffer::createStructured(mpDevice, sizeof(Marker2DDataBlob), (uint32_t)mMarkers.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, mMarkers.data(), false);
             mpMarkerBuffer->setName("Marker2DSet::mpMarkerBuffer");
         }
         // Else update the existing buffer.
-        else  
+        else
         {
             mpMarkerBuffer->setBlob(mMarkers.data(), 0, mMarkers.size() * sizeof(Marker2DDataBlob));
         }

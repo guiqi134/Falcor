@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,8 +28,6 @@
 #include "Composite.h"
 #include "CompositeMode.slangh"
 
-const RenderPass::Info Composite::kInfo { "Composite", "Composite pass." };
-
 namespace
 {
     const std::string kShaderFile("RenderPasses/Utils/Composite/Composite.cs.slang");
@@ -50,13 +48,8 @@ namespace
     };
 }
 
-Composite::SharedPtr Composite::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new Composite(dict));
-}
-
-Composite::Composite(const Dictionary& dict)
-    : RenderPass(kInfo)
+Composite::Composite(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     // Parse dictionary.
     for (const auto& [key, value] : dict)
@@ -69,7 +62,7 @@ Composite::Composite(const Dictionary& dict)
     }
 
     // Create resources.
-    mCompositePass = ComputePass::create(kShaderFile, "main", Program::DefineList(), false);
+    mCompositePass = ComputePass::create(mpDevice, kShaderFile, "main", Program::DefineList(), false);
 }
 
 Dictionary Composite::getScriptingDictionary()
@@ -99,7 +92,7 @@ void Composite::compile(RenderContext* pRenderContext, const CompileData& compil
 void Composite::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Prepare program.
-    const auto& pOutput = renderData[kOutput]->asTexture();
+    const auto& pOutput = renderData.getTexture(kOutput);
     FALCOR_ASSERT(pOutput);
     mOutputFormat = pOutput->getFormat();
 
@@ -109,14 +102,14 @@ void Composite::execute(RenderContext* pRenderContext, const RenderData& renderD
     }
 
     // Bind resources.
-    auto var = mCompositePass["CB"];
-    var["frameDim"] = mFrameDim;
-    var["scaleA"] = mScaleA;
-    var["scaleB"] = mScaleB;
+    auto var = mCompositePass->getRootVar();
+    var["CB"]["frameDim"] = mFrameDim;
+    var["CB"]["scaleA"] = mScaleA;
+    var["CB"]["scaleB"] = mScaleB;
+    var["A"] = renderData.getTexture(kInputA); // Can be nullptr
 
-    mCompositePass["A"] = renderData[kInputA]->asTexture(); // Can be nullptr
-    mCompositePass["B"] = renderData[kInputB]->asTexture(); // Can be nullptr
-    mCompositePass["output"] = pOutput;
+    var["B"] = renderData.getTexture(kInputB); // Can be nullptr
+    var["output"] = pOutput;
     mCompositePass->execute(pRenderContext, mFrameDim.x, mFrameDim.y);
 }
 

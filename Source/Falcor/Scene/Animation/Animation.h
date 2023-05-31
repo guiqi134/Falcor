@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,17 +26,24 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+#include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Scene/SceneIDs.h"
+#include "Utils/Math/Vector.h"
+#include "Utils/Math/Matrix.h"
+#include "Utils/Math/Quaternion.h"
+#include "Utils/UI/Gui.h"
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace Falcor
 {
     class AnimationController;
 
-    class FALCOR_API Animation
+    class FALCOR_API Animation : public Object
     {
     public:
-        using SharedPtr = std::shared_ptr<Animation>;
-
         enum class InterpolationMode
         {
             Linear,
@@ -56,16 +63,17 @@ namespace Falcor
             double time = 0;
             float3 translation = float3(0, 0, 0);
             float3 scaling = float3(1, 1, 1);
-            glm::quat rotation = glm::quat(1, 0, 0, 0);
+            quatf rotation = quatf::identity();
         };
+
+        static ref<Animation> create(const std::string& name, NodeID nodeID, double duration) { return make_ref<Animation>(name, nodeID, duration); }
 
         /** Create a new animation.
             \param[in] name Animation name.
             \param[in] nodeID ID of the animated node.
             \param[in] Animation duration in seconds.
-            \return Returns a new animation.
         */
-        static SharedPtr create(const std::string& name, uint32_t nodeID, double duration);
+        Animation(const std::string& name, NodeID nodeID, double duration);
 
         /** Get the animation name.
         */
@@ -73,11 +81,11 @@ namespace Falcor
 
         /** Get the animated node.
         */
-        uint32_t getNodeID() const { return mNodeID; }
+        NodeID getNodeID() const { return mNodeID; }
 
         /** Set the animated node.
         */
-        void setNodeID(uint32_t id) { mNodeID = id; }
+        void setNodeID(NodeID id) { mNodeID = id; }
 
         /** Get the animation duration in seconds.
         */
@@ -138,20 +146,18 @@ namespace Falcor
             \param time The current time in seconds. This can be larger then the animation time, in which case the animation will loop.
             \return Returns the animation's transform matrix for the specified time.
         */
-        glm::mat4 animate(double currentTime);
+        float4x4 animate(double currentTime);
 
         /* Render the UI.
         */
         void renderUI(Gui::Widgets& widget);
 
     private:
-        Animation(const std::string& name, uint32_t nodeID, double duration);
-
         Keyframe interpolate(InterpolationMode mode, double time) const;
         double calcSampleTime(double currentTime);
 
         std::string mName;
-        uint32_t mNodeID;
+        NodeID mNodeID;
         double mDuration; // Includes any time before the first keyframe. May be Assimp or FBX specific.
 
         Behavior mPreInfinityBehavior = Behavior::Constant; // How the animation behaves before the first keyframe

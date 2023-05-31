@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "Scene/Material/BasicMaterial.h"
+#include "BasicMaterial.h"
 
 namespace Falcor
 {
@@ -48,14 +48,23 @@ namespace Falcor
     class FALCOR_API HairMaterial : public BasicMaterial
     {
     public:
-        using SharedPtr = std::shared_ptr<HairMaterial>;
+        static ref<HairMaterial> create(ref<Device> pDevice, const std::string& name) { return make_ref<HairMaterial>(pDevice, name); };
 
-        /** Create a new hair material.
-            \param[in] name The material name.
+        HairMaterial(ref<Device> pDevice, const std::string& name);
+
+        Program::ShaderModuleList getShaderModules() const override;
+        Program::TypeConformanceList getTypeConformances() const override;
+
+        /** Compute sigmaA from eumelanin and pheomelanin concentration.
         */
-        static SharedPtr create(const std::string& name = "");
+        static float3 sigmaAFromConcentration(float ce, float cp);
 
-    protected:
-        HairMaterial(const std::string& name);
+        /** Compute sigmaA from RGB color.
+        */
+        static float3 sigmaAFromColor(float3 color, float betaN);
+
+        /** Compute RGB color from sigmaA (inverse of sigmaAFromColor).
+        */
+        static float3 colorFromSigmaA(float3 sigmaA, float betaN);
     };
 }

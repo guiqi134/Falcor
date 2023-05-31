@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -39,26 +39,24 @@ using namespace Falcor;
 class VBufferRaster : public GBufferBase
 {
 public:
-    using SharedPtr = std::shared_ptr<VBufferRaster>;
+    FALCOR_PLUGIN_CLASS(VBufferRaster, "VBufferRaster", "Rasterized V-buffer generation pass.");
 
-    static const Info kInfo;
+    static ref<VBufferRaster> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<VBufferRaster>(pDevice, dict); }
 
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
+    VBufferRaster(ref<Device> pDevice, const Dictionary& dict);
 
     RenderPassReflection reflect(const CompileData& compileData) override;
-    void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
 
 private:
-    VBufferRaster(const Dictionary& dict);
-
     // Internal state
-    Fbo::SharedPtr mpFbo;
+    ref<Fbo> mpFbo;
 
     struct
     {
-        GraphicsState::SharedPtr pState;
-        GraphicsProgram::SharedPtr pProgram;
-        GraphicsVars::SharedPtr pVars;
+        ref<GraphicsState> pState;
+        ref<GraphicsProgram> pProgram;
+        ref<GraphicsVars> pVars;
     } mRaster;
 };

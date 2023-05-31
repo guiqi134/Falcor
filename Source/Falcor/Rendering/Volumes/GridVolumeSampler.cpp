@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,8 +25,9 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "GridVolumeSampler.h"
+#include "Core/Assert.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
@@ -45,9 +46,11 @@ namespace Falcor
         };
     }
 
-    GridVolumeSampler::SharedPtr GridVolumeSampler::create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
+    GridVolumeSampler::GridVolumeSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options)
+        : mpScene(pScene)
+        , mOptions(options)
     {
-        return SharedPtr(new GridVolumeSampler(pRenderContext, pScene, options));
+        FALCOR_ASSERT(pScene);
     }
 
     Program::DefineList GridVolumeSampler::getDefines() const
@@ -91,13 +94,6 @@ namespace Falcor
         }
 
         return dirty;
-    }
-
-    GridVolumeSampler::GridVolumeSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
-        : mpScene(pScene)
-        , mOptions(options)
-    {
-        FALCOR_ASSERT(pScene);
     }
 
     FALCOR_SCRIPT_BINDING(GridVolumeSampler)

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,16 +27,16 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
-#include "Utils/Algorithm/ComputeParallelReduction.h"
+#include "RenderGraph/RenderPass.h"
+#include "Utils/Algorithm/ParallelReduction.h"
+#include <fstream>
 
 using namespace Falcor;
 
 class ErrorMeasurePass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ErrorMeasurePass>;
-
-    static const Info kInfo;
+    FALCOR_PLUGIN_CLASS(ErrorMeasurePass, "ErrorMeasurePass", "Measures error with respect to a reference image.");
 
     enum class OutputId
     {
@@ -46,7 +46,9 @@ public:
         Count
     };
 
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    static ref<ErrorMeasurePass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<ErrorMeasurePass>(pDevice, dict); }
+
+    ErrorMeasurePass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -55,20 +57,18 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
 private:
-    ErrorMeasurePass(const Dictionary& dict);
-
     bool init(RenderContext* pRenderContext, const Dictionary& dict);
 
     void loadReference();
-    Texture::SharedPtr getReference(const RenderData& renderData) const;
+    ref<Texture> getReference(const RenderData& renderData) const;
     void openMeasurementsFile();
     void saveMeasurementsToFile();
 
     void runDifferencePass(RenderContext* pRenderContext, const RenderData& renderData);
     void runReductionPasses(RenderContext* pRenderContext, const RenderData& renderData);
 
-    ComputePass::SharedPtr mpErrorMeasurerPass;
-    ComputeParallelReduction::SharedPtr mpParallelReduction;
+    ref<ComputePass> mpErrorMeasurerPass;
+    std::unique_ptr<ParallelReduction> mpParallelReduction;
 
     struct
     {
@@ -81,8 +81,8 @@ private:
     float3                  mRunningError = float3(0.f, 0.f, 0.f);
     float                   mRunningAvgError = -1.f;        ///< A negative value indicates that both running error values are invalid.
 
-    Texture::SharedPtr      mpReferenceTexture;
-    Texture::SharedPtr      mpDifferenceTexture;
+    ref<Texture>            mpReferenceTexture;
+    ref<Texture>            mpDifferenceTexture;
 
     std::ofstream           mMeasurementsFile;
 

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -62,10 +62,8 @@ struct BSDFIntegrator
 
         // Setup shading data struct.
         ShadingData sd = {};
-        sd.T = float3(1.f, 0.f, 0.f);
-        sd.B = float3(0.f, 1.f, 0.f);
-        sd.N = float3(0.f, 0.f, 1.f);
-        sd.faceN = sd.N;
+        sd.frame = ShadingFrame::createIdentity();
+        sd.faceN = sd.frame.N;
         sd.frontFacing = true;
 
         sd.mtl = gScene.materials.getMaterialHeader(materialID);
@@ -77,9 +75,9 @@ struct BSDFIntegrator
         float sinTheta = sqrt(1.f - cosTheta * cosTheta);
         sd.V = float3(sinTheta, 0.f, cosTheta);
 
-        // Create BSDF.
+        // Create MaterialInstance.
         let lod = ExplicitLodTextureSampler(0.f);
-        let bsdf = gScene.materials.getBSDF(sd, lod);
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
 
         // Approximate integral of the BSDF over grid cell.
         // We take multiple stratified samples to reduce the integration error.
@@ -99,7 +97,7 @@ struct BSDFIntegrator
                 float3 wo = sample_cosine_hemisphere_concentric(u, pdf);
 
                 // Evaluate BSDF divided by pdf.
-                value += pdf > 0.f ? bsdf.eval(sd, wo, sg) / pdf : float3(0.f);
+                value += pdf > 0.f ? mi.eval(sd, wo, sg) / pdf : float3(0.f);
             }
         }
         value *= 1.f / (kSampleCount.x * kSampleCount.y);

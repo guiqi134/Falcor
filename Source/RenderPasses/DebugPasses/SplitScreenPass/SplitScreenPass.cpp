@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,8 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "SplitScreenPass.h"
-
-const RenderPass::Info SplitScreenPass::kInfo { "SplitScreenPass", "Allows the user to split the screen between two inputs." };
 
 namespace
 {
@@ -59,39 +57,34 @@ namespace
     const std::string kSplitShader = "RenderPasses/DebugPasses/SplitScreenPass/SplitScreen.ps.slang";
 }
 
-SplitScreenPass::SplitScreenPass()
-    : ComparisonPass(kInfo)
+SplitScreenPass::SplitScreenPass(ref<Device> pDevice, const Dictionary& dict)
+    : ComparisonPass(pDevice)
 {
-    mpArrowTex = Texture::create2D(16, 16, ResourceFormat::R8Unorm, 1, Texture::kMaxPossible, kArrowArray);
-    mClock = gpFramework->getGlobalClock();
+    mpArrowTex = Texture::create2D(mpDevice, 16, 16, ResourceFormat::R8Unorm, 1, Texture::kMaxPossible, kArrowArray);
     createProgram();
-}
 
-SplitScreenPass::SharedPtr SplitScreenPass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new SplitScreenPass());
     for (const auto& [key, value] : dict)
     {
-        if (!pPass->parseKeyValuePair(key, value))
+        if (!parseKeyValuePair(key, value))
         {
             logWarning("Unknown field '{}' in a SplitScreenPass dictionary.", key);
         }
     }
-    return pPass;
 }
 
 void SplitScreenPass::createProgram()
 {
     // Create our shader that splits the screen.
-    mpSplitShader = FullScreenPass::create(kSplitShader);
+    mpSplitShader = FullScreenPass::create(mpDevice, kSplitShader);
 }
 
 void SplitScreenPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    mpSplitShader["GlobalCB"]["gDividerColor"] = mMouseOverDivider ? kColorSelected : kColorUnselected;
-    mpSplitShader["GlobalCB"]["gMousePosition"] = mMousePos;
-    mpSplitShader["GlobalCB"]["gDrawArrows"] = mDrawArrows && mMouseOverDivider;
-    mpSplitShader["gArrowTex"] = mpArrowTex;
+    auto var = mpSplitShader->getRootVar();
+    var["GlobalCB"]["gDividerColor"] = mMouseOverDivider ? kColorSelected : kColorUnselected;
+    var["GlobalCB"]["gMousePosition"] = mMousePos;
+    var["GlobalCB"]["gDrawArrows"] = mDrawArrows && mMouseOverDivider;
+    var["gArrowTex"] = mpArrowTex;
 
     ComparisonPass::execute(pRenderContext, renderData);
 }
@@ -105,7 +98,7 @@ bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
     mMousePos = int2(mouseEvent.screenPos.x, mouseEvent.screenPos.y);
 
     // If we're outside the window, stop.
-    mMousePos = glm::clamp(mMousePos, int2(0, 0), int2(pDstFbo->getWidth() - 1, pDstFbo->getHeight() - 1));
+    mMousePos = clamp(mMousePos, int2(0, 0), int2(pDstFbo->getWidth() - 1, pDstFbo->getHeight() - 1));
 
     // Actually process our events
     if (mMouseOverDivider && mouseEvent.type == MouseEvent::Type::ButtonDown && mouseEvent.button == Input::MouseButton::Left)
@@ -113,8 +106,8 @@ bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
         mDividerGrabbed = true;
         handled = true;
 
-        if (mClock.getTime() - mTimeOfLastClick < 0.1f) mSplitLoc = 0.5f;
-        else mTimeOfLastClick = mClock.getTime();
+        if (CpuTimer::calcDuration(mTimeOfLastClick, CpuTimer::getCurrentTimePoint()) < 100.0) mSplitLoc = 0.5f;
+        else mTimeOfLastClick = CpuTimer::getCurrentTimePoint();
     }
     else if (mDividerGrabbed)
     {
@@ -132,7 +125,7 @@ bool SplitScreenPass::onMouseEvent(const MouseEvent& mouseEvent)
 
     // Update whether the mouse if over the divider.  To ensure selecting the slider isn't a pain,
     // have a minimum landing size (13 pixels, 2*6+1) that counts as hovering over the slider.
-    mMouseOverDivider = (glm::abs(int32_t(mSplitLoc * pDstFbo->getWidth()) - mMousePos.x) < glm::max(6, int32_t(mDividerSize)));
+    mMouseOverDivider = (std::abs(int32_t(mSplitLoc * pDstFbo->getWidth()) - mMousePos.x) < std::max(6, int32_t(mDividerSize)));
 
     return handled;
 }

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,8 +30,6 @@
 #include "RenderGraph/RenderPassStandardFlags.h"
 #include "RenderGraph/RenderPassHelpers.h"
 
-const RenderPass::Info VBufferRT::kInfo { "VBufferRT", "Ray traced V-buffer generation pass." };
-
 namespace
 {
     const std::string kProgramRaytraceFile = "RenderPasses/GBuffer/VBuffer/VBufferRT.rt.slang";
@@ -55,12 +53,22 @@ namespace
         { "mvec",           "gMotionVector",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
         { "viewW",          "gViewW",           "View direction in world space",    true /* optional */, ResourceFormat::RGBA32Float }, // TODO: Switch to packed 2x16-bit snorm format.
         { "time",           "gTime",            "Per-pixel execution time",         true /* optional */, ResourceFormat::R32Uint     },
+        { "mask",           "gMask",            "Mask",                             true /* optional */, ResourceFormat::R32Float    },
     };
 };
 
-VBufferRT::SharedPtr VBufferRT::create(RenderContext* pRenderContext, const Dictionary& dict)
+VBufferRT::VBufferRT(ref<Device> pDevice, const Dictionary& dict)
+    : GBufferBase(pDevice)
 {
-    return SharedPtr(new VBufferRT(dict));
+    if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::RaytracingTier1_1))
+    {
+        throw RuntimeError("VBufferRT: Raytracing Tier 1.1 is not supported by the current device");
+    }
+
+    parseDictionary(dict);
+
+    // Create sample generator
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_DEFAULT);
 }
 
 RenderPassReflection VBufferRT::reflect(const CompileData& compileData)
@@ -82,7 +90,7 @@ void VBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
     GBufferBase::execute(pRenderContext, renderData);
 
     // Update frame dimension based on render pass output.
-    auto pOutput = renderData[kVBufferName]->asTexture();
+    auto pOutput = renderData.getTexture(kVBufferName);
     FALCOR_ASSERT(pOutput);
     updateFrameDim(uint2(pOutput->getWidth(), pOutput->getHeight()));
 
@@ -139,11 +147,23 @@ Dictionary VBufferRT::getScriptingDictionary()
     return dict;
 }
 
-void VBufferRT::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void VBufferRT::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     GBufferBase::setScene(pRenderContext, pScene);
 
     recreatePrograms();
+}
+
+void VBufferRT::parseDictionary(const Dictionary& dict)
+{
+    GBufferBase::parseDictionary(dict);
+
+    for (const auto& [key, value] : dict)
+    {
+        if (key == kUseTraceRayInline) mUseTraceRayInline = value;
+        else if (key == kUseDOF) mUseDOF = value;
+        // TODO: Check for unparsed fields, including those parsed in base classes.
+    }
 }
 
 void VBufferRT::recreatePrograms()
@@ -164,13 +184,14 @@ void VBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
 
         // Create ray tracing program.
         RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kProgramRaytraceFile);
+        desc.addTypeConformances(mpScene->getTypeConformances());
         desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-        desc.addTypeConformances(mpScene->getTypeConformances());
 
-        RtBindingTable::SharedPtr sbt = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        ref<RtBindingTable> sbt = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
         sbt->setRayGen(desc.addRayGen("rayGen"));
         sbt->setMiss(0, desc.addMiss("miss"));
         sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
@@ -193,10 +214,8 @@ void VBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::SDFGrid), desc.addHitGroup("sdfGridClosestHit", "", "sdfGridIntersection"));
         }
 
-        // Add hit groups for for other procedural primitives here.
-
-        mRaytrace.pProgram = RtProgram::create(desc, defines);
-        mRaytrace.pVars = RtProgramVars::create(mRaytrace.pProgram, sbt);
+        mRaytrace.pProgram = RtProgram::create(mpDevice, desc, defines);
+        mRaytrace.pVars = RtProgramVars::create(mpDevice, mRaytrace.pProgram, sbt);
 
         // Bind static resources.
         ShaderVar var = mRaytrace.pVars->getRootVar();
@@ -214,15 +233,11 @@ void VBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
 
 void VBufferRT::executeCompute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::RaytracingTier1_1))
-    {
-        throw RuntimeError("VBufferRT: Raytracing Tier 1.1 is not supported by the current device");
-    }
-
     // Create compute pass.
     if (!mpComputePass)
     {
     	Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
     	desc.addShaderLibrary(kProgramComputeFile).csEntry("main").setShaderModel("6_5");
         desc.addTypeConformances(mpScene->getTypeConformances());
 
@@ -231,7 +246,7 @@ void VBufferRT::executeCompute(RenderContext* pRenderContext, const RenderData& 
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getShaderDefines(renderData));
 
-    	mpComputePass = ComputePass::create(desc, defines, true);
+    	mpComputePass = ComputePass::create(mpDevice, desc, defines, true);
 
         // Bind static resources
         ShaderVar var = mpComputePass->getRootVar();
@@ -276,29 +291,8 @@ void VBufferRT::setShaderData(const ShaderVar& var, const RenderData& renderData
     // Bind output channels as UAV buffers.
     auto bind = [&](const ChannelDesc& channel)
     {
-        Texture::SharedPtr pTex = getOutput(renderData, channel.name);
+        ref<Texture> pTex = getOutput(renderData, channel.name);
         var[channel.texname] = pTex;
     };
     for (const auto& channel : kVBufferExtraChannels) bind(channel);
-}
-
-VBufferRT::VBufferRT(const Dictionary& dict)
-    : GBufferBase(kInfo)
-{
-    parseDictionary(dict);
-
-    // Create sample generator
-    mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_DEFAULT);
-}
-
-void VBufferRT::parseDictionary(const Dictionary& dict)
-{
-    GBufferBase::parseDictionary(dict);
-
-    for (const auto& [key, value] : dict)
-    {
-        if (key == kUseTraceRayInline) mUseTraceRayInline = value;
-        else if (key == kUseDOF) mUseDOF = value;
-        // TODO: Check for unparsed fields, including those parsed in base classes.
-    }
 }

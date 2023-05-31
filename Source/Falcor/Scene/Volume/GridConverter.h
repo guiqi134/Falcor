@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,14 +26,28 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include <execution>
+#include "BrickedGrid.h"
+#include "BC4Encode.h"
+#include "Core/API/Formats.h"
+#include "Utils/Logger.h"
+#include "Utils/HostDeviceShared.slangh"
+#include "Utils/NumericRange.h"
+#include "Utils/Math/Vector.h"
+#include "Utils/Timing/CpuTimer.h"
+
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4244 4267)
+#endif
 #include <nanovdb/NanoVDB.h>
+#ifdef _MSC_VER
 #pragma warning(pop)
-#include "BC4Encode.h"
-#include "Utils/NumericRange.h"
-#include "BrickedGrid.h"
+#endif
+
+#include <algorithm>
+#include <atomic>
+#include <execution>
+#include <vector>
 
 namespace Falcor
 {
@@ -49,18 +63,18 @@ namespace Falcor
         NanoVDBToBricksConverter(const nanovdb::FloatGrid* grid);
         NanoVDBToBricksConverter(const NanoVDBToBricksConverter& rhs) = delete;
 
-        BrickedGrid convert();
+        BrickedGrid convert(ref<Device> pDevice);
 
     private:
-        const static uint kBrickSize = 8; // Must be 8, to match both NanoVDB leaf size.
-        const static int kBC4Compress = kBitsPerTexel == 4;
+        const static uint32_t kBrickSize = 8; // Must be 8, to match both NanoVDB leaf size.
+        const static int32_t kBC4Compress = kBitsPerTexel == 4;
 
         void convertSlice(int z);
         void computeMip(int mip);
 
         inline uint3 getAtlasSizeBricks() const { return mAtlasSizeBricks; }
         inline uint3 getAtlasSizePixels() const { return mAtlasSizeBricks * kBrickSize; }
-        inline uint getAtlasMaxBrick() const { return mAtlasSizeBricks.x * mAtlasSizeBricks.y * mAtlasSizeBricks.z; }
+        inline uint32_t getAtlasMaxBrick() const { return mAtlasSizeBricks.x * mAtlasSizeBricks.y * mAtlasSizeBricks.z; }
 
         inline ResourceFormat getAtlasFormat() {
             switch (kBitsPerTexel) {
@@ -149,7 +163,7 @@ namespace Falcor
                 if (leaf)
                 {
                     // Nanovdb only stores minorant/majorant for active voxels, but we need all of them... Grab the central 8x8x8 first the quick way.
-                    const float* data = leaf->voxels();
+                    const float* data = leaf->data()->mValues;
                     for (int i = 0; i < kBrickSize * kBrickSize * kBrickSize; ++i) expandMinorantMajorant(data[i], minorant, majorant);
                     // We also need the 1-halo from neighbouring bricks. Fetch them in an order that maximises nanovdb's internal cache reuse.
                     for (int j = -1; j <= kBrickSize; ++j) for (int i = 0; i < kBrickSize; ++i) expandMinorantMajorant(a.getValue(ijk + nanovdb::Coord(i, j, -1)), minorant, majorant);
@@ -172,7 +186,7 @@ namespace Falcor
                 }
                 else
                 {
-                    const float* data = leaf->voxels();
+                    const float* data = leaf->data()->mValues;
                     majorant = f16tof32(f32tof16(majorant) + 1);
                     minorant = f16tof32(f32tof16(minorant));
                     *rangedst++ = f32tof16(majorant) + (f32tof16(minorant) << 16);
@@ -268,8 +282,8 @@ namespace Falcor
         } // z
     }
 
-    template <typename TexelType, unsigned int kBitsPerTexel> typename
-    BrickedGrid NanoVDBToBricksConverter<TexelType, kBitsPerTexel>::convert()
+    template <typename TexelType, unsigned int kBitsPerTexel>
+    BrickedGrid NanoVDBToBricksConverter<TexelType, kBitsPerTexel>::convert(ref<Device> pDevice)
     {
         auto t0 = CpuTimer::getCurrentTimePoint();
         auto range = NumericRange<int>(0, mLeafDim[0].z);
@@ -279,9 +293,9 @@ namespace Falcor
         logInfo("converted in {}ms: mNonEmptyCount {} vs max {}", dt, mNonEmptyCount, getAtlasMaxBrick());
 
         BrickedGrid bricks;
-        bricks.range = Texture::create3D(mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RG16Float, 4, mRangeData.data(), ResourceBindFlags::ShaderResource, false);
-        bricks.indirection = Texture::create3D(mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RGBA8Uint, 1, mPtrData.data(), ResourceBindFlags::ShaderResource, false);
-        bricks.atlas = Texture::create3D(getAtlasSizePixels().x, getAtlasSizePixels().y, getAtlasSizePixels().z, getAtlasFormat(), 1, mAtlasData.data(), ResourceBindFlags::ShaderResource, false);
+        bricks.range = Texture::create3D(pDevice, mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RG16Float, 4, mRangeData.data(), ResourceBindFlags::ShaderResource, false);
+        bricks.indirection = Texture::create3D(pDevice, mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RGBA8Uint, 1, mPtrData.data(), ResourceBindFlags::ShaderResource, false);
+        bricks.atlas = Texture::create3D(pDevice, getAtlasSizePixels().x, getAtlasSizePixels().y, getAtlasSizePixels().z, getAtlasFormat(), 1, mAtlasData.data(), ResourceBindFlags::ShaderResource, false);
         return bricks;
     }
 }

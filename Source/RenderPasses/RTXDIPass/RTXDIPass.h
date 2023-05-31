@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 #pragma once
 
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 #include "Rendering/RTXDI/RTXDI.h"
 
 using namespace Falcor;
@@ -50,40 +51,34 @@ using namespace Falcor;
 class RTXDIPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<RTXDIPass>;
+    FALCOR_PLUGIN_CLASS(RTXDIPass, "RTXDIPass", {"Standalone pass for direct lighting using RTXDI."})
 
-    static const Info kInfo;
+    static ref<RTXDIPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<RTXDIPass>(pDevice, dict); }
 
-    /** Create a new render pass object.
-        \param[in] pRenderContext The render context.
-        \param[in] dict Dictionary of serialized parameters.
-        \return A new object, or an exception is thrown if creation failed.
-    */
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    RTXDIPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override;
 
 private:
-    RTXDIPass(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
 
-    void prepareSurfaceData(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer);
-    void finalShading(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer, const RenderData& renderData);
+    void prepareSurfaceData(RenderContext* pRenderContext, const ref<Texture>& pVBuffer);
+    void finalShading(RenderContext* pRenderContext, const ref<Texture>& pVBuffer, const RenderData& renderData);
 
-    Scene::SharedPtr        mpScene;
+    ref<Scene>              mpScene;
 
-    RTXDI::SharedPtr        mpRTXDI;
+    std::unique_ptr<RTXDI>  mpRTXDI;
     RTXDI::Options          mOptions;
 
-    ComputePass::SharedPtr  mpPrepareSurfaceDataPass;
-    ComputePass::SharedPtr  mpFinalShadingPass;
+    ref<ComputePass>        mpPrepareSurfaceDataPass;
+    ref<ComputePass>        mpFinalShadingPass;
 
     uint2                   mFrameDim = { 0, 0 };
     bool                    mOptionsChanged = false;

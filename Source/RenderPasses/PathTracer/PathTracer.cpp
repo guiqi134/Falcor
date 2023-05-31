@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,9 +27,8 @@
  **************************************************************************/
 #include "PathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
 #include "Rendering/Lights/EmissiveUniformSampler.h"
-
-const RenderPass::Info PathTracer::kInfo { "PathTracer", "Reference path tracer." };
 
 namespace
 {
@@ -58,7 +57,7 @@ namespace
     const std::string kOutputAlbedo = "albedo";
     const std::string kOutputSpecularAlbedo = "specularAlbedo";
     const std::string kOutputIndirectAlbedo = "indirectAlbedo";
-    const std::string kOutputNormal = "normal";
+    const std::string kOutputGuideNormal = "guideNormal";
     const std::string kOutputReflectionPosW = "reflectionPosW";
     const std::string kOutputRayCount = "rayCount";
     const std::string kOutputPathLength = "pathLength";
@@ -87,7 +86,7 @@ namespace
         { kOutputAlbedo,                                    "",     "Output albedo (linear)", true /* optional */, ResourceFormat::RGBA8Unorm },
         { kOutputSpecularAlbedo,                            "",     "Output specular albedo (linear)", true /* optional */, ResourceFormat::RGBA8Unorm },
         { kOutputIndirectAlbedo,                            "",     "Output indirect albedo (linear)", true /* optional */, ResourceFormat::RGBA8Unorm },
-        { kOutputNormal,                                    "",     "Output normal (linear)", true /* optional */, ResourceFormat::RGBA16Float },
+        { kOutputGuideNormal,                               "",     "Output guide normal (linear)", true /* optional */, ResourceFormat::RGBA16Float },
         { kOutputReflectionPosW,                            "",     "Output reflection pos (world space)", true /* optional */, ResourceFormat::RGBA32Float },
         { kOutputRayCount,                                  "",     "Per-pixel ray count", true /* optional */, ResourceFormat::R32Uint },
         { kOutputPathLength,                                "",     "Per-pixel path length", true /* optional */, ResourceFormat::R32Uint },
@@ -175,15 +174,9 @@ namespace
     const std::string kUseNRDDemodulation = "useNRDDemodulation";
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(PathTracer::kInfo, PathTracer::create);
+    registry.registerClass<RenderPass, PathTracer>();
     ScriptBindings::registerBinding(PathTracer::registerBindings);
 }
 
@@ -198,7 +191,7 @@ void PathTracer::registerBindings(pybind11::module& m)
     misHeuristic.value("PowerTwo", MISHeuristic::PowerTwo);
     misHeuristic.value("PowerExp", MISHeuristic::PowerExp);
 
-    pybind11::class_<PathTracer, RenderPass, PathTracer::SharedPtr> pass(m, "PathTracer");
+    pybind11::class_<PathTracer, RenderPass, ref<PathTracer>> pass(m, "PathTracer");
     pass.def_property_readonly("pixelStats", &PathTracer::getPixelStats);
 
     pass.def_property("useFixedSeed",
@@ -211,19 +204,14 @@ void PathTracer::registerBindings(pybind11::module& m)
     );
 }
 
-PathTracer::SharedPtr PathTracer::create(RenderContext* pRenderContext, const Dictionary& dict)
+PathTracer::PathTracer(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
-    return SharedPtr(new PathTracer(dict));
-}
-
-PathTracer::PathTracer(const Dictionary& dict)
-    : RenderPass(kInfo)
-{
-    if (!gpDevice->isShaderModelSupported(Device::ShaderModel::SM6_5))
+    if (!mpDevice->isShaderModelSupported(Device::ShaderModel::SM6_5))
     {
         throw RuntimeError("PathTracer: Shader Model 6.5 is not supported by the current device");
     }
-    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::RaytracingTier1_1))
+    if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::RaytracingTier1_1))
     {
         throw RuntimeError("PathTracer: Raytracing Tier 1.1 is not supported by the current device");
     }
@@ -232,19 +220,16 @@ PathTracer::PathTracer(const Dictionary& dict)
     validateOptions();
 
     // Create sample generator.
-    mpSampleGenerator = SampleGenerator::create(mStaticParams.sampleGenerator);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, mStaticParams.sampleGenerator);
 
-    // Create programs.
+    // Create resolve pass. This doesn't depend on the scene so can be created here.
     auto defines = mStaticParams.getDefines(*this);
+    mpResolvePass = ComputePass::create(mpDevice, Program::Desc(kResolvePassFilename).setShaderModel(kShaderModel).csEntry("main"), defines, false);
 
-    mpGeneratePaths = ComputePass::create(Program::Desc(kGeneratePathsFilename).setShaderModel(kShaderModel).csEntry("main"), defines, false);
-    mpResolvePass = ComputePass::create(Program::Desc(kResolvePassFilename).setShaderModel(kShaderModel).csEntry("main"), defines, false);
-    mpReflectTypes = ComputePass::create(Program::Desc(kReflectTypesFile).setShaderModel(kShaderModel).csEntry("main"), defines, false);
+    // Note: The other programs are lazily created in updatePrograms() because a scene needs to be present when creating them.
 
-    // Note: The trace pass program is lazily created in updatePrograms() because a scene needs to be present when creating it.
-
-    mpPixelStats = PixelStats::create();
-    mpPixelDebug = PixelDebug::create();
+    mpPixelStats = std::make_unique<PixelStats>(mpDevice);
+    mpPixelDebug = std::make_unique<PixelDebug>(mpDevice);
 }
 
 void PathTracer::parseDictionary(const Dictionary& dict)
@@ -323,7 +308,7 @@ void PathTracer::validateOptions()
     if (mParams.specularRoughnessThreshold < 0.f || mParams.specularRoughnessThreshold > 1.f)
     {
         logWarning("'specularRoughnessThreshold' has invalid value. Clamping to range [0,1].");
-        mParams.specularRoughnessThreshold = clamp(mParams.specularRoughnessThreshold, 0.f, 1.f);
+        mParams.specularRoughnessThreshold = std::clamp(mParams.specularRoughnessThreshold, 0.f, 1.f);
     }
 
     // Static parameters.
@@ -360,7 +345,7 @@ void PathTracer::validateOptions()
 
 Dictionary PathTracer::getScriptingDictionary()
 {
-    if (auto lightBVHSampler = std::dynamic_pointer_cast<LightBVHSampler>(mpEmissiveSampler))
+    if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveSampler.get()))
     {
         mLightBVHOptions = lightBVHSampler->getOptions();
     }
@@ -435,13 +420,13 @@ void PathTracer::setFrameDim(const uint2 frameDim)
     FALCOR_ASSERT(kScreenTileDim.x == (1 << kScreenTileBits.x) && kScreenTileDim.y == (1 << kScreenTileBits.y));
     mParams.screenTiles = div_round_up(mParams.frameDim, kScreenTileDim);
 
-    if (mParams.frameDim != prevFrameDim || mParams.screenTiles != prevScreenTiles)
+    if (any(mParams.frameDim != prevFrameDim) || any(mParams.screenTiles != prevScreenTiles))
     {
         mVarsChanged = true;
     }
 }
 
-void PathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void PathTracer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
     mParams.frameCount = 0;
@@ -455,6 +440,8 @@ void PathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr&
     mpTracePass = nullptr;
     mpTraceDeltaReflectionPass = nullptr;
     mpTraceDeltaTransmissionPass = nullptr;
+    mpGeneratePaths = nullptr;
+    mpReflectTypes = nullptr;
 
     resetLighting();
 
@@ -491,7 +478,7 @@ void PathTracer::execute(RenderContext* pRenderContext, const RenderData& render
     // Update RTXDI.
     if (mpRTXDI)
     {
-        const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
+        const auto& pMotionVectors = renderData.getTexture(kInputMotionVectors);
         mpRTXDI->update(pRenderContext, pMotionVectors);
     }
 
@@ -568,7 +555,7 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
 
     if (widget.dropdown("Sample generator", SampleGenerator::getGuiDropdownList(), mStaticParams.sampleGenerator))
     {
-        mpSampleGenerator = SampleGenerator::create(mStaticParams.sampleGenerator);
+        mpSampleGenerator = SampleGenerator::create(mpDevice, mStaticParams.sampleGenerator);
         dirty = true;
     }
 
@@ -711,7 +698,7 @@ bool PathTracer::onMouseEvent(const MouseEvent& mouseEvent)
     return mpPixelDebug->onMouseEvent(mouseEvent);
 }
 
-PathTracer::TracePass::TracePass(const std::string& name, const std::string& passDefine, const Scene::SharedPtr& pScene, const Program::DefineList& defines, const Program::TypeConformanceList& globalTypeConformances)
+PathTracer::TracePass::TracePass(ref<Device> pDevice, const std::string& name, const std::string& passDefine, const ref<Scene>& pScene, const Program::DefineList& defines, const Program::TypeConformanceList& globalTypeConformances)
     : name(name)
     , passDefine(passDefine)
 {
@@ -719,6 +706,7 @@ PathTracer::TracePass::TracePass(const std::string& name, const std::string& pas
     const uint32_t kMissScatter = 0;
 
     RtProgram::Desc desc;
+    desc.addShaderModules(pScene->getShaderModules());
     desc.addShaderLibrary(kTracePassFilename);
     desc.setShaderModel(kShaderModel);
     desc.setMaxPayloadSize(160); // This is conservative but the required minimum is 140 bytes.
@@ -738,11 +726,11 @@ PathTracer::TracePass::TracePass(const std::string& name, const std::string& pas
     // Specify hit group entry points for every combination of geometry and material type.
     // The code for each hit group gets specialized for the actual types it's operating on.
     // First query which material types the scene has.
-    auto materialTypes = pScene->getMaterialSystem()->getMaterialTypes();
+    auto materialTypes = pScene->getMaterialSystem().getMaterialTypes();
 
     for (const auto materialType : materialTypes)
     {
-        auto typeConformances = pScene->getMaterialSystem()->getTypeConformances(materialType);
+        auto typeConformances = pScene->getMaterialSystem().getTypeConformances(materialType);
 
         // Add hit groups for triangles.
         if (auto geometryIDs = pScene->getGeometryIDs(Scene::GeometryType::TriangleMesh, materialType); !geometryIDs.empty())
@@ -773,15 +761,15 @@ PathTracer::TracePass::TracePass(const std::string& name, const std::string& pas
         }
     }
 
-    pProgram = RtProgram::create(desc, defines);
+    pProgram = RtProgram::create(pDevice, desc, defines);
 }
 
-void PathTracer::TracePass::prepareProgram(const Program::DefineList& defines)
+void PathTracer::TracePass::prepareProgram(ref<Device> pDevice, const Program::DefineList& defines)
 {
     FALCOR_ASSERT(pProgram != nullptr && pBindingTable != nullptr);
     pProgram->setDefines(defines);
     if (!passDefine.empty()) pProgram->addDefine(passDefine);
-    pVars = RtProgramVars::create(pProgram, pBindingTable);
+    pVars = RtProgramVars::create(pDevice, pProgram, pBindingTable);
 }
 
 void PathTracer::updatePrograms()
@@ -791,28 +779,46 @@ void PathTracer::updatePrograms()
     if (mRecompile == false) return;
 
     auto defines = mStaticParams.getDefines(*this);
-    auto globalTypeConformances = mpScene->getMaterialSystem()->getTypeConformances();
+    auto globalTypeConformances = mpScene->getMaterialSystem().getTypeConformances();
 
     // Create trace passes lazily.
-    if (!mpTracePass) mpTracePass = std::make_unique<TracePass>("tracePass", "", mpScene, defines, globalTypeConformances);
+    if (!mpTracePass) mpTracePass = std::make_unique<TracePass>(mpDevice, "tracePass", "", mpScene, defines, globalTypeConformances);
     if (mOutputNRDAdditionalData)
     {
-        if (!mpTraceDeltaReflectionPass) mpTraceDeltaReflectionPass = std::make_unique<TracePass>("traceDeltaReflectionPass", "DELTA_REFLECTION_PASS", mpScene, defines, globalTypeConformances);
-        if (!mpTraceDeltaTransmissionPass) mpTraceDeltaTransmissionPass = std::make_unique<TracePass>("traceDeltaTransmissionPass", "DELTA_TRANSMISSION_PASS", mpScene, defines, globalTypeConformances);
+        if (!mpTraceDeltaReflectionPass) mpTraceDeltaReflectionPass = std::make_unique<TracePass>(mpDevice, "traceDeltaReflectionPass", "DELTA_REFLECTION_PASS", mpScene, defines, globalTypeConformances);
+        if (!mpTraceDeltaTransmissionPass) mpTraceDeltaTransmissionPass = std::make_unique<TracePass>(mpDevice, "traceDeltaTransmissionPass", "DELTA_TRANSMISSION_PASS", mpScene, defines, globalTypeConformances);
     }
 
     // Create program vars for trace programs.
     // We only need to set defines for program specialization here. Type conformances have already been setup on construction.
-    mpTracePass->prepareProgram(defines);
-    if (mpTraceDeltaReflectionPass) mpTraceDeltaReflectionPass->prepareProgram(defines);
-    if (mpTraceDeltaTransmissionPass) mpTraceDeltaTransmissionPass->prepareProgram(defines);
+    mpTracePass->prepareProgram(mpDevice, defines);
+    if (mpTraceDeltaReflectionPass) mpTraceDeltaReflectionPass->prepareProgram(mpDevice, defines);
+    if (mpTraceDeltaTransmissionPass) mpTraceDeltaTransmissionPass->prepareProgram(mpDevice, defines);
+
+    // Create compute passes.
+    Program::Desc baseDesc;
+    baseDesc.addShaderModules(mpScene->getShaderModules());
+    baseDesc.addTypeConformances(globalTypeConformances);
+    baseDesc.setShaderModel(kShaderModel);
+
+    if (!mpGeneratePaths)
+    {
+        Program::Desc desc = baseDesc;
+        desc.addShaderLibrary(kGeneratePathsFilename).csEntry("main");
+        mpGeneratePaths = ComputePass::create(mpDevice, desc, defines, false);
+    }
+    if (!mpReflectTypes)
+    {
+        Program::Desc desc = baseDesc;
+        desc.addShaderLibrary(kReflectTypesFile).csEntry("main");
+        mpReflectTypes = ComputePass::create(mpDevice, desc, defines, false);
+    }
 
     // Perform program specialization.
     // Note that we must use set instead of add functions to replace any stale state.
-    auto prepareProgram = [&](Program::SharedPtr program)
+    auto prepareProgram = [&](ref<Program> program)
     {
         program->setDefines(defines);
-        program->setTypeConformances(globalTypeConformances);
     };
     prepareProgram(mpGeneratePaths->getProgram());
     prepareProgram(mpResolvePass->getProgram());
@@ -846,7 +852,7 @@ void PathTracer::prepareResources(RenderContext* pRenderContext, const RenderDat
         if (!mpSampleOffset || mpSampleOffset->getWidth() != mParams.frameDim.x || mpSampleOffset->getHeight() != mParams.frameDim.y)
         {
             FALCOR_ASSERT(kScreenTileDim.x * kScreenTileDim.y * kMaxSamplesPerPixel <= (1u << 16));
-            mpSampleOffset = Texture::create2D(mParams.frameDim.x, mParams.frameDim.y, ResourceFormat::R16Uint, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+            mpSampleOffset = Texture::create2D(mpDevice, mParams.frameDim.x, mParams.frameDim.y, ResourceFormat::R16Uint, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
             mVarsChanged = true;
         }
     }
@@ -859,23 +865,24 @@ void PathTracer::prepareResources(RenderContext* pRenderContext, const RenderDat
     {
         if (!mpSampleColor || mpSampleColor->getElementCount() < sampleCount || mVarsChanged)
         {
-            mpSampleColor = Buffer::createStructured(var["sampleColor"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+            mpSampleColor = Buffer::createStructured(mpDevice, var["sampleColor"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
             mVarsChanged = true;
         }
     }
 
     if (mOutputGuideData && (!mpSampleGuideData || mpSampleGuideData->getElementCount() < sampleCount || mVarsChanged))
     {
-        mpSampleGuideData = Buffer::createStructured(var["sampleGuideData"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleGuideData = Buffer::createStructured(mpDevice, var["sampleGuideData"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mVarsChanged = true;
     }
 
     if (mOutputNRDData && (!mpSampleNRDRadiance || mpSampleNRDRadiance->getElementCount() < sampleCount || mVarsChanged))
     {
-        mpSampleNRDRadiance = Buffer::createStructured(var["sampleNRDRadiance"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-        mpSampleNRDHitDist = Buffer::createStructured(var["sampleNRDHitDist"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-        mpSampleNRDEmission = Buffer::createStructured(var["sampleNRDEmission"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-        mpSampleNRDReflectance = Buffer::createStructured(var["sampleNRDReflectance"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleNRDRadiance = Buffer::createStructured(mpDevice, var["sampleNRDRadiance"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleNRDHitDist = Buffer::createStructured(mpDevice, var["sampleNRDHitDist"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleNRDPrimaryHitNeeOnDelta = Buffer::createStructured(mpDevice, var["sampleNRDPrimaryHitNeeOnDelta"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleNRDEmission = Buffer::createStructured(mpDevice, var["sampleNRDEmission"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpSampleNRDReflectance = Buffer::createStructured(mpDevice, var["sampleNRDReflectance"], sampleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mVarsChanged = true;
     }
 }
@@ -886,7 +893,7 @@ void PathTracer::preparePathTracer(const RenderData& renderData)
     if (!mpPathTracerBlock || mVarsChanged)
     {
         auto reflector = mpReflectTypes->getProgram()->getReflector()->getParameterBlock("pathTracer");
-        mpPathTracerBlock = ParameterBlock::create(reflector);
+        mpPathTracerBlock = ParameterBlock::create(mpDevice, reflector);
         FALCOR_ASSERT(mpPathTracerBlock);
         mVarsChanged = true;
     }
@@ -899,7 +906,7 @@ void PathTracer::preparePathTracer(const RenderData& renderData)
 void PathTracer::resetLighting()
 {
     // Retain the options for the emissive sampler.
-    if (auto lightBVHSampler = std::dynamic_pointer_cast<LightBVHSampler>(mpEmissiveSampler))
+    if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveSampler.get()))
     {
         mLightBVHOptions = lightBVHSampler->getOptions();
     }
@@ -947,7 +954,7 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
     {
         if (!mpEnvMapSampler)
         {
-            mpEnvMapSampler = EnvMapSampler::create(pRenderContext, mpScene->getEnvMap());
+            mpEnvMapSampler = std::make_unique<EnvMapSampler>(mpDevice, mpScene->getEnvMap());
             lightingChanged = true;
             mRecompile = true;
         }
@@ -973,19 +980,19 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
         if (!mpEmissiveSampler)
         {
             const auto& pLights = mpScene->getLightCollection(pRenderContext);
-            FALCOR_ASSERT(pLights && pLights->getActiveLightCount() > 0);
+            FALCOR_ASSERT(pLights && pLights->getActiveLightCount(pRenderContext) > 0);
             FALCOR_ASSERT(!mpEmissiveSampler);
 
             switch (mStaticParams.emissiveSampler)
             {
             case EmissiveLightSamplerType::Uniform:
-                mpEmissiveSampler = EmissiveUniformSampler::create(pRenderContext, mpScene);
+                mpEmissiveSampler = std::make_unique<EmissiveUniformSampler>(pRenderContext, mpScene);
                 break;
             case EmissiveLightSamplerType::LightBVH:
-                mpEmissiveSampler = LightBVHSampler::create(pRenderContext, mpScene, mLightBVHOptions);
+                mpEmissiveSampler = std::make_unique<LightBVHSampler>(pRenderContext, mpScene, mLightBVHOptions);
                 break;
             case EmissiveLightSamplerType::Power:
-                mpEmissiveSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+                mpEmissiveSampler = std::make_unique<EmissivePowerSampler>(pRenderContext, mpScene);
                 break;
             default:
                 throw RuntimeError("Unknown emissive light sampler type");
@@ -999,7 +1006,7 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
         if (mpEmissiveSampler)
         {
             // Retain the options for the emissive sampler.
-            if (auto lightBVHSampler = std::dynamic_pointer_cast<LightBVHSampler>(mpEmissiveSampler))
+            if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveSampler.get()))
             {
                 mLightBVHOptions = lightBVHSampler->getOptions();
             }
@@ -1024,7 +1031,7 @@ void PathTracer::prepareRTXDI(RenderContext* pRenderContext)
 {
     if (mStaticParams.useRTXDI)
     {
-        if (!mpRTXDI) mpRTXDI = RTXDI::create(mpScene, mRTXDIOptions);
+        if (!mpRTXDI) mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
 
         // Emit warning if enabled while using spp != 1.
         if (!mFixedSampleCount || mStaticParams.samplesPerPixel != 1)
@@ -1042,21 +1049,22 @@ void PathTracer::setNRDData(const ShaderVar& var, const RenderData& renderData) 
 {
     var["sampleRadiance"] = mpSampleNRDRadiance;
     var["sampleHitDist"] = mpSampleNRDHitDist;
+    var["samplePrimaryHitNEEOnDelta"] = mpSampleNRDPrimaryHitNeeOnDelta;
     var["sampleEmission"] = mpSampleNRDEmission;
     var["sampleReflectance"] = mpSampleNRDReflectance;
-    var["primaryHitEmission"] = renderData[kOutputNRDEmission]->asTexture();
-    var["primaryHitDiffuseReflectance"] = renderData[kOutputNRDDiffuseReflectance]->asTexture();
-    var["primaryHitSpecularReflectance"] = renderData[kOutputNRDSpecularReflectance]->asTexture();
-    var["deltaReflectionReflectance"] = renderData[kOutputNRDDeltaReflectionReflectance]->asTexture();
-    var["deltaReflectionEmission"] = renderData[kOutputNRDDeltaReflectionEmission]->asTexture();
-    var["deltaReflectionNormWRoughMaterialID"] = renderData[kOutputNRDDeltaReflectionNormWRoughMaterialID]->asTexture();
-    var["deltaReflectionPathLength"] = renderData[kOutputNRDDeltaReflectionPathLength]->asTexture();
-    var["deltaReflectionHitDist"] = renderData[kOutputNRDDeltaReflectionHitDist]->asTexture();
-    var["deltaTransmissionReflectance"] = renderData[kOutputNRDDeltaTransmissionReflectance]->asTexture();
-    var["deltaTransmissionEmission"] = renderData[kOutputNRDDeltaTransmissionEmission]->asTexture();
-    var["deltaTransmissionNormWRoughMaterialID"] = renderData[kOutputNRDDeltaTransmissionNormWRoughMaterialID]->asTexture();
-    var["deltaTransmissionPathLength"] = renderData[kOutputNRDDeltaTransmissionPathLength]->asTexture();
-    var["deltaTransmissionPosW"] = renderData[kOutputNRDDeltaTransmissionPosW]->asTexture();
+    var["primaryHitEmission"] = renderData.getTexture(kOutputNRDEmission);
+    var["primaryHitDiffuseReflectance"] = renderData.getTexture(kOutputNRDDiffuseReflectance);
+    var["primaryHitSpecularReflectance"] = renderData.getTexture(kOutputNRDSpecularReflectance);
+    var["deltaReflectionReflectance"] = renderData.getTexture(kOutputNRDDeltaReflectionReflectance);
+    var["deltaReflectionEmission"] = renderData.getTexture(kOutputNRDDeltaReflectionEmission);
+    var["deltaReflectionNormWRoughMaterialID"] = renderData.getTexture(kOutputNRDDeltaReflectionNormWRoughMaterialID);
+    var["deltaReflectionPathLength"] = renderData.getTexture(kOutputNRDDeltaReflectionPathLength);
+    var["deltaReflectionHitDist"] = renderData.getTexture(kOutputNRDDeltaReflectionHitDist);
+    var["deltaTransmissionReflectance"] = renderData.getTexture(kOutputNRDDeltaTransmissionReflectance);
+    var["deltaTransmissionEmission"] = renderData.getTexture(kOutputNRDDeltaTransmissionEmission);
+    var["deltaTransmissionNormWRoughMaterialID"] = renderData.getTexture(kOutputNRDDeltaTransmissionNormWRoughMaterialID);
+    var["deltaTransmissionPathLength"] = renderData.getTexture(kOutputNRDDeltaTransmissionPathLength);
+    var["deltaTransmissionPosW"] = renderData.getTexture(kOutputNRDDeltaTransmissionPosW);
 }
 
 void PathTracer::setShaderData(const ShaderVar& var, const RenderData& renderData, bool useLightSampling) const
@@ -1074,25 +1082,25 @@ void PathTracer::setShaderData(const ShaderVar& var, const RenderData& renderDat
     // Bind runtime data.
     setNRDData(var["outputNRD"], renderData);
 
-    Texture::SharedPtr pViewDir;
+    ref<Texture> pViewDir;
     if (mpScene->getCamera()->getApertureRadius() > 0.f)
     {
-        pViewDir = renderData[kInputViewDir]->asTexture();
+        pViewDir = renderData.getTexture(kInputViewDir);
         if (!pViewDir) logWarning("Depth-of-field requires the '{}' input. Expect incorrect rendering.", kInputViewDir);
     }
 
-    Texture::SharedPtr pSampleCount;
+    ref<Texture> pSampleCount;
     if (!mFixedSampleCount)
     {
-        pSampleCount = renderData[kInputSampleCount]->asTexture();
+        pSampleCount = renderData.getTexture(kInputSampleCount);
         if (!pSampleCount) throw RuntimeError("PathTracer: Missing sample count input texture");
     }
 
     var["params"].setBlob(mParams);
-    var["vbuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["vbuffer"] = renderData.getTexture(kInputVBuffer);
     var["viewDir"] = pViewDir; // Can be nullptr
     var["sampleCount"] = pSampleCount; // Can be nullptr
-    var["outputColor"] = renderData[kOutputColor]->asTexture();
+    var["outputColor"] = renderData.getTexture(kOutputColor);
 
     if (useLightSampling && mpEmissiveSampler)
     {
@@ -1103,7 +1111,7 @@ void PathTracer::setShaderData(const ShaderVar& var, const RenderData& renderDat
 
 bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& pOutputColor = renderData[kOutputColor]->asTexture();
+    const auto& pOutputColor = renderData.getTexture(kOutputColor);
     FALCOR_ASSERT(pOutputColor);
 
     // Set output frame dimension.
@@ -1115,7 +1123,7 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
     auto validateChannels = [&](const auto& channels) {
         for (const auto& channel : channels)
         {
-            auto pTexture = renderData[channel.name]->asTexture();
+            auto pTexture = renderData.getTexture(channel.name);
             if (pTexture && (pTexture->getWidth() != mParams.frameDim.x || pTexture->getHeight() != mParams.frameDim.y)) resolutionMismatch = true;
         }
     };
@@ -1179,7 +1187,7 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
 
     // Check if guide data should be generated.
     mOutputGuideData = renderData[kOutputAlbedo] != nullptr || renderData[kOutputSpecularAlbedo] != nullptr
-        || renderData[kOutputIndirectAlbedo] != nullptr || renderData[kOutputNormal] != nullptr
+        || renderData[kOutputIndirectAlbedo] != nullptr || renderData[kOutputGuideNormal] != nullptr
         || renderData[kOutputReflectionPosW] != nullptr;
 
     // Check if NRD data should be generated.
@@ -1244,8 +1252,8 @@ void PathTracer::endFrame(RenderContext* pRenderContext, const RenderData& rende
     };
 
     // Copy pixel stats to outputs if available.
-    copyTexture(renderData[kOutputRayCount]->asTexture().get(), mpPixelStats->getRayCountTexture(pRenderContext).get());
-    copyTexture(renderData[kOutputPathLength]->asTexture().get(), mpPixelStats->getPathLengthTexture().get());
+    copyTexture(renderData.getTexture(kOutputRayCount).get(), mpPixelStats->getRayCountTexture(pRenderContext).get());
+    copyTexture(renderData.getTexture(kOutputPathLength).get(), mpPixelStats->getPathLengthTexture().get());
 
     if (mpRTXDI) mpRTXDI->endFrame(pRenderContext);
 
@@ -1255,7 +1263,7 @@ void PathTracer::endFrame(RenderContext* pRenderContext, const RenderData& rende
 
 void PathTracer::generatePaths(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE("generatePaths");
+    FALCOR_PROFILE(pRenderContext, "generatePaths");
 
     // Check shader assumptions.
     // We launch one thread group per screen tile, with threads linearly indexed.
@@ -1275,7 +1283,7 @@ void PathTracer::generatePaths(RenderContext* pRenderContext, const RenderData& 
     auto var = mpGeneratePaths->getRootVar()["CB"]["gPathGenerator"];
     setShaderData(var, renderData, false);
 
-    mpGeneratePaths["gScene"] = mpScene->getParameterBlock();
+    mpGeneratePaths->getRootVar()["gScene"] = mpScene->getParameterBlock();
 
     if (mpRTXDI) mpRTXDI->setShaderData(mpGeneratePaths->getRootVar());
 
@@ -1286,7 +1294,7 @@ void PathTracer::generatePaths(RenderContext* pRenderContext, const RenderData& 
 
 void PathTracer::tracePass(RenderContext* pRenderContext, const RenderData& renderData, TracePass& tracePass)
 {
-    FALCOR_PROFILE(tracePass.name);
+    FALCOR_PROFILE(pRenderContext, tracePass.name);
 
     FALCOR_ASSERT(tracePass.pProgram != nullptr && tracePass.pBindingTable != nullptr && tracePass.pVars != nullptr);
 
@@ -1317,7 +1325,7 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
 {
     if (!mOutputGuideData && !mOutputNRDData && mFixedSampleCount && mStaticParams.samplesPerPixel == 1) return;
 
-    FALCOR_PROFILE("resolvePass");
+    FALCOR_PROFILE(pRenderContext, "resolvePass");
 
     // This pass is executed when multiple samples per pixel are used.
     // We launch one thread per pixel that computes the resolved color by iterating over the samples.
@@ -1332,18 +1340,18 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
     // Bind resources.
     auto var = mpResolvePass->getRootVar()["CB"]["gResolvePass"];
     var["params"].setBlob(mParams);
-    var["sampleCount"] = renderData[kInputSampleCount]->asTexture(); // Can be nullptr
-    var["outputColor"] = renderData[kOutputColor]->asTexture();
-    var["outputAlbedo"] = renderData[kOutputAlbedo]->asTexture();
-    var["outputSpecularAlbedo"] = renderData[kOutputSpecularAlbedo]->asTexture();
-    var["outputIndirectAlbedo"] = renderData[kOutputIndirectAlbedo]->asTexture();
-    var["outputNormal"] = renderData[kOutputNormal]->asTexture();
-    var["outputReflectionPosW"] = renderData[kOutputReflectionPosW]->asTexture();
-    var["outputNRDDiffuseRadianceHitDist"] = renderData[kOutputNRDDiffuseRadianceHitDist]->asTexture();
-    var["outputNRDSpecularRadianceHitDist"] = renderData[kOutputNRDSpecularRadianceHitDist]->asTexture();
-    var["outputNRDDeltaReflectionRadianceHitDist"] = renderData[kOutputNRDDeltaReflectionRadianceHitDist]->asTexture();
-    var["outputNRDDeltaTransmissionRadianceHitDist"] = renderData[kOutputNRDDeltaTransmissionRadianceHitDist]->asTexture();
-    var["outputNRDResidualRadianceHitDist"] = renderData[kOutputNRDResidualRadianceHitDist]->asTexture();
+    var["sampleCount"] = renderData.getTexture(kInputSampleCount); // Can be nullptr
+    var["outputColor"] = renderData.getTexture(kOutputColor);
+    var["outputAlbedo"] = renderData.getTexture(kOutputAlbedo);
+    var["outputSpecularAlbedo"] = renderData.getTexture(kOutputSpecularAlbedo);
+    var["outputIndirectAlbedo"] = renderData.getTexture(kOutputIndirectAlbedo);
+    var["outputGuideNormal"] = renderData.getTexture(kOutputGuideNormal);
+    var["outputReflectionPosW"] = renderData.getTexture(kOutputReflectionPosW);
+    var["outputNRDDiffuseRadianceHitDist"] = renderData.getTexture(kOutputNRDDiffuseRadianceHitDist);
+    var["outputNRDSpecularRadianceHitDist"] = renderData.getTexture(kOutputNRDSpecularRadianceHitDist);
+    var["outputNRDDeltaReflectionRadianceHitDist"] = renderData.getTexture(kOutputNRDDeltaReflectionRadianceHitDist);
+    var["outputNRDDeltaTransmissionRadianceHitDist"] = renderData.getTexture(kOutputNRDDeltaTransmissionRadianceHitDist);
+    var["outputNRDResidualRadianceHitDist"] = renderData.getTexture(kOutputNRDResidualRadianceHitDist);
 
     if (mVarsChanged)
     {
@@ -1354,6 +1362,9 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
         var["sampleNRDHitDist"] = mpSampleNRDHitDist;
         var["sampleNRDEmission"] = mpSampleNRDEmission;
         var["sampleNRDReflectance"] = mpSampleNRDReflectance;
+
+        var["sampleNRDPrimaryHitNeeOnDelta"] = mpSampleNRDPrimaryHitNeeOnDelta;
+        var["primaryHitDiffuseReflectance"] = renderData.getTexture(kOutputNRDDiffuseReflectance);
     }
 
     // Launch one thread per pixel.
@@ -1402,8 +1413,9 @@ Program::DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner
     defines.add("USE_ENV_LIGHT", scene && scene->useEnvLight() ? "1" : "0");
     defines.add("USE_ANALYTIC_LIGHTS", scene && scene->useAnalyticLights() ? "1" : "0");
     defines.add("USE_EMISSIVE_LIGHTS", scene && scene->useEmissiveLights() ? "1" : "0");
-    defines.add("USE_CURVES", scene && scene->hasGeometryType(Scene::GeometryType::Curve) ? "1" : "0");
-	defines.add("USE_SDF_GRIDS", scene && scene->hasGeometryType(Scene::GeometryType::SDFGrid) ? "1" : "0");
+    defines.add("USE_CURVES", scene && (scene->hasGeometryType(Scene::GeometryType::Curve)) ? "1" : "0");
+    defines.add("USE_SDF_GRIDS", scene && scene->hasGeometryType(Scene::GeometryType::SDFGrid) ? "1" : "0");
+    defines.add("USE_HAIR_MATERIAL", scene && scene->getMaterialCountByType(MaterialType::Hair) > 0u ? "1" : "0");
 
     // Set default (off) values for additional features.
     defines.add("USE_VIEW_DIR", "0");

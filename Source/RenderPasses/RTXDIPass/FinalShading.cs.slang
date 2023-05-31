@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,7 @@
  **************************************************************************/
 import LoadShadingData;
 import Scene.RaytracingInline;
-import Rendering.Materials.Microfacet;
+import Rendering.Materials.IsotropicGGX;
 import Rendering.RTXDI.RTXDI;
 import Utils.Sampling.TinyUniformSampleGenerator;
 
@@ -67,9 +67,10 @@ struct FinalShading
         let lod = ExplicitLodTextureSampler(0.f); // TODO: Implement texture level-of-detail.
         if (loadShadingData(pixel, frameDim, gScene.camera, vbuffer, lod, sd))
         {
-            // Create BSDF instance and query its properties.
-            let bsdf = gScene.materials.getBSDF(sd, lod);
-            let bsdfProperties = bsdf.getProperties(sd);
+            // Create material instance and query its properties.
+            let hints = getMaterialInstanceHints();
+            let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+            let bsdfProperties = mi.getProperties(sd);
 
             // Get final sample from RTXDI.
             float3 dir;
@@ -97,10 +98,10 @@ struct FinalShading
                 TinyUniformSampleGenerator sg = TinyUniformSampleGenerator(pixel, gRTXDI.frameIndex);
 
                 sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
-                diffuse = bsdf.eval(sd, dir, sg) * Li;
+                diffuse = mi.eval(sd, dir, sg) * Li;
 
                 sd.mtl.setActiveLobes((uint)LobeType::SpecularReflection);
-                specular = bsdf.eval(sd, dir, sg) * Li;
+                specular = mi.eval(sd, dir, sg) * Li;
 
                 hitT = distance;
             }
@@ -113,14 +114,15 @@ struct FinalShading
 
             // Demodulate diffuse reflectance (albedo) from diffuse color.
             diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;
-            float3 diffuseFactor = diffuseReflectance <= 0.f ? 0.f : 1.f / diffuseReflectance;
+            float3 diffuseFactor = select(diffuseReflectance <= 0.f, 0.f, 1.f / diffuseReflectance);
             diffuseIllumination = diffuse * diffuseFactor;
 
             // Demodulate preintegrated specular reflectance from specular color.
-            float NdotV = saturate(dot(sd.N, sd.V));
+            // We use an approximate shading model with a single specular lobe.
+            float NdotV = saturate(dot(bsdfProperties.guideNormal, sd.V));
             float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
             specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
-            float3 specularFactor = specularReflectance <= 0.f ? 0.f : 1.f / specularReflectance;
+            float3 specularFactor = select(specularReflectance <= 0.f, 0.f, 1.f / specularReflectance);
             specularIllumination = specular * specularFactor;
         }
         else

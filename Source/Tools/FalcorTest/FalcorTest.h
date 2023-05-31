@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,22 +27,26 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "Core/SampleApp.h"
+#include "Testing/UnitTest.h"
 
 using namespace Falcor;
 
-class FalcorTest : public IRenderer
+class FalcorTest : public SampleApp
 {
 public:
     struct Options
     {
+        UnitTestCategoryFlags categoryFlags = UnitTestCategoryFlags::All;
         std::string filter;
+        std::filesystem::path xmlReportPath;
         uint32_t repeat = 1;
     };
 
-    FalcorTest(const Options& options) : mOptions(options) {}
+    FalcorTest(const SampleAppConfig& config, const Options& options);
+    ~FalcorTest();
 
-    void onLoad(RenderContext* pRenderContext) override;
-    void onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo) override;
+    void onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo) override;
 
 private:
     Options mOptions;

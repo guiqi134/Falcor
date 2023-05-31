@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,11 +25,16 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "SceneCache.h"
+#include "Material/StandardMaterial.h"
+#include "Material/HairMaterial.h"
+#include "Material/ClothMaterial.h"
 #include "Material/MaterialTextureLoader.h"
+#include "Utils/Logger.h"
 
 #include <lz4_stream/lz4_stream.h>
+
+#include <fstream>
 
 namespace Falcor
 {
@@ -77,7 +82,6 @@ namespace Falcor
             write(&value, sizeof(T));
         }
 
-        template<>
         void write(const std::string& value)
         {
             uint64_t len = value.size();
@@ -85,7 +89,6 @@ namespace Falcor
             write(value.data(), len);
         }
 
-        template<>
         void write(const std::filesystem::path& path)
         {
             write(path.string());
@@ -102,7 +105,7 @@ namespace Falcor
             }
             else
             {
-                for (const auto& item : vec) write<T>(item);
+                for (const auto& item : vec) write(item);
             }
         }
 
@@ -136,7 +139,6 @@ namespace Falcor
             read(&value, sizeof(T));
         }
 
-        template<>
         void read(std::string& value)
         {
             uint64_t len = read<uint64_t>();
@@ -144,7 +146,6 @@ namespace Falcor
             read(value.data(), len);
         }
 
-        template<>
         void read(std::filesystem::path& path)
         {
             std::string str;
@@ -171,7 +172,7 @@ namespace Falcor
             }
             else
             {
-                for (auto& item : vec) read<T>(item);
+                for (auto& item : vec) read(item);
             }
         }
 
@@ -179,7 +180,12 @@ namespace Falcor
         void read(std::optional<T>& opt)
         {
             bool hasValue = read<bool>();
-            if (hasValue) opt = read<T>();
+            if (hasValue)
+            {
+                T value;
+                read(value);
+                opt = value;
+            }
         }
 
     private:
@@ -227,7 +233,7 @@ namespace Falcor
         if (fs.bad()) throw RuntimeError("Failed to write scene cache file to '{}'.", cachePath);
     }
 
-    Scene::SceneData SceneCache::readCache(const Key& key)
+    Scene::SceneData SceneCache::readCache(ref<Device> pDevice, const Key& key)
     {
         auto cachePath = getCachePath(key);
 
@@ -245,17 +251,14 @@ namespace Falcor
         // Read cache (compressed).
         lz4_stream::basic_istream<kBlockSize, kBlockSize> zs(fs);
         InputStream stream(zs);
-        auto sceneData = readSceneData(stream);
+        auto sceneData = readSceneData(stream, pDevice);
         if (fs.bad()) throw RuntimeError("Failed to read scene cache file from '{}'.", cachePath);
         return sceneData;
     }
 
     std::filesystem::path SceneCache::getCachePath(const Key& key)
     {
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0') << std::setw(2);
-        for (auto c : key) ss << (int)c;
-        return getAppDataDirectory() / kDirectory / ss.str();
+        return getAppDataDirectory() / kDirectory / SHA1::toString(key);
     }
 
     // SceneData
@@ -292,7 +295,7 @@ namespace Falcor
         if (hasEnvMap) writeEnvMap(stream, sceneData.pEnvMap);
 
         writeMarker(stream, "Materials");
-        writeMaterials(stream, sceneData.pMaterials);
+        writeMaterials(stream, *sceneData.pMaterials);
 
         writeMarker(stream, "SceneGraph");
         stream.write((uint32_t)sceneData.sceneGraph.size());
@@ -373,10 +376,10 @@ namespace Falcor
         writeMarker(stream, "End");
     }
 
-    Scene::SceneData SceneCache::readSceneData(InputStream& stream)
+    Scene::SceneData SceneCache::readSceneData(InputStream& stream, ref<Device> pDevice)
     {
         Scene::SceneData sceneData;
-        sceneData.pMaterials = MaterialSystem::create();
+        sceneData.pMaterials = std::make_unique<MaterialSystem>(pDevice);
 
         readMarker(stream, "Path");
         stream.read(sceneData.path);
@@ -396,15 +399,15 @@ namespace Falcor
 
         readMarker(stream, "Grids");
         sceneData.grids.resize(stream.read<uint32_t>());
-        for (auto& pGrid : sceneData.grids) pGrid = readGrid(stream);
+        for (auto& pGrid : sceneData.grids) pGrid = readGrid(stream, pDevice);
 
         readMarker(stream, "GridVolumes");
         sceneData.gridVolumes.resize(stream.read<uint32_t>());
-        for (auto& pGridVolume : sceneData.gridVolumes) pGridVolume = readGridVolume(stream, sceneData.grids);
+        for (auto& pGridVolume : sceneData.gridVolumes) pGridVolume = readGridVolume(stream, sceneData.grids, pDevice);
 
         readMarker(stream, "EnvMap");
         auto hasEnvMap = stream.read<bool>();
-        if (hasEnvMap) sceneData.pEnvMap = readEnvMap(stream);
+        if (hasEnvMap) sceneData.pEnvMap = readEnvMap(stream, pDevice);
 
         // Material textures are loaded asynchronously to allow loading other data
         // in parallel while loading textures from files and uploading them to the GPU.
@@ -416,7 +419,7 @@ namespace Falcor
         auto pMaterialTextureLoader = std::make_unique<MaterialTextureLoader>(sceneData.pMaterials->getTextureManager(), true);
 
         readMarker(stream, "Materials");
-        readMaterials(stream, sceneData.pMaterials, *pMaterialTextureLoader);
+        readMaterials(stream, *sceneData.pMaterials, *pMaterialTextureLoader, pDevice);
 
         readMarker(stream, "SceneGraph");
         sceneData.sceneGraph.resize(stream.read<uint32_t>());
@@ -532,7 +535,7 @@ namespace Falcor
 
     // Camera
 
-    void SceneCache::writeCamera(OutputStream& stream, const Camera::SharedPtr& pCamera)
+    void SceneCache::writeCamera(OutputStream& stream, const ref<Camera>& pCamera)
     {
         stream.write(pCamera->mHasAnimation);
         stream.write(pCamera->mIsAnimated);
@@ -543,7 +546,7 @@ namespace Falcor
         stream.write(pCamera->mData);
     }
 
-    Camera::SharedPtr SceneCache::readCamera(InputStream& stream)
+    ref<Camera> SceneCache::readCamera(InputStream& stream)
     {
         auto pCamera = Camera::create();
 
@@ -560,7 +563,7 @@ namespace Falcor
 
     // Light
 
-    void SceneCache::writeLight(OutputStream& stream, const Light::SharedPtr& pLight)
+    void SceneCache::writeLight(OutputStream& stream, const ref<Light>& pLight)
     {
         LightType type = pLight->getType();
         stream.write(type);
@@ -579,20 +582,20 @@ namespace Falcor
         case LightType::Directional:
             break;
         case LightType::Distant:
-            stream.write(std::static_pointer_cast<DistantLight>(pLight)->mAngle);
+            stream.write(static_ref_cast<DistantLight>(pLight)->mAngle);
             break;
         case LightType::Rect:
         case LightType::Disc:
         case LightType::Sphere:
-            stream.write(std::static_pointer_cast<AnalyticAreaLight>(pLight)->mScaling);
-            stream.write(std::static_pointer_cast<AnalyticAreaLight>(pLight)->mTransformMatrix);
+            stream.write(static_ref_cast<AnalyticAreaLight>(pLight)->mScaling);
+            stream.write(static_ref_cast<AnalyticAreaLight>(pLight)->mTransformMatrix);
             break;
         }
     }
 
-    Light::SharedPtr SceneCache::readLight(InputStream& stream)
+    ref<Light> SceneCache::readLight(InputStream& stream)
     {
-        Light::SharedPtr pLight;
+        ref<Light> pLight;
         auto type = stream.read<LightType>();
 
         switch (type)
@@ -631,13 +634,13 @@ namespace Falcor
         case LightType::Directional:
             break;
         case LightType::Distant:
-            stream.read(std::static_pointer_cast<DistantLight>(pLight)->mAngle);
+            stream.read(static_ref_cast<DistantLight>(pLight)->mAngle);
             break;
         case LightType::Rect:
         case LightType::Disc:
         case LightType::Sphere:
-            stream.read(std::static_pointer_cast<AnalyticAreaLight>(pLight)->mScaling);
-            stream.read(std::static_pointer_cast<AnalyticAreaLight>(pLight)->mTransformMatrix);
+            stream.read(static_ref_cast<AnalyticAreaLight>(pLight)->mScaling);
+            stream.read(static_ref_cast<AnalyticAreaLight>(pLight)->mTransformMatrix);
             break;
         }
 
@@ -646,19 +649,19 @@ namespace Falcor
 
     // Materials
 
-    void SceneCache::writeMaterials(OutputStream& stream, const MaterialSystem::SharedPtr& pMaterials)
+    void SceneCache::writeMaterials(OutputStream& stream, const MaterialSystem& materialSystem)
     {
-        uint32_t materialCount = pMaterials->getMaterialCount();
+        uint32_t materialCount = materialSystem.getMaterialCount();
         stream.write(materialCount);
 
-        for (uint32_t i = 0; i < materialCount; i++)
+        for (MaterialID materialID{ 0 }; materialID.get() < materialCount; ++materialID)
         {
-            auto pMaterial = pMaterials->getMaterial(i);
+            auto pMaterial = materialSystem.getMaterial(materialID);
             writeMaterial(stream, pMaterial);
         }
     }
 
-    void SceneCache::writeMaterial(OutputStream& stream, const Material::SharedPtr& pMaterial)
+    void SceneCache::writeMaterial(OutputStream& stream, const ref<Material>& pMaterial)
     {
         // Write common fields.
         stream.write((uint32_t)pMaterial->getType());
@@ -688,7 +691,7 @@ namespace Falcor
         else throw RuntimeError("Unsupported material type");
     }
 
-    void SceneCache::writeBasicMaterial(OutputStream& stream, const BasicMaterial::SharedPtr& pMaterial)
+    void SceneCache::writeBasicMaterial(OutputStream& stream, const ref<BasicMaterial>& pMaterial)
     {
         stream.write(pMaterial->mData);
         stream.write(pMaterial->mAlphaRange);
@@ -701,35 +704,35 @@ namespace Falcor
         writeSampler(stream, pMaterial->mpDisplacementMaxSampler);
     }
 
-    void SceneCache::readMaterials(InputStream& stream, const MaterialSystem::SharedPtr& pMaterials, MaterialTextureLoader& materialTextureLoader)
+    void SceneCache::readMaterials(InputStream& stream, MaterialSystem& materialSystem, MaterialTextureLoader& materialTextureLoader, ref<Device> pDevice)
     {
         uint32_t materialCount = 0;
         stream.read(materialCount);
 
         for (uint32_t i = 0; i < materialCount; i++)
         {
-            auto pMaterial = readMaterial(stream, materialTextureLoader);
-            pMaterials->addMaterial(pMaterial);
+            auto pMaterial = readMaterial(stream, materialTextureLoader, pDevice);
+            materialSystem.addMaterial(pMaterial);
         }
     }
 
-    Material::SharedPtr SceneCache::readMaterial(InputStream& stream, MaterialTextureLoader& materialTextureLoader)
+    ref<Material> SceneCache::readMaterial(InputStream& stream, MaterialTextureLoader& materialTextureLoader, ref<Device> pDevice)
     {
         // Create derived material class of the right type.
-        Material::SharedPtr pMaterial;
+        ref<Material> pMaterial;
         {
             uint32_t type;
             stream.read(type);
             switch ((MaterialType)type)
             {
             case MaterialType::Standard:
-                pMaterial = StandardMaterial::create();
+                pMaterial = StandardMaterial::create(pDevice, "");
                 break;
             case MaterialType::Hair:
-                pMaterial = HairMaterial::create();
+                pMaterial = HairMaterial::create(pDevice, "");
                 break;
             case MaterialType::Cloth:
-                pMaterial = ClothMaterial::create();
+                pMaterial = ClothMaterial::create(pDevice, "");
                 break;
             default:
                 throw RuntimeError("Unsupported material type");
@@ -759,13 +762,13 @@ namespace Falcor
         }
 
         // Read data in derived class.
-        if (auto pBasicMaterial = pMaterial->toBasicMaterial()) readBasicMaterial(stream, materialTextureLoader, pBasicMaterial);
+        if (auto pBasicMaterial = pMaterial->toBasicMaterial()) readBasicMaterial(stream, materialTextureLoader, pBasicMaterial, pDevice);
         else throw RuntimeError("Unsupported material type");
 
         return pMaterial;
     }
 
-    void SceneCache::readBasicMaterial(InputStream& stream, MaterialTextureLoader& materialTextureLoader, const BasicMaterial::SharedPtr& pMaterial)
+    void SceneCache::readBasicMaterial(InputStream& stream, MaterialTextureLoader& materialTextureLoader, const ref<BasicMaterial>& pMaterial, ref<Device> pDevice)
     {
         stream.read(pMaterial->mData);
         stream.read(pMaterial->mAlphaRange);
@@ -773,12 +776,12 @@ namespace Falcor
         stream.read(pMaterial->mIsTexturedAlphaConstant);
         stream.read(pMaterial->mDisplacementMapChanged);
 
-        pMaterial->mpDefaultSampler = readSampler(stream);
-        pMaterial->mpDisplacementMinSampler = readSampler(stream);
-        pMaterial->mpDisplacementMaxSampler = readSampler(stream);
+        pMaterial->mpDefaultSampler = readSampler(stream, pDevice);
+        pMaterial->mpDisplacementMinSampler = readSampler(stream, pDevice);
+        pMaterial->mpDisplacementMaxSampler = readSampler(stream, pDevice);
     }
 
-    void SceneCache::writeSampler(OutputStream& stream, const Sampler::SharedPtr& pSampler)
+    void SceneCache::writeSampler(OutputStream& stream, const ref<Sampler>& pSampler)
     {
         bool valid = pSampler != nullptr;
         stream.write(valid);
@@ -788,20 +791,20 @@ namespace Falcor
         }
     }
 
-    Sampler::SharedPtr SceneCache::readSampler(InputStream& stream)
+    ref<Sampler> SceneCache::readSampler(InputStream& stream, ref<Device> pDevice)
     {
         bool valid = stream.read<bool>();
         if (valid)
         {
             auto desc = stream.read<Sampler::Desc>();
-            return Sampler::create(desc);
+            return Sampler::create(pDevice, desc);
         }
         return nullptr;
     }
 
     // GridVolume
 
-    void SceneCache::writeGridVolume(OutputStream& stream, const GridVolume::SharedPtr& pGridVolume, const std::vector<Grid::SharedPtr>& grids)
+    void SceneCache::writeGridVolume(OutputStream& stream, const ref<GridVolume>& pGridVolume, const std::vector<ref<Grid>>& grids)
     {
         stream.write(pGridVolume->mHasAnimation);
         stream.write(pGridVolume->mIsAnimated);
@@ -823,9 +826,9 @@ namespace Falcor
         stream.write(pGridVolume->mData);
     }
 
-    GridVolume::SharedPtr SceneCache::readGridVolume(InputStream& stream, const std::vector<Grid::SharedPtr>& grids)
+    ref<GridVolume> SceneCache::readGridVolume(InputStream& stream, const std::vector<ref<Grid>>& grids, ref<Device> pDevice)
     {
-        GridVolume::SharedPtr pGridVolume = GridVolume::create("");
+        ref<GridVolume> pGridVolume = GridVolume::create(pDevice, "");
 
         stream.read(pGridVolume->mHasAnimation);
         stream.read(pGridVolume->mIsAnimated);
@@ -851,24 +854,24 @@ namespace Falcor
 
     // Grid
 
-    void SceneCache::writeGrid(OutputStream& stream, const Grid::SharedPtr& pGrid)
+    void SceneCache::writeGrid(OutputStream& stream, const ref<Grid>& pGrid)
     {
         const nanovdb::HostBuffer& buffer = pGrid->mGridHandle.buffer();
         stream.write((uint64_t)buffer.size());
         stream.write(buffer.data(), buffer.size());
     }
 
-    Grid::SharedPtr SceneCache::readGrid(InputStream& stream)
+    ref<Grid> SceneCache::readGrid(InputStream& stream, ref<Device> pDevice)
     {
         uint64_t size = stream.read<uint64_t>();
         auto buffer = nanovdb::HostBuffer::create(size);
         stream.read(buffer.data(), buffer.size());
-        return Grid::SharedPtr(new Grid(nanovdb::GridHandle<nanovdb::HostBuffer>(std::move(buffer))));
+        return ref<Grid>(new Grid(pDevice, nanovdb::GridHandle<nanovdb::HostBuffer>(std::move(buffer))));
     }
 
     // EnvMap
 
-    void SceneCache::writeEnvMap(OutputStream& stream, const EnvMap::SharedPtr& pEnvMap)
+    void SceneCache::writeEnvMap(OutputStream& stream, const ref<EnvMap>& pEnvMap)
     {
         auto path = pEnvMap->getEnvMap()->getSourcePath();
         stream.write(path);
@@ -876,10 +879,10 @@ namespace Falcor
         stream.write(pEnvMap->mRotation);
     }
 
-    EnvMap::SharedPtr SceneCache::readEnvMap(InputStream& stream)
+    ref<EnvMap> SceneCache::readEnvMap(InputStream& stream, ref<Device> pDevice)
     {
         auto path = stream.read<std::filesystem::path>();
-        auto pEnvMap = EnvMap::createFromFile(path);
+        auto pEnvMap = EnvMap::createFromFile(pDevice, path);
         if (!pEnvMap) throw RuntimeError("Failed to load environment map");
         stream.read(pEnvMap->mData);
         stream.read(pEnvMap->mRotation);
@@ -906,7 +909,7 @@ namespace Falcor
 
     // Animation
 
-    void SceneCache::writeAnimation(OutputStream& stream, const Animation::SharedPtr& pAnimation)
+    void SceneCache::writeAnimation(OutputStream& stream, const ref<Animation>& pAnimation)
     {
         stream.write(pAnimation->mName);
         stream.write(pAnimation->mNodeID);
@@ -918,9 +921,9 @@ namespace Falcor
         stream.write(pAnimation->mKeyframes);
     }
 
-    Animation::SharedPtr SceneCache::readAnimation(InputStream& stream)
+    ref<Animation> SceneCache::readAnimation(InputStream& stream)
     {
-        Animation::SharedPtr pAnimation = Animation::create("", 0, 0.0);
+        ref<Animation> pAnimation = Animation::create("", NodeID(), 0.0);
         stream.read(pAnimation->mName);
         stream.read(pAnimation->mNodeID);
         stream.read(pAnimation->mDuration);

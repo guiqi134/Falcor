@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,8 +30,6 @@
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
 
-const RenderPass::Info VBufferRaster::kInfo { "VBufferRaster", "Rasterized V-buffer generation pass." };
-
 namespace
 {
     const std::string kProgramFile = "RenderPasses/GBuffer/VBuffer/VBufferRaster.3d.slang";
@@ -44,9 +42,36 @@ namespace
     const ChannelList kVBufferExtraChannels =
     {
         { "mvec",           "gMotionVector",    "Motion vector",                true /* optional */, ResourceFormat::RG32Float   },
+        { "mask",           "gMask",            "Mask",                         true /* optional */, ResourceFormat::R32Float    },
     };
 
     const std::string kDepthName = "depth";
+}
+
+VBufferRaster::VBufferRaster(ref<Device> pDevice, const Dictionary& dict)
+    : GBufferBase(pDevice)
+{
+    // Check for required features.
+    if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::Barycentrics))
+    {
+        throw RuntimeError("VBufferRaster: Pixel shader barycentrics are not supported by the current device");
+    }
+    if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::RasterizerOrderedViews))
+    {
+        throw RuntimeError("VBufferRaster: Rasterizer ordered views (ROVs) are not supported by the current device");
+    }
+
+    parseDictionary(dict);
+
+    // Initialize graphics state
+    mRaster.pState = GraphicsState::create(mpDevice);
+
+    // Set depth function
+    DepthStencilState::Desc dsDesc;
+    dsDesc.setDepthFunc(DepthStencilState::Func::LessEqual).setDepthWriteMask(true);
+    mRaster.pState->setDepthStencilState(DepthStencilState::create(dsDesc));
+
+    mpFbo = Fbo::create(mpDevice);
 }
 
 RenderPassReflection VBufferRaster::reflect(const CompileData& compileData)
@@ -64,48 +89,11 @@ RenderPassReflection VBufferRaster::reflect(const CompileData& compileData)
     return reflector;
 }
 
-VBufferRaster::SharedPtr VBufferRaster::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new VBufferRaster(dict));
-}
-
-VBufferRaster::VBufferRaster(const Dictionary& dict)
-    : GBufferBase(kInfo)
-{
-    // Check for required features.
-    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::Barycentrics))
-    {
-        throw RuntimeError("VBufferRaster: Pixel shader barycentrics are not supported by the current device");
-    }
-    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::RasterizerOrderedViews))
-    {
-        throw RuntimeError("VBufferRaster: Rasterizer ordered views (ROVs) are not supported by the current device");
-    }
-
-    parseDictionary(dict);
-
-    // Create raster program
-    Program::Desc desc;
-    desc.addShaderLibrary(kProgramFile).vsEntry("vsMain").psEntry("psMain");
-    desc.setShaderModel(kShaderModel);
-    mRaster.pProgram = GraphicsProgram::create(desc);
-
-    // Initialize graphics state
-    mRaster.pState = GraphicsState::create();
-    mRaster.pState->setProgram(mRaster.pProgram);
-
-    // Set depth function
-    DepthStencilState::Desc dsDesc;
-    dsDesc.setDepthFunc(DepthStencilState::Func::LessEqual).setDepthWriteMask(true);
-    mRaster.pState->setDepthStencilState(DepthStencilState::create(dsDesc));
-
-    mpFbo = Fbo::create();
-}
-
-void VBufferRaster::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void VBufferRaster::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     GBufferBase::setScene(pRenderContext, pScene);
 
+    mRaster.pProgram = nullptr;
     mRaster.pVars = nullptr;
 
     if (pScene)
@@ -115,8 +103,15 @@ void VBufferRaster::setScene(RenderContext* pRenderContext, const Scene::SharedP
             throw RuntimeError("VBufferRaster: Requires triangle list geometry due to usage of SV_Barycentrics.");
         }
 
-        mRaster.pProgram->addDefines(pScene->getSceneDefines());
-        mRaster.pProgram->setTypeConformances(pScene->getTypeConformances());
+        // Create raster program.
+        Program::Desc desc;
+        desc.addShaderModules(pScene->getShaderModules());
+        desc.addShaderLibrary(kProgramFile).vsEntry("vsMain").psEntry("psMain");
+        desc.addTypeConformances(pScene->getTypeConformances());
+        desc.setShaderModel(kShaderModel);
+
+        mRaster.pProgram = GraphicsProgram::create(mpDevice, desc, pScene->getSceneDefines());
+        mRaster.pState->setProgram(mRaster.pProgram);
     }
 }
 
@@ -125,7 +120,7 @@ void VBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
     GBufferBase::execute(pRenderContext, renderData);
 
     // Update frame dimension based on render pass output.
-    auto pOutput = renderData[kVBufferName]->asTexture();
+    auto pOutput = renderData.getTexture(kVBufferName);
     FALCOR_ASSERT(pOutput);
     updateFrameDim(uint2(pOutput->getWidth(), pOutput->getHeight()));
 
@@ -153,19 +148,21 @@ void VBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
     // Create program vars.
     if (!mRaster.pVars)
     {
-        mRaster.pVars = GraphicsVars::create(mRaster.pProgram.get());
+        mRaster.pVars = GraphicsVars::create(mpDevice, mRaster.pProgram.get());
     }
 
     mpFbo->attachColorTarget(pOutput, 0);
     mpFbo->attachDepthStencilTarget(pDepth);
     mRaster.pState->setFbo(mpFbo); // Sets the viewport
-    mRaster.pVars["PerFrameCB"]["gFrameDim"] = mFrameDim;
+
+    auto var = mRaster.pVars->getRootVar();
+    var["PerFrameCB"]["gFrameDim"] = mFrameDim;
 
     // Bind extra channels as UAV buffers.
     for (const auto& channel : kVBufferExtraChannels)
     {
-        Texture::SharedPtr pTex = getOutput(renderData, channel.name);
-        mRaster.pVars[channel.texname] = pTex;
+        ref<Texture> pTex = getOutput(renderData, channel.name);
+        var[channel.texname] = pTex;
     }
 
     // Rasterize the scene.

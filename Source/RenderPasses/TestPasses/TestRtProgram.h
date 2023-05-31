@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,27 +27,23 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 
 using namespace Falcor;
 
 class TestRtProgram : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<TestRtProgram>;
+    FALCOR_PLUGIN_CLASS(TestRtProgram, "TestRtProgram", "Test pass for RtProgram.");
 
-    static const Info kInfo;
+    static ref<TestRtProgram> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<TestRtProgram>(pDevice, dict); }
 
-    /** Create a new render pass object.
-        \param[in] pRenderContext The render context.
-        \param[in] dict Dictionary of serialized parameters.
-        \return A new object, or an exception is thrown if creation failed.
-    */
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
+    TestRtProgram(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override {}
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
@@ -56,15 +52,13 @@ public:
     static void registerScriptBindings(pybind11::module& m);
 
 private:
-    TestRtProgram(const Dictionary& dict);
-
     void sceneChanged();
     void addCustomPrimitive();
     void removeCustomPrimitive(uint32_t index);
     void moveCustomPrimitive();
 
     // Internal state
-    Scene::SharedPtr mpScene;
+    ref<Scene> mpScene;
 
     uint32_t mMode = 0;
     uint32_t mSelectedIdx = 0;
@@ -74,7 +68,7 @@ private:
 
     struct
     {
-        RtProgram::SharedPtr pProgram;
-        RtProgramVars::SharedPtr pVars;
+        ref<RtProgram> pProgram;
+        ref<RtProgramVars> pVars;
     } mRT;
 };

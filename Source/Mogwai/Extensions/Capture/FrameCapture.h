@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 #pragma once
 #include "../../Mogwai.h"
 #include "CaptureTrigger.h"
+#include "Utils/Image/ImageProcessing.h"
 
 namespace Mogwai
 {
@@ -52,6 +53,6 @@ namespace Mogwai
         void captureOutput(RenderContext* pRenderContext, RenderGraph* pGraph, const uint32_t outputIndex);
 
         bool mCaptureAllOutputs = false;
-        ImageProcessing::SharedPtr mpImageProcessing;
+        std::unique_ptr<ImageProcessing> mpImageProcessing;
     };
 }

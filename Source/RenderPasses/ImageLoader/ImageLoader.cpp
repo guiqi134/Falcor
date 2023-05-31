@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,6 @@
  **************************************************************************/
 #include "ImageLoader.h"
 
-const RenderPass::Info ImageLoader::kInfo { "ImageLoader", "Load an image into a texture." };
-
 namespace
 {
     const std::string kDst = "dst";
@@ -42,34 +40,13 @@ namespace
     const std::string kMipLevel = "mipLevel";
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
+    registry.registerClass<RenderPass, ImageLoader>();
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(ImageLoader::kInfo, ImageLoader::create);
-}
-
-RenderPassReflection ImageLoader::reflect(const CompileData& compileData)
-{
-    RenderPassReflection reflector;
-    uint2 fixedSize = mpTex ? uint2(mpTex->getWidth(), mpTex->getHeight()) : uint2(0);
-    const uint2 sz = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, fixedSize, compileData.defaultTexDims);
-
-    reflector.addOutput(kDst, "Destination texture").format(mOutputFormat).texture2D(sz.x, sz.y);
-    return reflector;
-}
-
-ImageLoader::SharedPtr ImageLoader::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new ImageLoader(dict));
-}
-
-ImageLoader::ImageLoader(const Dictionary& dict)
-    : RenderPass(kInfo)
+ImageLoader::ImageLoader(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     for (const auto& [key, value] : dict)
     {
@@ -92,6 +69,16 @@ ImageLoader::ImageLoader(const Dictionary& dict)
     }
 }
 
+RenderPassReflection ImageLoader::reflect(const CompileData& compileData)
+{
+    RenderPassReflection reflector;
+    uint2 fixedSize = mpTex ? uint2(mpTex->getWidth(), mpTex->getHeight()) : uint2(0);
+    const uint2 sz = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, fixedSize, compileData.defaultTexDims);
+
+    reflector.addOutput(kDst, "Destination texture").format(mOutputFormat).texture2D(sz.x, sz.y);
+    return reflector;
+}
+
 Dictionary ImageLoader::getScriptingDictionary()
 {
     Dictionary dict;
@@ -112,7 +99,7 @@ void ImageLoader::compile(RenderContext* pRenderContext, const CompileData& comp
 
 void ImageLoader::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& pDstTex = renderData[kDst]->asTexture();
+    const auto& pDstTex = renderData.getTexture(kDst);
     FALCOR_ASSERT(pDstTex);
     mOutputFormat = pDstTex->getFormat();
     mOutputSize = { pDstTex->getWidth(), pDstTex->getHeight() };
@@ -152,7 +139,7 @@ void ImageLoader::renderUI(Gui::Widgets& widget)
         if (mpTex->getMipCount() > 1) widget.slider("Mip Level", mMipLevel, 0u, mpTex->getMipCount() - 1);
         if (mpTex->getArraySize() > 1) widget.slider("Array Slice", mArraySlice, 0u, mpTex->getArraySize() - 1);
 
-        widget.image(mImagePath.string().c_str(), mpTex, { 320, 320 });
+        widget.image(mImagePath.string().c_str(), mpTex.get(), { 320, 320 });
         widget.text("Image format: " + to_string(mpTex->getFormat()));
         widget.text("Image size: (" + std::to_string(mpTex->getWidth()) + ", " + std::to_string(mpTex->getHeight()) + ")");
         widget.text("Output format: " + to_string(mOutputFormat));
@@ -166,7 +153,7 @@ void ImageLoader::renderUI(Gui::Widgets& widget)
 
         if (!loadImage(mImagePath))
         {
-            msgBox(fmt::format("Failed to load image from '{}'", mImagePath), MsgBoxType::Ok, MsgBoxIcon::Warning);
+            msgBox("Error", fmt::format("Failed to load image from '{}'", mImagePath), MsgBoxType::Ok, MsgBoxIcon::Warning);
         }
 
         // If output is set to native size and image dimensions have changed, we'll trigger a graph recompile to update the render pass I/O sizes.
@@ -188,7 +175,7 @@ bool ImageLoader::loadImage(const std::filesystem::path& path)
     if (findFileInDataDirectories(mImagePath, fullPath))
     {
         mImagePath = fullPath;
-        mpTex = Texture::createFromFile(mImagePath, mGenerateMips, mLoadSRGB);
+        mpTex = Texture::createFromFile(mpDevice, mImagePath, mGenerateMips, mLoadSRGB);
         return mpTex != nullptr;
     }
     else

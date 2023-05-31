@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,12 +26,25 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "RenderGraph/BasePasses/ComputePass.h"
 #include "MeshLightData.slang"
+#include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Core/API/Buffer.h"
+#include "Core/API/Sampler.h"
+#include "Core/API/GpuFence.h"
+#include "Core/State/GraphicsState.h"
+#include "Core/Program/GraphicsProgram.h"
+#include "Core/Program/ProgramVars.h"
+#include "Core/Pass/ComputePass.h"
+#include "Utils/Math/Vector.h"
+#include <memory>
+#include <vector>
 
 namespace Falcor
 {
     class Scene;
+    class RenderContext;
+    struct ShaderVar;
 
     /** Class that holds a collection of mesh lights for a scene.
 
@@ -41,12 +54,9 @@ namespace Falcor
         The LightCollection can be used standalone, but more commonly it will be wrapped
         by an emissive light sampler.
     */
-    class FALCOR_API LightCollection
+    class FALCOR_API LightCollection : public Object
     {
     public:
-        using SharedPtr = std::shared_ptr<LightCollection>;
-        using SharedConstPtr = std::shared_ptr<const LightCollection>;
-
         enum class UpdateFlags : uint32_t
         {
             None                = 0u,   ///< Nothing was changed.
@@ -103,16 +113,20 @@ namespace Falcor
             }
         };
 
-
-        ~LightCollection() = default;
-
         /** Creates a light collection for the given scene.
             Note that update() must be called before the collection is ready to use.
+            \param[in] pDevice GPU device.
             \param[in] pRenderContext The render context.
             \param[in] pScene The scene.
             \return A pointer to a new light collection object, or throws an exception if creation failed.
         */
-        static SharedPtr create(RenderContext* pRenderContext, const std::shared_ptr<Scene>& pScene);
+        static ref<LightCollection> create(ref<Device> pDevice, RenderContext* pRenderContext, Scene* pScene)
+        {
+            return make_ref<LightCollection>(pDevice, pRenderContext, pScene);
+        }
+
+        LightCollection(ref<Device> pDevice, RenderContext* pRenderContext, Scene* pScene);
+        ~LightCollection() = default;
 
         /** Updates the light collection to the current state of the scene.
             \param[in] pRenderContext The render context.
@@ -128,7 +142,7 @@ namespace Falcor
 
         /** Returns the total number of active (non-culled) triangle lights.
         */
-        uint32_t getActiveLightCount() const { return getStats().trianglesActive; }
+        uint32_t getActiveLightCount(RenderContext* pRenderContext) const { return getStats(pRenderContext).trianglesActive; }
 
         /** Returns the total number of triangle lights (may include culled triangles).
         */
@@ -136,13 +150,13 @@ namespace Falcor
 
         /** Returns stats.
         */
-        const MeshLightStats& getStats() const { computeStats(); return mMeshLightStats; }
+        const MeshLightStats& getStats(RenderContext* pRenderContext) const { computeStats(pRenderContext); return mMeshLightStats; }
 
         /** Returns a CPU buffer with all emissive triangles in world space.
             Note that update() must have been called before for the data to be valid.
             Call prepareSyncCPUData() ahead of time to avoid stalling the GPU.
         */
-        const std::vector<MeshLightTriangle>& getMeshLightTriangles() const { syncCPUData(); return mMeshLightTriangles; }
+        const std::vector<MeshLightTriangle>& getMeshLightTriangles(RenderContext* pRenderContext) const { syncCPUData(pRenderContext); return mMeshLightTriangles; }
 
         /** Returns a CPU buffer with all mesh lights.
             Note that update() must have been called before for the data to be valid.
@@ -171,24 +185,23 @@ namespace Falcor
         };
 
     protected:
-        LightCollection(RenderContext* pRenderContext, const std::shared_ptr<Scene>& pScene);
-
-        void initIntegrator(const Scene& scene);
+        void initIntegrator(RenderContext* pRenderContext, const Scene& scene);
         void setupMeshLights(const Scene& scene);
         void build(RenderContext* pRenderContext, const Scene& scene);
         void prepareTriangleData(RenderContext* pRenderContext, const Scene& scene);
         void prepareMeshData(const Scene& scene);
         void integrateEmissive(RenderContext* pRenderContext, const Scene& scene);
-        void computeStats() const;
+        void computeStats(RenderContext* pRenderContext) const;
         void buildTriangleList(RenderContext* pRenderContext, const Scene& scene);
-        void updateActiveTriangleList();
+        void updateActiveTriangleList(RenderContext* pRenderContext);
         void updateTrianglePositions(RenderContext* pRenderContext, const Scene& scene, const std::vector<uint32_t>& updatedLights);
 
         void copyDataToStagingBuffer(RenderContext* pRenderContext) const;
-        void syncCPUData() const;
+        void syncCPUData(RenderContext* pRenderContext) const;
 
         // Internal state
-        std::weak_ptr<Scene>                    mpScene;                ///< Weak pointer to scene (scene owns LightCollection).
+        ref<Device>                             mpDevice;
+        Scene*                                  mpScene;                ///< Unowning pointer to scene (scene owns LightCollection).
 
         std::vector<MeshLightData>              mMeshLights;            ///< List of all mesh lights.
         uint32_t                                mTriangleCount = 0;     ///< Total number of triangles in all mesh lights (= mMeshLightTriangles.size()). This may include culled triangles.
@@ -201,31 +214,31 @@ namespace Falcor
         mutable bool                            mStatsValid = false;    ///< True when stats are valid.
 
         // GPU resources for the mesh lights and emissive triangles.
-        Buffer::SharedPtr                       mpTriangleData;         ///< Per-triangle geometry data for emissive triangles (mTriangleCount elements).
-        Buffer::SharedPtr                       mpActiveTriangleList;   ///< List of active (non-culled) emissive triangle.
-        Buffer::SharedPtr                       mpTriToActiveList;      ///< Mapping of all light triangles to index in mActiveTriangleList.
-        Buffer::SharedPtr                       mpFluxData;             ///< Per-triangle flux data for emissive triangles (mTriangleCount elements).
-        Buffer::SharedPtr                       mpMeshData;             ///< Per-mesh data for emissive meshes (mMeshLights.size() elements).
-        Buffer::SharedPtr                       mpPerMeshInstanceOffset; ///< Per-mesh instance offset into emissive triangles array (Scene::getMeshInstanceCount() elements).
+        ref<Buffer>                             mpTriangleData;         ///< Per-triangle geometry data for emissive triangles (mTriangleCount elements).
+        ref<Buffer>                             mpActiveTriangleList;   ///< List of active (non-culled) emissive triangle.
+        ref<Buffer>                             mpTriToActiveList;      ///< Mapping of all light triangles to index in mActiveTriangleList.
+        ref<Buffer>                             mpFluxData;             ///< Per-triangle flux data for emissive triangles (mTriangleCount elements).
+        ref<Buffer>                             mpMeshData;             ///< Per-mesh data for emissive meshes (mMeshLights.size() elements).
+        ref<Buffer>                             mpPerMeshInstanceOffset; ///< Per-mesh instance offset into emissive triangles array (Scene::getMeshInstanceCount() elements).
 
-        mutable Buffer::SharedPtr               mpStagingBuffer;        ///< Staging buffer used for retrieving the vertex positions, texture coordinates and light IDs from the GPU.
-        GpuFence::SharedPtr                     mpStagingFence;         ///< Fence used for waiting on the staging buffer being filled in.
+        mutable ref<Buffer>                     mpStagingBuffer;        ///< Staging buffer used for retrieving the vertex positions, texture coordinates and light IDs from the GPU.
+        ref<GpuFence>                           mpStagingFence;         ///< Fence used for waiting on the staging buffer being filled in.
 
-        Sampler::SharedPtr                      mpSamplerState;         ///< Material sampler for emissive textures.
+        ref<Sampler>                            mpSamplerState;         ///< Material sampler for emissive textures.
 
         // Shader programs.
         struct
         {
-            GraphicsProgram::SharedPtr          pProgram;
-            GraphicsVars::SharedPtr             pVars;
-            GraphicsState::SharedPtr            pState;
-            Sampler::SharedPtr                  pPointSampler;      ///< Point sampler for fetching individual texels in integrator. Must use same wrap mode etc. as material sampler.
-            Buffer::SharedPtr                   pResultBuffer;      ///< The output of the integration pass is written here. Using raw buffer for fp32 compatibility.
+            ref<GraphicsProgram>                pProgram;
+            ref<GraphicsVars>                   pVars;
+            ref<GraphicsState>                  pState;
+            ref<Sampler>                        pPointSampler;      ///< Point sampler for fetching individual texels in integrator. Must use same wrap mode etc. as material sampler.
+            ref<Buffer>                         pResultBuffer;      ///< The output of the integration pass is written here. Using raw buffer for fp32 compatibility.
         } mIntegrator;
 
-        ComputePass::SharedPtr                  mpTriangleListBuilder;
-        ComputePass::SharedPtr                  mpTrianglePositionUpdater;
-        ComputePass::SharedPtr                  mpFinalizeIntegration;
+        ref<ComputePass>                        mpTriangleListBuilder;
+        ref<ComputePass>                        mpTrianglePositionUpdater;
+        ref<ComputePass>                        mpFinalizeIntegration;
 
         mutable CPUOutOfDateFlags               mCPUInvalidData = CPUOutOfDateFlags::None;  ///< Flags indicating which CPU data is valid.
         mutable bool                            mStagingBufferValid = true;                 ///< Flag to indicate if the contents of the staging buffer is up-to-date.

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,10 +25,11 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "LightBVHSampler.h"
-#include <glm/gtc/constants.hpp>
-#include <glm/gtx/io.hpp>
+#include "Core/Assert.h"
+#include "Core/Errors.h"
+#include "Utils/Timing/Profiler.h"
+#include "Utils/Scripting/ScriptBindings.h"
 #include <algorithm>
 #include <numeric>
 
@@ -44,14 +45,9 @@ namespace Falcor
         };
     }
 
-    LightBVHSampler::SharedPtr LightBVHSampler::create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
-    {
-        return SharedPtr(new LightBVHSampler(pRenderContext, pScene, options));
-    }
-
     bool LightBVHSampler::update(RenderContext* pRenderContext)
     {
-        FALCOR_PROFILE("LightBVHSampler::update");
+        FALCOR_PROFILE(pRenderContext, "LightBVHSampler::update");
 
         bool samplerChanged = false;
         bool needsRefit = false;
@@ -66,7 +62,7 @@ namespace Falcor
         // Rebuild BVH if it's marked as dirty.
         if (mNeedsRebuild)
         {
-            mpBVHBuilder->build(*mpBVH);
+            mpBVHBuilder->build(pRenderContext, *mpBVH);
             mNeedsRebuild = false;
             samplerChanged = true;
         }
@@ -144,21 +140,13 @@ namespace Falcor
         return optionsChanged;
     }
 
-    LightBVH::SharedConstPtr LightBVHSampler::getBVH() const
-    {
-        return mpBVH->isValid() ? mpBVH : nullptr;
-    }
-
-    LightBVHSampler::LightBVHSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
+    LightBVHSampler::LightBVHSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options)
         : EmissiveLightSampler(EmissiveLightSamplerType::LightBVH, pScene)
         , mOptions(options)
     {
         // Create the BVH and builder.
-        mpBVHBuilder = LightBVHBuilder::create(mOptions.buildOptions);
-        if (!mpBVHBuilder) throw RuntimeError("Failed to create BVH builder");
-
-        mpBVH = LightBVH::create(pScene->getLightCollection(pRenderContext));
-        if (!mpBVH) throw RuntimeError("Failed to create BVH");
+        mpBVHBuilder = std::make_unique<LightBVHBuilder>(mOptions.buildOptions);
+        mpBVH = std::make_unique<LightBVH>(pScene->getDevice(), pScene->getLightCollection(pRenderContext));
     }
 
     FALCOR_SCRIPT_BINDING(LightBVHSampler)

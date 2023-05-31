@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,21 +26,21 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 __exported import Rendering.Materials.IMaterial;
-__exported import Rendering.Materials.ClothBSDF;
+__exported import Rendering.Materials.ClothMaterialInstance;
 import Scene.Material.BasicMaterialData;
 import Scene.Material.ShadingUtils;
+import Scene.Scene;
 
 /** Implementation of a simple cloth material.
-*/
-struct ClothMaterial : IMaterial
+ */
+struct ClothMaterial : MaterialBase, IMaterial
 {
-    MaterialHeader header;
     BasicMaterialData data;
 
-    // Specify that the associated `BSDF` type is `ClothBSDF`.
-    typedef ClothBSDF BSDF;
+    // Specify that the associated `MaterialInstance` type is `ClothMaterialInstance`.
+    typedef ClothMaterialInstance MaterialInstance;
 
-    ClothBSDF setupBSDF(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod)
+    ClothMaterialInstance setupMaterialInstance(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
     {
         SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
 
@@ -62,14 +62,26 @@ struct ClothMaterial : IMaterial
         brdf.roughness = spec.g;                // TODO: Linear or squared roughness?
         brdf.f0 = float3(F0);                   // TODO: What's appropriate here?
 
-        return ClothBSDF(brdf);
-    }
+        // DEMO21
+        if (Scene::kDiffuseAlbedoMultiplier != 1.f)
+        {
+            brdf.diffuseColor = saturate(brdf.diffuseColor * Scene::kDiffuseAlbedoMultiplier);
+        }
 
-    void modifyTangentSpace(const MaterialSystem ms, const float4 tangentW, const ITextureSampler lod, inout ShadingData sd)
-    {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
-        applyNormalMap(sd, data.getNormalMapType(), encodedNormal, tangentW);
+        // Compute final shading frame.
+        ShadingFrame sf = sd.frame;
+        if (isNormalMappingEnabled(hints))
+        {
+            float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
+            sf = computeShadingFrameFromNormalMap(sd, data.getNormalMapType(), encodedNormal);
+        }
+        flipShadingNormal(sd, sf);
+        if (isAdjustShadingNormalEnabled(hints))
+        {
+            adjustShadingNormal(sd, sf);
+        }
+
+        return ClothMaterialInstance(sf, brdf);
     }
 
     float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod)

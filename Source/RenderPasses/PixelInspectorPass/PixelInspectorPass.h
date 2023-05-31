@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 
 using namespace Falcor;
 
@@ -35,30 +36,29 @@ using namespace Falcor;
 class PixelInspectorPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<PixelInspectorPass>;
+    FALCOR_PLUGIN_CLASS(PixelInspectorPass, "PixelInspectorPass", {
+        "Inspect geometric and material properties at a given pixel.\n"
+        "Left-mouse click on a pixel to select it.\n"
+    });
 
-    static const Info kInfo;
+    static ref<PixelInspectorPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<PixelInspectorPass>(pDevice, dict); }
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict = {});
+    PixelInspectorPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override;
 
 private:
-    PixelInspectorPass();
-
     // Internal state
-    Scene::SharedPtr                      mpScene;
-    ComputeProgram::SharedPtr             mpProgram;
-    ComputeState::SharedPtr               mpState;
-    ComputeVars::SharedPtr                mpVars;
+    ref<Scene>                            mpScene;
+    ref<ComputeProgram>                   mpProgram;
+    ref<ComputeState>                     mpState;
+    ref<ComputeVars>                      mpVars;
 
-    Buffer::SharedPtr                     mpPixelDataBuffer;
+    ref<Buffer>                           mpPixelDataBuffer;
 
     float2                                mCursorPosition = float2(0.0f);
     float2                                mSelectedCursorPosition = float2(0.0f);

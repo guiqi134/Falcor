@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,8 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "SimplePostFX.h"
-
-const RenderPass::Info SimplePostFX::kInfo { "SimplePostFX", "Simple set of post effects." };
 
 namespace
 {
@@ -56,15 +54,9 @@ namespace
     const char kShaderFile[] = "RenderPasses/SimplePostFX/SimplePostFX.cs.slang";
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
-    return PROJECT_DIR;
-}
-
 static void regSimplePostFX(pybind11::module& m)
 {
-    pybind11::class_<SimplePostFX, RenderPass, SimplePostFX::SharedPtr> pass(m, "SimplePostFX");
+    pybind11::class_<SimplePostFX, RenderPass, ref<SimplePostFX>> pass(m, "SimplePostFX");
     pass.def_property(kEnabled, &SimplePostFX::getEnabled, &SimplePostFX::setEnabled);
     pass.def_property(kWipe, &SimplePostFX::getWipe, &SimplePostFX::setWipe);
     pass.def_property(kBloomAmount, &SimplePostFX::getBloomAmount, &SimplePostFX::setBloomAmount);
@@ -82,42 +74,14 @@ static void regSimplePostFX(pybind11::module& m)
     pass.def_property(kColorPowerScalar, &SimplePostFX::getColorPowerScalar, &SimplePostFX::setColorPowerScalar);
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary & lib)
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    lib.registerPass(SimplePostFX::kInfo, SimplePostFX::create);
+    registry.registerClass<RenderPass, SimplePostFX>();
     ScriptBindings::registerBinding(regSimplePostFX);
 }
 
-SimplePostFX::SharedPtr SimplePostFX::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new SimplePostFX(dict));
-}
-
-Dictionary SimplePostFX::getScriptingDictionary()
-{
-    Dictionary dict;
-    dict[kEnabled] = getEnabled();
-    dict[kOutputSize] = mOutputSizeSelection;
-    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) dict[kFixedOutputSize] = mFixedOutputSize;
-    dict[kWipe] = getWipe();
-    dict[kBloomAmount] = getBloomAmount();
-    dict[kStarAmount] = getStarAmount();
-    dict[kStarAngle] = getStarAngle();
-    dict[kVignetteAmount] = getVignetteAmount();
-    dict[kChromaticAberrationAmount] = getChromaticAberrationAmount();
-    dict[kBarrelDistortAmount] = getBarrelDistortAmount();
-    dict[kSaturationCurve] = getSaturationCurve();
-    dict[kColorOffset] = getColorOffset();
-    dict[kColorScale] = getColorScale();
-    dict[kColorPower] = getColorPower();
-    dict[kColorOffsetScalar] = getColorOffsetScalar();
-    dict[kColorScaleScalar] = getColorScaleScalar();
-    dict[kColorPowerScalar] = getColorPowerScalar();
-    return dict;
-}
-
-SimplePostFX::SimplePostFX(const Dictionary& dict)
-    : RenderPass(kInfo)
+SimplePostFX::SimplePostFX(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     // Deserialize pass from dictionary.
     for (const auto& [key, value] : dict)
@@ -145,12 +109,35 @@ SimplePostFX::SimplePostFX(const Dictionary& dict)
     Sampler::Desc samplerDesc;
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Border, Sampler::AddressMode::Border, Sampler::AddressMode::Border);
-    mpLinearSampler = Sampler::create(samplerDesc);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
 
     Program::DefineList defines;
-    mpDownsamplePass = ComputePass::create(kShaderFile, "downsample", defines);
-    mpUpsamplePass = ComputePass::create(kShaderFile, "upsample", defines);
-    mpPostFXPass = ComputePass::create(kShaderFile, "runPostFX", defines);
+    mpDownsamplePass = ComputePass::create(mpDevice, kShaderFile, "downsample", defines);
+    mpUpsamplePass = ComputePass::create(mpDevice, kShaderFile, "upsample", defines);
+    mpPostFXPass = ComputePass::create(mpDevice, kShaderFile, "runPostFX", defines);
+}
+
+Dictionary SimplePostFX::getScriptingDictionary()
+{
+    Dictionary dict;
+    dict[kEnabled] = getEnabled();
+    dict[kOutputSize] = mOutputSizeSelection;
+    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) dict[kFixedOutputSize] = mFixedOutputSize;
+    dict[kWipe] = getWipe();
+    dict[kBloomAmount] = getBloomAmount();
+    dict[kStarAmount] = getStarAmount();
+    dict[kStarAngle] = getStarAngle();
+    dict[kVignetteAmount] = getVignetteAmount();
+    dict[kChromaticAberrationAmount] = getChromaticAberrationAmount();
+    dict[kBarrelDistortAmount] = getBarrelDistortAmount();
+    dict[kSaturationCurve] = getSaturationCurve();
+    dict[kColorOffset] = getColorOffset();
+    dict[kColorScale] = getColorScale();
+    dict[kColorPower] = getColorPower();
+    dict[kColorOffsetScalar] = getColorOffsetScalar();
+    dict[kColorScaleScalar] = getColorScaleScalar();
+    dict[kColorPowerScalar] = getColorPowerScalar();
+    return dict;
 }
 
 RenderPassReflection SimplePostFX::reflect(const CompileData& compileData)
@@ -165,8 +152,8 @@ RenderPassReflection SimplePostFX::reflect(const CompileData& compileData)
 
 void SimplePostFX::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    auto pSrc = renderData[kSrc]->asTexture();
-    auto pDst = renderData[kDst]->asTexture();
+    auto pSrc = renderData.getTexture(kSrc);
+    auto pDst = renderData.getTexture(kDst);
     FALCOR_ASSERT(pSrc && pDst);
 
     // Issue error and disable pass if I/O size doesn't match. The user can hit continue and fix the config or abort.
@@ -182,10 +169,10 @@ void SimplePostFX::execute(RenderContext* pRenderContext, const RenderData& rend
         getBloomAmount() == 0.f &&
         getChromaticAberrationAmount() == 0.f &&
         getBarrelDistortAmount() == 0.f &&
-        getSaturationCurve() == float3(1.f) &&
-        getColorOffset() == float3(0.5f) &&
-        getColorScale() == float3(0.5f) &&
-        getColorPower() == float3(0.5f) &&
+        all(getSaturationCurve() == float3(1.f)) &&
+        all(getColorOffset() == float3(0.5f)) &&
+        all(getColorScale() == float3(0.5f)) &&
+        all(getColorPower() == float3(0.5f)) &&
         getColorOffsetScalar() == 0.f &&
         getColorScaleScalar() == 0.f &&
         getColorPowerScalar() == 0.f
@@ -199,51 +186,60 @@ void SimplePostFX::execute(RenderContext* pRenderContext, const RenderData& rend
     preparePostFX(pRenderContext, resolution.x, resolution.y);
     if (getBloomAmount() > 0.f)
     {
-        mpDownsamplePass["gLinearSampler"] = mpLinearSampler;
-        for (int level = 0; level < kNumLevels; ++level)
+        // Downsampling
         {
-            uint2 res = { std::max(1u , resolution.x >> (level + 1)), std::max(1u , resolution.y >> (level + 1)) };
-            float2 invres = float2(1.f / res.x, 1.f / res.y);
-            mpDownsamplePass["PerFrameCB"]["gResolution"] = res;
-            mpDownsamplePass["PerFrameCB"]["gInvRes"] = invres;
-            mpDownsamplePass["gSrc"] = level ? mpPyramid[level] : pSrc;
-            mpDownsamplePass["gDst"] = mpPyramid[level + 1];
-            mpDownsamplePass->execute(pRenderContext, uint3(res, 1));
+            auto var = mpDownsamplePass->getRootVar();
+            var["gLinearSampler"] = mpLinearSampler;
+            for (int level = 0; level < kNumLevels; ++level)
+            {
+                uint2 res = { std::max(1u , resolution.x >> (level + 1)), std::max(1u , resolution.y >> (level + 1)) };
+                float2 invres = float2(1.f / res.x, 1.f / res.y);
+                var["PerFrameCB"]["gResolution"] = res;
+                var["PerFrameCB"]["gInvRes"] = invres;
+                var["gSrc"] = level ? mpPyramid[level] : pSrc;
+                var["gDst"] = mpPyramid[level + 1];
+                mpDownsamplePass->execute(pRenderContext, uint3(res, 1));
+            }
         }
 
-        mpUpsamplePass["gLinearSampler"] = mpLinearSampler;
-        mpUpsamplePass["PerFrameCB"]["gBloomAmount"] = getBloomAmount();
-        mpUpsamplePass["gSrc"] = pSrc;
-        for (int level = kNumLevels - 1; level >= 0; --level)
+        // Upsampling
         {
-            uint2 res = { std::max(1u , resolution.x >> level), std::max(1u , resolution.y >> level) };
-            float2 invres = float2(1.f / res.x, 1.f / res.y);
-            mpUpsamplePass["PerFrameCB"]["gResolution"] = res;
-            mpUpsamplePass["PerFrameCB"]["gInvRes"] = invres;
-            bool wantStar = level == 1 || level == 2;
-            mpUpsamplePass["PerFrameCB"]["gStar"] = (wantStar) ? getStarAmount() : 0.f;
-            if (wantStar) {
-                float ang = getStarAngle();
-                mpUpsamplePass["PerFrameCB"]["gStarDir1"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
-                ang += float(M_PI) / 3.f;
-                mpUpsamplePass["PerFrameCB"]["gStarDir2"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
-                ang += float(M_PI) / 3.f;
-                mpUpsamplePass["PerFrameCB"]["gStarDir3"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
+            auto var = mpUpsamplePass->getRootVar();
+            var["gLinearSampler"] = mpLinearSampler;
+            var["PerFrameCB"]["gBloomAmount"] = getBloomAmount();
+            var["gSrc"] = pSrc;
+            for (int level = kNumLevels - 1; level >= 0; --level)
+            {
+                uint2 res = { std::max(1u , resolution.x >> level), std::max(1u , resolution.y >> level) };
+                float2 invres = float2(1.f / res.x, 1.f / res.y);
+                var["PerFrameCB"]["gResolution"] = res;
+                var["PerFrameCB"]["gInvRes"] = invres;
+                bool wantStar = level == 1 || level == 2;
+                var["PerFrameCB"]["gStar"] = (wantStar) ? getStarAmount() : 0.f;
+                if (wantStar) {
+                    float ang = getStarAngle();
+                    var["PerFrameCB"]["gStarDir1"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
+                    ang += float(M_PI) / 3.f;
+                    var["PerFrameCB"]["gStarDir2"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
+                    ang += float(M_PI) / 3.f;
+                    var["PerFrameCB"]["gStarDir3"] = float2(std::sin(ang), std::cos(ang)) * invres * 2.f;
+                }
+                var["gBloomed"] = mpPyramid[level + 1];
+                var["gDst"] = mpPyramid[level];
+                var["PerFrameCB"]["gInPlace"] = level > 0; // for most levels, we update the pyramid in place. for the last step, we read from the original source since we did not compute it in the downsample passes.
+                mpUpsamplePass->execute(pRenderContext, uint3(res, 1));
             }
-            mpUpsamplePass["gBloomed"] = mpPyramid[level + 1];
-            mpUpsamplePass["gDst"] = mpPyramid[level];
-            mpUpsamplePass["PerFrameCB"]["gInPlace"] = level > 0; // for most levels, we update the pyramid in place. for the last step, we read from the original source since we did not compute it in the downsample passes.
-            mpUpsamplePass->execute(pRenderContext, uint3(res, 1));
         }
     }
 
     {
-        mpPostFXPass["PerFrameCB"]["gResolution"] = resolution;
-        mpPostFXPass["PerFrameCB"]["gInvRes"] = float2(1.f / resolution.x, 1.f / resolution.y);
-        mpPostFXPass["PerFrameCB"]["gVignetteAmount"] = getVignetteAmount();
-        mpPostFXPass["PerFrameCB"]["gChromaticAberrationAmount"] = getChromaticAberrationAmount() * (1.f / 64.f);
+        auto var = mpPostFXPass->getRootVar();
+        var["PerFrameCB"]["gResolution"] = resolution;
+        var["PerFrameCB"]["gInvRes"] = float2(1.f / resolution.x, 1.f / resolution.y);
+        var["PerFrameCB"]["gVignetteAmount"] = getVignetteAmount();
+        var["PerFrameCB"]["gChromaticAberrationAmount"] = getChromaticAberrationAmount() * (1.f / 64.f);
         float barrel = getBarrelDistortAmount() * 0.125f;
-        mpPostFXPass["PerFrameCB"]["gBarrelDistort"] = float2(1.f / (1.f + 4.f * barrel), barrel); // scale factor chosen to keep the corners of a 16:9 viewport fixed
+        var["PerFrameCB"]["gBarrelDistort"] = float2(1.f / (1.f + 4.f * barrel), barrel); // scale factor chosen to keep the corners of a 16:9 viewport fixed
         float3 satcurve = getSaturationCurve();
         // fit a quadratic thru the 3 points
         satcurve.y -= satcurve.x;
@@ -251,15 +247,15 @@ void SimplePostFX::execute(RenderContext* pRenderContext, const RenderData& rend
         float A = 2.f * satcurve.z - 4.f * satcurve.y;
         float B = satcurve.z - A;
         float C = satcurve.x;
-        mpPostFXPass["PerFrameCB"]["gSaturationCurve"] = float3(A, B, C);
-        mpPostFXPass["PerFrameCB"]["gColorOffset"] = getColorOffset() + getColorOffsetScalar() - 0.5f;
-        mpPostFXPass["PerFrameCB"]["gColorScale"] = getColorScale() * std::exp2(1.f + 2.f * getColorScaleScalar());
-        mpPostFXPass["PerFrameCB"]["gColorPower"] = exp2(3.f * (0.5f - getColorPower() - getColorPowerScalar()));
-        mpPostFXPass["PerFrameCB"]["gWipe"] = mWipe * resolution.x;
-        mpPostFXPass["gBloomed"] = getBloomAmount() > 0.f ? mpPyramid[0] : pSrc;
-        mpPostFXPass["gSrc"] = pSrc;
-        mpPostFXPass["gDst"] = pDst;
-        mpPostFXPass["gLinearSampler"] = mpLinearSampler;
+        var["PerFrameCB"]["gSaturationCurve"] = float3(A, B, C);
+        var["PerFrameCB"]["gColorOffset"] = getColorOffset() + getColorOffsetScalar() - 0.5f;
+        var["PerFrameCB"]["gColorScale"] = getColorScale() * std::exp2(1.f + 2.f * getColorScaleScalar());
+        var["PerFrameCB"]["gColorPower"] = exp2(3.f * (0.5f - getColorPower() - getColorPowerScalar()));
+        var["PerFrameCB"]["gWipe"] = mWipe * resolution.x;
+        var["gBloomed"] = getBloomAmount() > 0.f ? mpPyramid[0] : pSrc;
+        var["gSrc"] = pSrc;
+        var["gDst"] = pDst;
+        var["gLinearSampler"] = mpLinearSampler;
         mpPostFXPass->execute(pRenderContext, uint3(resolution, 1));
     }
 }
@@ -268,7 +264,7 @@ void SimplePostFX::preparePostFX(RenderContext* pRenderContext, uint32_t width, 
 {
     for (int res = 0; res < kNumLevels + 1; ++res)
     {
-        Texture::SharedPtr& pBuf = mpPyramid[res];
+        ref<Texture>& pBuf = mpPyramid[res];
         if (getBloomAmount() <= 0.f)
         {
             pBuf = nullptr;
@@ -279,7 +275,7 @@ void SimplePostFX::preparePostFX(RenderContext* pRenderContext, uint32_t width, 
             uint32_t h = std::max(1u, height >> res);
             if (!pBuf || pBuf->getWidth() != w || pBuf->getHeight() != h)
             {
-                pBuf = Texture::create2D(w, h, ResourceFormat::RGBA16Float, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+                pBuf = Texture::create2D(mpDevice, w, h, ResourceFormat::RGBA16Float, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
                 FALCOR_ASSERT(pBuf);
             }
         }

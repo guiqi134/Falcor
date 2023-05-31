@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,6 @@
  **************************************************************************/
 #include "ModulateIllumination.h"
 #include "RenderGraph/RenderPassHelpers.h"
-
-const RenderPass::Info ModulateIllumination::kInfo { "ModulateIllumination", "Modulate illumination pass." };
 
 namespace
 {
@@ -65,28 +63,18 @@ namespace
     const char kUseDeltaTransmissionReflectance[] = "useDeltaTransmissionReflectance";
     const char kUseDeltaTransmissionRadiance[] = "useDeltaTransmissionRadiance";
     const char kUseResidualRadiance[] = "useResidualRadiance";
+    const char kOutputSize[] = "outputSize";
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
+    registry.registerClass<RenderPass, ModulateIllumination>();
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
+ModulateIllumination::ModulateIllumination(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
-    lib.registerPass(ModulateIllumination::kInfo, ModulateIllumination::create);
-}
-
-ModulateIllumination::SharedPtr ModulateIllumination::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new ModulateIllumination(dict));
-}
-
-ModulateIllumination::ModulateIllumination(const Dictionary& dict)
-    : RenderPass(kInfo)
-{
-    mpModulateIlluminationPass = ComputePass::create(kShaderFile, "main", Program::DefineList(), false);
+    mpModulateIlluminationPass = ComputePass::create(mpDevice, kShaderFile, "main", Program::DefineList(), false);
 
     // Deserialize pass from dictionary.
     for (const auto& [key, value] : dict)
@@ -103,6 +91,7 @@ ModulateIllumination::ModulateIllumination(const Dictionary& dict)
         else if (key == kUseDeltaTransmissionReflectance) mUseDeltaTransmissionReflectance = value;
         else if (key == kUseDeltaTransmissionRadiance) mUseDeltaTransmissionRadiance = value;
         else if (key == kUseResidualRadiance) mUseResidualRadiance = value;
+        else if (key == kOutputSize) mOutputSizeSelection = value;
         else
         {
             logWarning("Unknown field '{}' in ModulateIllumination dictionary.", key);
@@ -125,6 +114,7 @@ Falcor::Dictionary ModulateIllumination::getScriptingDictionary()
     dict[kUseDeltaTransmissionReflectance] = mUseDeltaTransmissionReflectance;
     dict[kUseDeltaTransmissionRadiance] = mUseDeltaTransmissionRadiance;
     dict[kUseResidualRadiance] = mUseResidualRadiance;
+    dict[kOutputSize] = mOutputSizeSelection;
     return dict;
 }
 
@@ -133,18 +123,22 @@ RenderPassReflection ModulateIllumination::reflect(const CompileData& compileDat
     RenderPassReflection reflector;
 
     addRenderPassInputs(reflector, kInputChannels);
+
+    const uint2 sz = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, mFrameDim, compileData.defaultTexDims);
     // TODO: Allow user to specify output format
-    reflector.addOutput(kOutput, "output").bindFlags(ResourceBindFlags::UnorderedAccess).format(ResourceFormat::RGBA32Float);
+    reflector.addOutput(kOutput, "output").bindFlags(ResourceBindFlags::UnorderedAccess).format(ResourceFormat::RGBA32Float).texture2D(sz.x, sz.y);
     return reflector;
 }
 
 void ModulateIllumination::compile(RenderContext* pRenderContext, const CompileData& compileData)
 {
-    mFrameDim = compileData.defaultTexDims;
 }
 
 void ModulateIllumination::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    const auto& pOutput = renderData.getTexture(kOutput);
+    mFrameDim = { pOutput->getWidth(), pOutput->getHeight() };
+
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     // TODO: This should be moved to a more general mechanism using Slang.
     Program::DefineList defineList = getValidResourceDefines(kInputChannels, renderData);
@@ -168,18 +162,25 @@ void ModulateIllumination::execute(RenderContext* pRenderContext, const RenderDa
         mpModulateIlluminationPass->setVars(nullptr);
     }
 
-    mpModulateIlluminationPass["CB"]["frameDim"] = mFrameDim;
+    auto var = mpModulateIlluminationPass->getRootVar();
+    var["CB"]["frameDim"] = mFrameDim;
 
     auto bind = [&](const ChannelDesc& desc)
     {
         if (!desc.texname.empty())
         {
-            mpModulateIlluminationPass[desc.texname] = renderData[desc.name]->asTexture();
+            ref<Texture> pTexture = renderData.getTexture(desc.name);
+            if (pTexture && (mFrameDim.x != pTexture->getWidth() || mFrameDim.y != pTexture->getHeight()))
+            {
+                logError("Texture {} has dim {}x{}, not compatible with the FrameDim {}x{}.",
+                    pTexture->getName(), pTexture->getWidth(), pTexture->getHeight(), mFrameDim.x, mFrameDim.y);
+            }
+            var[desc.texname] = pTexture;
         }
     };
     for (const auto& channel : kInputChannels) bind(channel);
 
-    mpModulateIlluminationPass["gOutput"] = renderData[kOutput]->asTexture();
+    var["gOutput"] = renderData.getTexture(kOutput);
 
     mpModulateIlluminationPass->execute(pRenderContext, mFrameDim.x, mFrameDim.y);
 }

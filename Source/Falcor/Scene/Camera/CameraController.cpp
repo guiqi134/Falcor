@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,11 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "CameraController.h"
+#include "Camera.h"
 #include "Utils/UI/InputTypes.h"
 #include "Utils/Math/FalcorMath.h"
-#include "Camera.h"
 
 namespace Falcor
 {
@@ -38,15 +37,24 @@ namespace Falcor
         const float kGamepadDeadZone = 0.1f;        ///< Gamepad dead zone.
         const float kGamepadPowerCurve = 1.2f;      ///< Gamepad power curve exponent.
         const float kGamepadRotationSpeed = 2.5f;   ///< Gamepad camera rotation speed.
+
+        float2 convertCamPosRange(const float2 pos)
+        {
+            // Convert [0,1] range to [-1, 1], and inverse the Y (screen-space y==0 is top)
+            const float2 scale(2, -2);
+            const float2 offset(-1, 1);
+            float2 res = (pos * scale) + offset;
+            return res;
+        }
     }
 
-    float2 convertCamPosRange(const float2 pos)
+    float3 CameraController::getUpVector() const
     {
-        // Convert [0,1] range to [-1, 1], and inverse the Y (screen-space y==0 is top)
-        const float2 scale(2, -2);
-        const float2 offset(-1, 1);
-        float2 res = (pos * scale) + offset;
-        return res;
+        uint32_t index = (uint32_t)mUpDirection;
+        FALCOR_ASSERT(index < 6);
+        float3 up{0.f};
+        up[index / 2] = (index % 2 == 0) ? 1.f : -1.f;
+        return up;
     }
 
     void OrbiterCameraController::setModelParams(const float3& center, float radius, float distanceInRadius)
@@ -54,7 +62,7 @@ namespace Falcor
         mModelCenter = center;
         mModelRadius = radius;
         mCameraDistance = distanceInRadius;
-        mRotation = glm::mat3();
+        mRotation = float3x3::identity();
         mbDirty = true;
     }
 
@@ -87,9 +95,9 @@ namespace Falcor
             if(mIsLeftButtonDown)
             {
                 float3 curVec = project2DCrdToUnitSphere(convertCamPosRange(mouseEvent.pos));
-                glm::quat q = createQuaternionFromVectors(mLastVector, curVec);
-                glm::mat3x3 rot = (glm::mat3x3)q;
-                mRotation = rot * mRotation;
+                quatf q = quatFromRotationBetweenVectors(mLastVector, curVec);
+                float3x3 rot = math::matrixFromQuat(q);
+                mRotation = mul(rot, mRotation);
                 mbDirty = true;
                 mLastVector = curVec;
                 handled = true;
@@ -112,19 +120,27 @@ namespace Falcor
             mpCamera->setTarget(mModelCenter);
 
             float3 camPos = mModelCenter;
-            camPos += (float3(0,0,1) * mRotation) * mModelRadius * mCameraDistance;
+            // tdavidovic: Why do we multiply the rotation matrix from the left (i.e., as if we multiplied by a transpose?)
+            camPos += mul(float3(0,0,1), mRotation) * mModelRadius * mCameraDistance;
             mpCamera->setPosition(camPos);
 
             float3 up(0, 1, 0);
-            up = up * mRotation;
+            up = mul(up, mRotation);
             mpCamera->setUpVector(up);
             return true;
         }
         return false;
     }
 
+    void OrbiterCameraController::resetInputState()
+    {
+        mIsLeftButtonDown   = false;
+        mShouldRotate       = false;
+        mbDirty             = false;
+    }
+
     template<bool b6DoF>
-    FirstPersonCameraControllerCommon<b6DoF>::FirstPersonCameraControllerCommon(const Camera::SharedPtr& pCamera) : CameraController(pCamera)
+    FirstPersonCameraControllerCommon<b6DoF>::FirstPersonCameraControllerCommon(const ref<Camera>& pCamera) : CameraController(pCamera)
     {
         mTimer.update();
     }
@@ -186,7 +202,7 @@ namespace Falcor
     }
     inline float applyPowerCurve(const float v, const float power)
     {
-        return std::powf(std::fabs(v), power) * (v < 0.f ? -1.f : 1.f);
+        return std::pow(std::fabs(v), power) * (v < 0.f ? -1.f : 1.f);
     }
     inline float2 applyPowerCurve(const float2 v, const float power)
     {
@@ -236,28 +252,28 @@ namespace Falcor
             {
                 float3 camPos = mpCamera->getPosition();
                 float3 camTarget = mpCamera->getTarget();
-                float3 camUp = b6DoF ? mpCamera->getUpVector() : float3(0, 1, 0);;
+                float3 camUp = b6DoF ? mpCamera->getUpVector() : getUpVector();
 
-                float3 viewDir = glm::normalize(camTarget - camPos);
+                float3 viewDir = normalize(camTarget - camPos);
 
                 if (mIsLeftButtonDown || anyGamepadRotation)
                 {
-                    float3 sideway = glm::cross(viewDir, normalize(camUp));
+                    float3 sideway = cross(viewDir, normalize(camUp));
 
                     float2 mouseRotation = mIsLeftButtonDown ? mMouseDelta * mSpeedModifier : float2(0.f);
                     float2 gamepadRotation = anyGamepadRotation ? mGamepadRightStick * kGamepadRotationSpeed * elapsedTime : float2(0.f);
                     float2 rotation = mouseRotation + gamepadRotation;
 
                     // Rotate around x-axis
-                    glm::quat qy = glm::angleAxis(rotation.y, sideway);
-                    glm::mat3 rotY(qy);
-                    viewDir = viewDir * rotY;
-                    camUp = camUp * rotY;
+                    quatf qy = math::quatFromAngleAxis(rotation.y, sideway);
+                    float3x3 rotY = math::matrixFromQuat(qy);
+                    viewDir = mul(viewDir, rotY);
+                    camUp = mul(camUp, rotY);
 
                     // Rotate around y-axis
-                    glm::quat qx = glm::angleAxis(rotation.x, camUp);
-                    glm::mat3 rotX(qx);
-                    viewDir = viewDir * rotX;
+                    quatf qx = math::quatFromAngleAxis(rotation.x, camUp);
+                    float3x3 rotX = math::matrixFromQuat(qx);
+                    viewDir = mul(viewDir, rotX);
 
                     mpCamera->setTarget(camPos + viewDir);
                     mpCamera->setUpVector(camUp);
@@ -267,9 +283,9 @@ namespace Falcor
                 if (b6DoF && mIsRightButtonDown)
                 {
                     // Rotate around x-axis
-                    glm::quat q = glm::angleAxis(mMouseDelta.x * mSpeedModifier, viewDir);
-                    glm::mat3 rot(q);
-                    camUp = camUp * rot;
+                    quatf q = math::quatFromAngleAxis(mMouseDelta.x * mSpeedModifier, viewDir);
+                    float3x3 rot = math::matrixFromQuat(q);
+                    camUp = mul(camUp, rot);
                     mpCamera->setUpVector(camUp);
                     dirty = true;
                 }
@@ -300,12 +316,15 @@ namespace Falcor
                 float3 camUp = mpCamera->getUpVector();
 
                 float3 viewDir = normalize(camTarget - camPos);
-                float3 sideway = glm::cross(viewDir, normalize(camUp));
+                float3 sideway = cross(viewDir, normalize(camUp));
 
                 float curMove = mSpeedModifier * mSpeed * elapsedTime;
                 camPos += movement.z * curMove * viewDir;
                 camPos += movement.x * curMove * sideway;
                 camPos += movement.y * curMove * camUp;
+
+                if (mBounds.valid())
+                    camPos = clamp(camPos, mBounds.minPoint, mBounds.maxPoint);
 
                 camTarget = camPos + viewDir;
 
@@ -367,6 +386,20 @@ namespace Falcor
         }
 
         return handled;
+    }
+
+    template<bool b6DoF>
+    void FirstPersonCameraControllerCommon<b6DoF>::resetInputState()
+    {
+        mIsLeftButtonDown   = false;
+        mIsRightButtonDown  = false;
+        mShouldRotate       = false;
+        mMovement.reset();
+
+        mGamepadLeftStick       = float2(0.f);
+        mGamepadRightStick      = float2(0.f);
+        mGamepadLeftTrigger     = 0.f;
+        mGamepadRightTrigger    = 0.f;
     }
 
     template class FirstPersonCameraControllerCommon < true > ;

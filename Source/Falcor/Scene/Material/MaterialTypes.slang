@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -35,12 +35,21 @@ BEGIN_NAMESPACE_FALCOR
 // TODO: Specify the backing type when Slang issue has been resolved
 enum class MaterialType // : uint32_t
 {
+    Unknown,    ///< Unknown material type, e.g. type is not yet registered.
+
     Standard,
     Cloth,
     Hair,
     MERL,
-
-    Count // Must be last
+    MERLMix,
+    PBRTDiffuse,
+    PBRTDiffuseTransmission,
+    PBRTConductor,
+    PBRTDielectric,
+    PBRTCoatedConductor,
+    PBRTCoatedDiffuse,
+    RGL,
+    BuiltinCount // Must be last
 };
 
 /** Alpha mode. This specifies how alpha testing should be done.

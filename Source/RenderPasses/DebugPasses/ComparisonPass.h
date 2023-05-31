@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,28 +27,30 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "Core/Pass/FullScreenPass.h"
+#include "RenderGraph/RenderPass.h"
+#include "Utils/UI/TextRenderer.h"
 
 using namespace Falcor;
 
 class ComparisonPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ComparisonPass>;
-
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
 
 protected:
-    ComparisonPass(const Info& info) : RenderPass(info) {}
+    ComparisonPass(ref<Device> pDevice);
     virtual void createProgram() = 0;
     bool parseKeyValuePair(const std::string key, const Dictionary::Value val);
 
-    FullScreenPass::SharedPtr mpSplitShader;
-    Texture::SharedPtr pLeftSrcTex;
-    Texture::SharedPtr pRightSrcTex;
-    Fbo::SharedPtr pDstFbo;
+    ref<FullScreenPass> mpSplitShader;
+    ref<Texture> pLeftSrcTex;
+    ref<Texture> pRightSrcTex;
+    ref<Fbo> pDstFbo;
+    std::unique_ptr<TextRenderer> mpTextRenderer;
 
     // Screen parameters
     bool mSwapSides = false; // Is the left input on the left side

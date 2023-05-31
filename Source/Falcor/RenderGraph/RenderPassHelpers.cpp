@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,31 +25,39 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
+#include "RenderPassHelpers.h"
 #include "RenderPass.h"
+#include "Core/Assert.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-    uint2 RenderPassHelpers::calculateIOSize(const IOSize selection, const uint2 fixedSize, const uint2 windowSize)
-    {
-        uint2 sz = {};
-        if (selection == RenderPassHelpers::IOSize::Fixed) sz = fixedSize;
-        else if (selection == RenderPassHelpers::IOSize::Full) sz = windowSize;
-        else if (selection == RenderPassHelpers::IOSize::Half) sz = windowSize / uint2(2);
-        else if (selection == RenderPassHelpers::IOSize::Quarter) sz = windowSize / uint2(4);
-        else if (selection == RenderPassHelpers::IOSize::Double) sz = windowSize * uint2(2);
-        else FALCOR_ASSERT(selection == RenderPassHelpers::IOSize::Default);
-        return sz;
-    }
-
-    FALCOR_SCRIPT_BINDING(RenderPassHelpers)
-    {
-        pybind11::enum_<RenderPassHelpers::IOSize> sz(m, "IOSize");
-        sz.value("Default", RenderPassHelpers::IOSize::Default);
-        sz.value("Fixed", RenderPassHelpers::IOSize::Fixed);
-        sz.value("Full", RenderPassHelpers::IOSize::Full);
-        sz.value("Half", RenderPassHelpers::IOSize::Half);
-        sz.value("Quarter", RenderPassHelpers::IOSize::Quarter);
-        sz.value("Double", RenderPassHelpers::IOSize::Double);
-    }
+uint2 RenderPassHelpers::calculateIOSize(const IOSize selection, const uint2 fixedSize, const uint2 windowSize)
+{
+    uint2 sz = {};
+    if (selection == RenderPassHelpers::IOSize::Fixed)
+        sz = fixedSize;
+    else if (selection == RenderPassHelpers::IOSize::Full)
+        sz = windowSize;
+    else if (selection == RenderPassHelpers::IOSize::Half)
+        sz = windowSize / uint2(2);
+    else if (selection == RenderPassHelpers::IOSize::Quarter)
+        sz = windowSize / uint2(4);
+    else if (selection == RenderPassHelpers::IOSize::Double)
+        sz = windowSize * uint2(2);
+    else
+        FALCOR_ASSERT(selection == RenderPassHelpers::IOSize::Default);
+    return sz;
 }
+
+FALCOR_SCRIPT_BINDING(RenderPassHelpers)
+{
+    pybind11::enum_<RenderPassHelpers::IOSize> sz(m, "IOSize");
+    sz.value("Default", RenderPassHelpers::IOSize::Default);
+    sz.value("Fixed", RenderPassHelpers::IOSize::Fixed);
+    sz.value("Full", RenderPassHelpers::IOSize::Full);
+    sz.value("Half", RenderPassHelpers::IOSize::Half);
+    sz.value("Quarter", RenderPassHelpers::IOSize::Quarter);
+    sz.value("Double", RenderPassHelpers::IOSize::Double);
+}
+} // namespace Falcor

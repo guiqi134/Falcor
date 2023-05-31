@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,23 +25,34 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "ClothMaterial.h"
+#include "GlobalState.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-    ClothMaterial::SharedPtr ClothMaterial::create(const std::string& name)
+    namespace
     {
-        return SharedPtr(new ClothMaterial(name));
+        const char kShaderFile[] = "Rendering/Materials/ClothMaterial.slang";
     }
 
-    ClothMaterial::ClothMaterial(const std::string& name)
-        : BasicMaterial(name, MaterialType::Cloth)
+    ClothMaterial::ClothMaterial(ref<Device> pDevice, const std::string& name)
+        : BasicMaterial(pDevice, name, MaterialType::Cloth)
     {
         // Setup additional texture slots.
         mTextureSlotInfo[(uint32_t)TextureSlot::BaseColor] = { "baseColor", TextureChannelFlags::RGBA, true };
         mTextureSlotInfo[(uint32_t)TextureSlot::Specular] = { "specular", TextureChannelFlags::Green, false };
         mTextureSlotInfo[(uint32_t)TextureSlot::Normal] = { "normal", TextureChannelFlags::RGB, false };
+    }
+
+    Program::ShaderModuleList ClothMaterial::getShaderModules() const
+    {
+        return { Program::ShaderModule(kShaderFile) };
+    }
+
+    Program::TypeConformanceList ClothMaterial::getTypeConformances() const
+    {
+        return { {{"ClothMaterial", "IMaterial"}, (uint32_t)MaterialType::Cloth} };
     }
 
     void ClothMaterial::renderSpecularUI(Gui::Widgets& widget)
@@ -61,10 +72,16 @@ namespace Falcor
 
     FALCOR_SCRIPT_BINDING(ClothMaterial)
     {
+        using namespace pybind11::literals;
+
         FALCOR_SCRIPT_BINDING_DEPENDENCY(BasicMaterial)
 
-        pybind11::class_<ClothMaterial, BasicMaterial, ClothMaterial::SharedPtr> material(m, "ClothMaterial");
-        material.def(pybind11::init(&ClothMaterial::create), "name"_a = "");
+        pybind11::class_<ClothMaterial, BasicMaterial, ref<ClothMaterial>> material(m, "ClothMaterial");
+        auto create = [] (const std::string& name)
+        {
+            return ClothMaterial::create(accessActivePythonSceneBuilder().getDevice(), name);
+        };
+        material.def(pybind11::init(create), "name"_a = ""); // PYTHONDEPRECATED
 
         material.def_property("roughness", &ClothMaterial::getRoughness, &ClothMaterial::setRoughness);
     }

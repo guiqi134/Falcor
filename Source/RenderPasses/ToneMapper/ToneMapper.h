@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,16 +28,20 @@
 #pragma once
 #include "Falcor.h"
 #include "ToneMapperParams.slang"
+#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderPassHelpers.h"
+#include "Core/Pass/FullScreenPass.h"
 
 using namespace Falcor;
 
 class ToneMapper : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ToneMapper>;
-    using Operator = ToneMapperOperator;
+    FALCOR_PLUGIN_CLASS(ToneMapper, "ToneMapper", {
+        "Tone-map a color-buffer. The resulting buffer is always in the [0, 1] range. The pass supports auto-exposure and eye-adaptation."
+    });
 
-    static const Info kInfo;
+    using Operator = ToneMapperOperator;
 
     enum class ExposureMode
     {
@@ -45,15 +49,15 @@ public:
         ShutterPriority,        // Keep shutter constant when modifying EV
     };
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
+    static ref<ToneMapper> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<ToneMapper>(pDevice, dict); }
+
+    ToneMapper(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const std::shared_ptr<Scene>& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
     // Scripting functions
     void setExposureCompensation(float exposureCompensation);
@@ -85,23 +89,22 @@ public:
     ExposureMode getExposureMode() const { return mExposureMode; }
 
 private:
-    ToneMapper(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
 
     void createToneMapPass();
     void createLuminancePass();
-    void createLuminanceFbo(const Texture::SharedPtr& pSrc);
+    void createLuminanceFbo(const ref<Texture>& pSrc);
 
     void updateWhiteBalanceTransform();
     void updateColorTransform();
 
     void updateExposureValue();
 
-    FullScreenPass::SharedPtr mpToneMapPass;
-    FullScreenPass::SharedPtr mpLuminancePass;
-    Fbo::SharedPtr mpLuminanceFbo;
-    Sampler::SharedPtr mpPointSampler;
-    Sampler::SharedPtr mpLinearSampler;
+    ref<FullScreenPass> mpToneMapPass;
+    ref<FullScreenPass> mpLuminancePass;
+    ref<Fbo> mpLuminanceFbo;
+    ref<Sampler> mpPointSampler;
+    ref<Sampler> mpLinearSampler;
 
     RenderPassHelpers::IOSize mOutputSizeSelection = RenderPassHelpers::IOSize::Default;    ///< Selected output size.
     ResourceFormat mOutputFormat = ResourceFormat::Unknown;                                 ///< Output format (uses default when set to ResourceFormat::Unknown).

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,8 @@
  **************************************************************************/
 import RenderPasses.ToneMapper.ToneMapperParams;
 
-SamplerState gLuminanceTexSampler : register(s0);
-SamplerState gColorSampler : register(s1);
+SamplerState gLuminanceTexSampler;
+SamplerState gColorSampler;
 
 Texture2D gColorTex;
 Texture2D gLuminanceTex;
@@ -37,7 +37,7 @@ static const uint kOperator = _TONE_MAPPER_OPERATOR;
 static const float kExposureKey = 0.042;
 static const float kLuminanceLod = 16.0; // Lookup highest mip level to get average luminance
 
-cbuffer PerImageCB : register(b0)
+cbuffer PerImageCB
 {
     ToneMapperParams gParams;
 };
@@ -155,7 +155,7 @@ float4 main(float2 texC : TEXCOORD) : SV_TARGET0
 #endif
 
     // apply color grading
-    finalColor = mul(finalColor, (float3x3) gParams.colorTransform);
+    finalColor = mul((float3x3)gParams.colorTransform, finalColor);
 
     // apply tone mapping
     finalColor = toneMap(finalColor);

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -47,6 +47,11 @@ float evalFresnelSchlick(float f0, float f90, float cosTheta)
     return f0 + (f90 - f0) * pow(max(1 - cosTheta, 0), 5); // Clamp to avoid NaN if cosTheta = 1+epsilon
 }
 
+float3 evalFresnelGeneralizedSchlick(float3 f0, float3 f90, float exponent, float cosTheta)
+{
+    return f0 + (f90 - f0) * pow(max(1 - cosTheta, 0), exponent); // Clamp to avoid NaN if cosTheta = 1+epsilon
+}
+
 /** Evaluates the Fresnel term using dieletric fresnel equations.
     Based on http://www.pbr-book.org/3ed-2018/Reflection_Models/Specular_Reflection_and_Transmission.html
 
@@ -92,4 +97,48 @@ float evalFresnelDielectric(float eta, float cosThetaI)
 {
     float cosThetaT;
     return evalFresnelDielectric(eta, cosThetaI, cosThetaT);
+}
+
+/** Evaluates the Fresnel term using conductor fresnel equations, assuming unpolarized light.
+    Base on "PHYSICALLY BASED LIGHTING CALCULATIONS FOR COMPUTER GRAPHICS" by Peter Shirley
+    http://www.cs.virginia.edu/~jdl/bib/globillum/shirley_thesis.pdf
+
+    \param[in] eta Real part of complex index of refraction
+    \param[in] k Imaginary part of complex index of refraction (the "absorption coefficient")
+    \param[in] cosThetaI Cosine of angle between normal and incident direction.
+    \return Returns conductor reflectance.
+*/
+float evalFresnelConductor(float eta, float k, float cosThetaI)
+{
+    float cosThetaISq = cosThetaI * cosThetaI;
+    float sinThetaISq = max(1.0f - cosThetaISq, 0.0f);
+    float sinThetaIQu = sinThetaISq * sinThetaISq;
+
+    float innerTerm = eta * eta - k * k - sinThetaISq;
+    float aSqPlusBSq = sqrt(max(innerTerm*innerTerm + 4.0f * eta * eta * k * k, 0.0f));
+    float a = sqrt(max((aSqPlusBSq + innerTerm) * 0.5f, 0.0f));
+
+    float Rs = ((aSqPlusBSq + cosThetaISq) - (2.0f * a * cosThetaI))/
+               ((aSqPlusBSq + cosThetaISq) + (2.0f * a * cosThetaI));
+    float Rp = ((cosThetaISq * aSqPlusBSq + sinThetaIQu) - (2.0f * a * cosThetaI * sinThetaISq))/
+               ((cosThetaISq * aSqPlusBSq + sinThetaIQu) + (2.0f * a * cosThetaI * sinThetaISq));
+
+    return 0.5f * (Rs + Rs * Rp);
+}
+
+/** Evaluates the Fresnel term using conductor fresnel equations, assuming unpolarized light.
+    Convenience function that takes coefficients at 3 wavelengths.
+
+    \param[in] eta Real part of complex index of refraction
+    \param[in] k Imaginary part of complex index of refraction (the "absorption coefficient")
+    \param[in] cosThetaI Cosine of angle between normal and incident direction.
+    \return Returns conductor reflectance.
+*/
+float3 evalFresnelConductor(float3 eta, float3 k, float cosThetaI)
+{
+    return float3(
+        evalFresnelConductor(eta.x, k.x, cosThetaI),
+        evalFresnelConductor(eta.y, k.y, cosThetaI),
+        evalFresnelConductor(eta.z, k.z, cosThetaI)
+    );
 }

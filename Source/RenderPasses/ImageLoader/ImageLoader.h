@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,19 +27,19 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderPassHelpers.h"
 
 using namespace Falcor;
 
 class ImageLoader : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ImageLoader>;
+    FALCOR_PLUGIN_CLASS(ImageLoader, "ImageLoader", "Load an image into a texture.");
 
-    static const Info kInfo;
+    static ref<ImageLoader> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<ImageLoader>(pDevice, dict); }
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
+    ImageLoader(ref<Device> pDevice, const Dictionary& dict);
 
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
@@ -48,15 +48,13 @@ public:
     virtual Dictionary getScriptingDictionary() override;
 
 private:
-    ImageLoader(const Dictionary& dict);
-
     bool loadImage(const std::filesystem::path& path);
 
     RenderPassHelpers::IOSize mOutputSizeSelection = RenderPassHelpers::IOSize::Default; ///< Selected output size.
     ResourceFormat mOutputFormat = ResourceFormat::Unknown;     ///< Current output resource format.
     uint2 mOutputSize = {};                                     ///< Current output size in pixels.
 
-    Texture::SharedPtr mpTex;
+    ref<Texture> mpTex;
     std::filesystem::path mImagePath;
     uint32_t mArraySlice = 0;
     uint32_t mMipLevel = 0;

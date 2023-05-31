@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -37,6 +37,12 @@ namespace
     const std::string kLeftInput = "leftInput";
     const std::string kRightInput = "rightInput";
     const std::string kOutput = "output";
+}
+
+ComparisonPass::ComparisonPass(ref<Device> pDevice)
+    : RenderPass(pDevice)
+{
+    mpTextRenderer = std::make_unique<TextRenderer>(mpDevice);
 }
 
 bool ComparisonPass::parseKeyValuePair(const std::string key, const Dictionary::Value val)
@@ -88,18 +94,19 @@ RenderPassReflection ComparisonPass::reflect(const CompileData& compileData)
 void ComparisonPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Get references to our input, output, and temporary accumulation texture
-    pLeftSrcTex = renderData[kLeftInput]->asTexture();
-    pRightSrcTex = renderData[kRightInput]->asTexture();
-    pDstFbo = Fbo::create({ renderData[kOutput]->asTexture() });
+    pLeftSrcTex = renderData.getTexture(kLeftInput);
+    pRightSrcTex = renderData.getTexture(kRightInput);
+    pDstFbo = Fbo::create(mpDevice, { renderData.getTexture(kOutput) });
 
     // If we haven't initialized the split location, split the screen in half by default
     if (mSplitLoc < 0) mSplitLoc = 0.5f;
 
     // Set shader parameters
-    mpSplitShader["GlobalCB"]["gSplitLocation"] = int32_t(mSplitLoc * renderData.getDefaultTextureDims().x);
-    mpSplitShader["GlobalCB"]["gDividerSize"] = mDividerSize;
-    mpSplitShader["gLeftInput"] = mSwapSides ? pRightSrcTex : pLeftSrcTex;
-    mpSplitShader["gRightInput"] = mSwapSides ? pLeftSrcTex : pRightSrcTex;
+    auto var = mpSplitShader->getRootVar();
+    var["GlobalCB"]["gSplitLocation"] = int32_t(mSplitLoc * renderData.getDefaultTextureDims().x);
+    var["GlobalCB"]["gDividerSize"] = mDividerSize;
+    var["gLeftInput"] = mSwapSides ? pRightSrcTex : pLeftSrcTex;
+    var["gRightInput"] = mSwapSides ? pLeftSrcTex : pRightSrcTex;
 
     // Execute the accumulation shader
     mpSplitShader->execute(pRenderContext, pDstFbo);
@@ -112,12 +119,12 @@ void ComparisonPass::execute(RenderContext* pRenderContext, const RenderData& re
 
         // Draw text labeling the right side image
         std::string rightSide = mSwapSides ? mLeftLabel : mRightLabel;
-        TextRenderer::render(pRenderContext, rightSide, pDstFbo, float2(screenLocX + 16, screenLocY));
+        mpTextRenderer->render(pRenderContext, rightSide, pDstFbo, float2(screenLocX + 16, screenLocY));
 
         // Draw text labeling the left side image
         std::string leftSide = mSwapSides ? mRightLabel : mLeftLabel;
         uint32_t leftLength = uint32_t(leftSide.length()) * 9;
-        TextRenderer::render(pRenderContext, leftSide, pDstFbo, float2(screenLocX - 16 - leftLength, screenLocY));
+        mpTextRenderer->render(pRenderContext, leftSide, pDstFbo, float2(screenLocX - 16 - leftLength, screenLocY));
     }
 }
 

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,6 @@
  **************************************************************************/
 #include "ErrorMeasurePass.h"
 #include <sstream>
-
-const RenderPass::Info ErrorMeasurePass::kInfo { "ErrorMeasurePass", "Measures error with respect to a reference image." };
 
 namespace
 {
@@ -63,15 +61,9 @@ static void regErrorMeasurePass(pybind11::module& m)
     op.value("Difference", ErrorMeasurePass::OutputId::Difference);
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(ErrorMeasurePass::kInfo, ErrorMeasurePass::create);
+    registry.registerClass<RenderPass, ErrorMeasurePass>();
     ScriptBindings::registerBinding(regErrorMeasurePass);
 }
 
@@ -87,13 +79,8 @@ const Gui::RadioButtonGroup ErrorMeasurePass::sOutputSelectionButtonsSourceOnly 
     { (uint32_t)OutputId::Source, "Source", true }
 };
 
-ErrorMeasurePass::SharedPtr ErrorMeasurePass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new ErrorMeasurePass(dict));
-}
-
-ErrorMeasurePass::ErrorMeasurePass(const Dictionary& dict)
-    : RenderPass(kInfo)
+ErrorMeasurePass::ErrorMeasurePass(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
     for (const auto& [key, value] : dict)
     {
@@ -116,8 +103,8 @@ ErrorMeasurePass::ErrorMeasurePass(const Dictionary& dict)
     loadReference();
     openMeasurementsFile();
 
-    mpParallelReduction = ComputeParallelReduction::create();
-    mpErrorMeasurerPass = ComputePass::create(kErrorComputationShaderFile);
+    mpParallelReduction = std::make_unique<ParallelReduction>(mpDevice);
+    mpErrorMeasurerPass = ComputePass::create(mpDevice, kErrorComputationShaderFile);
 }
 
 Dictionary ErrorMeasurePass::getScriptingDictionary()
@@ -148,8 +135,8 @@ RenderPassReflection ErrorMeasurePass::reflect(const CompileData& compileData)
 
 void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    Texture::SharedPtr pSourceImageTexture = renderData[kInputChannelSourceImage]->asTexture();
-    Texture::SharedPtr pOutputImageTexture = renderData[kOutputChannelImage]->asTexture();
+    ref<Texture> pSourceImageTexture = renderData.getTexture(kInputChannelSourceImage);
+    ref<Texture> pOutputImageTexture = renderData.getTexture(kOutputChannelImage);
 
     // Create the texture for the difference image if this is our first
     // time through or if the source image resolution has changed.
@@ -157,14 +144,14 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
     if (!mpDifferenceTexture || mpDifferenceTexture->getWidth() != width ||
         mpDifferenceTexture->getHeight() != height)
     {
-        mpDifferenceTexture = Texture::create2D(width, height, ResourceFormat::RGBA32Float, 1, 1, nullptr,
+        mpDifferenceTexture = Texture::create2D(mpDevice, width, height, ResourceFormat::RGBA32Float, 1, 1, nullptr,
                                                 Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
         FALCOR_ASSERT(mpDifferenceTexture);
     }
 
     mMeasurements.valid = false;
 
-    Texture::SharedPtr pReference = getReference(renderData);
+    ref<Texture> pReference = getReference(renderData);
     if (!pReference)
     {
         // We don't have a reference image, so just copy the source image to the output.
@@ -196,20 +183,21 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
 void ErrorMeasurePass::runDifferencePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Bind textures.
-    Texture::SharedPtr pSourceTexture = renderData[kInputChannelSourceImage]->asTexture();
-    Texture::SharedPtr pWorldPositionTexture = renderData[kInputChannelWorldPosition]->asTexture();
-    mpErrorMeasurerPass["gReference"] = getReference(renderData);
-    mpErrorMeasurerPass["gSource"] = pSourceTexture;
-    mpErrorMeasurerPass["gWorldPosition"] = pWorldPositionTexture;
-    mpErrorMeasurerPass["gResult"] = mpDifferenceTexture;
+    ref<Texture> pSourceTexture = renderData.getTexture(kInputChannelSourceImage);
+    ref<Texture> pWorldPositionTexture = renderData.getTexture(kInputChannelWorldPosition);
+    auto var = mpErrorMeasurerPass->getRootVar();
+    var["gReference"] = getReference(renderData);
+    var["gSource"] = pSourceTexture;
+    var["gWorldPosition"] = pWorldPositionTexture;
+    var["gResult"] = mpDifferenceTexture;
 
     // Set constant buffer parameters.
     const uint2 resolution = uint2(pSourceTexture->getWidth(), pSourceTexture->getHeight());
-    mpErrorMeasurerPass[kConstantBufferName]["gResolution"] = resolution;
+    var[kConstantBufferName]["gResolution"] = resolution;
     // If the world position texture is unbound, then don't do the background pixel check.
-    mpErrorMeasurerPass[kConstantBufferName]["gIgnoreBackground"] = (uint32_t)(mIgnoreBackground && pWorldPositionTexture);
-    mpErrorMeasurerPass[kConstantBufferName]["gComputeDiffSqr"] = (uint32_t)mComputeSquaredDifference;
-    mpErrorMeasurerPass[kConstantBufferName]["gComputeAverage"] = (uint32_t)mComputeAverage;
+    var[kConstantBufferName]["gIgnoreBackground"] = (uint32_t)(mIgnoreBackground && pWorldPositionTexture);
+    var[kConstantBufferName]["gComputeDiffSqr"] = (uint32_t)mComputeSquaredDifference;
+    var[kConstantBufferName]["gComputeAverage"] = (uint32_t)mComputeAverage;
 
     // Run the compute shader.
     mpErrorMeasurerPass->execute(pRenderContext, resolution.x, resolution.y);
@@ -218,10 +206,10 @@ void ErrorMeasurePass::runDifferencePass(RenderContext* pRenderContext, const Re
 void ErrorMeasurePass::runReductionPasses(RenderContext* pRenderContext, const RenderData& renderData)
 {
     float4 error;
-    mpParallelReduction->execute(pRenderContext, mpDifferenceTexture, ComputeParallelReduction::Type::Sum, &error);
+    mpParallelReduction->execute(pRenderContext, mpDifferenceTexture, ParallelReduction::Type::Sum, &error);
 
     const float pixelCountf = static_cast<float>(mpDifferenceTexture->getWidth() * mpDifferenceTexture->getHeight());
-    mMeasurements.error = error / pixelCountf;
+    mMeasurements.error = error.xyz() / pixelCountf;
     mMeasurements.avgError = (mMeasurements.error.x + mMeasurements.error.y + mMeasurements.error.z) / 3.f;
     mMeasurements.valid = true;
 
@@ -358,7 +346,7 @@ void ErrorMeasurePass::loadReference()
     if (mReferenceImagePath.empty()) return;
 
     // TODO: it would be nice to also be able to take the reference image as an input.
-    mpReferenceTexture = Texture::createFromFile(mReferenceImagePath, false /* no MIPs */, false /* linear color */);
+    mpReferenceTexture = Texture::createFromFile(mpDevice, mReferenceImagePath, false /* no MIPs */, false /* linear color */);
     if (!mpReferenceTexture)
     {
         reportError(fmt::format("Failed to load texture from '{}'", mReferenceImagePath));
@@ -369,9 +357,9 @@ void ErrorMeasurePass::loadReference()
     mRunningAvgError = -1.f;   // Mark running error values as invalid.
 }
 
-Texture::SharedPtr ErrorMeasurePass::getReference(const RenderData& renderData) const
+ref<Texture> ErrorMeasurePass::getReference(const RenderData& renderData) const
 {
-    return mUseLoadedReference ? mpReferenceTexture : renderData[kInputChannelReferenceImage]->asTexture();
+    return mUseLoadedReference ? mpReferenceTexture : renderData.getTexture(kInputChannelReferenceImage);
 }
 
 void ErrorMeasurePass::openMeasurementsFile()

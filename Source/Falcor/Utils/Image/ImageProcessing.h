@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,43 +26,45 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "Core/API/Texture.h"
+#include "Core/Macros.h"
+#include "Core/API/Formats.h"
+#include "Core/API/ResourceViews.h"
+#include "Core/Pass/ComputePass.h"
+#include <memory>
 
 namespace Falcor
 {
-    /** Image processing utilities.
-    */
-    class FALCOR_API ImageProcessing
-    {
-    public:
-        using SharedPtr = std::shared_ptr<ImageProcessing>;
-        ~ImageProcessing();
+class RenderContext;
 
-        /** Create image processing utility.
-            \return New object.
-        */
-        static SharedPtr create();
+/**
+ * Image processing utilities.
+ */
+class FALCOR_API ImageProcessing
+{
+public:
+    /// Constructor.
+    ImageProcessing(ref<Device> pDevice);
 
-        /** Copy single mip level and color channel from source to destination.
-            The views must have matching dimension and format type (float vs integer).
-            The source value is written to all color channels of the destination.
-            The function throws if the requirements are not fulfilled.
-            \param[in] pRenderContxt The render context.
-            \param[in] pSrc Resource view for source texture.
-            \param[in] pDst Unordered access view for destination texture.
-            \param[in] srcMask Mask specifying which source color channel to copy. Must be a single channel.
-        */
-        void copyColorChannel(RenderContext* pRenderContxt, const ShaderResourceView::SharedPtr& pSrc, const UnorderedAccessView::SharedPtr& pDst, const TextureChannelFlags srcMask);
+    /**
+     * Copy single mip level and color channel from source to destination.
+     * The views must have matching dimension and format type (float vs integer).
+     * The source value is written to all color channels of the destination.
+     * The function throws if the requirements are not fulfilled.
+     * @param[in] pRenderContxt The render context.
+     * @param[in] pSrc Resource view for source texture.
+     * @param[in] pDst Unordered access view for destination texture.
+     * @param[in] srcMask Mask specifying which source color channel to copy. Must be a single channel.
+     */
+    void copyColorChannel(
+        RenderContext* pRenderContxt,
+        const ref<ShaderResourceView>& pSrc,
+        const ref<UnorderedAccessView>& pDst,
+        const TextureChannelFlags srcMask
+    );
 
-    private:
-        ImageProcessing();
-
-        struct SharedData
-        {
-            size_t refCount = 0;
-            ComputePass::SharedPtr pCopyFloatPass;
-            ComputePass::SharedPtr pCopyIntPass;
-        };
-        static SharedData sSharedData;
-    };
-}
+private:
+    ref<Device> mpDevice;
+    ref<ComputePass> mpCopyFloatPass;
+    ref<ComputePass> mpCopyIntPass;
+};
+} // namespace Falcor

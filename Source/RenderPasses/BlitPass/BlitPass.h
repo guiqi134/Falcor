@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 
 using namespace Falcor;
 
@@ -37,13 +38,11 @@ using namespace Falcor;
 class BlitPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<BlitPass>;
+    FALCOR_PLUGIN_CLASS(BlitPass, "BlitPass", "Blit a texture into a different texture.");
 
-    static const Info kInfo;
+    static ref<BlitPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<BlitPass>(pDevice, dict); }
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    BlitPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -55,8 +54,8 @@ public:
     void setFilter(Sampler::Filter filter) { mFilter = filter; }
 
 private:
-    BlitPass(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
 
     Sampler::Filter mFilter = Sampler::Filter::Linear;
+    ResourceFormat mOutputFormat = ResourceFormat::Unknown;
 };

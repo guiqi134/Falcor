@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,19 +25,11 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include <Falcor.h>
+#include "Falcor.h"
+#include "Core/API/NativeHandleTraits.h"
 
-#if FALCOR_D3D12_AVAILABLE
 #include "NRDPass.h"
 #include "RenderPasses/Shared/Denoising/NRDConstants.slang"
-#include <glm/gtc/type_ptr.hpp>
-#include <sstream>
-
-#if FALCOR_ENABLE_NRD
-#pragma comment(lib, "NRD.lib")
-#endif
-
-const RenderPass::Info NRDPass::kInfo { "NRD", "NRD denoiser." };
 
 namespace
 {
@@ -63,6 +55,7 @@ namespace
 
     const char kEnabled[] = "enabled";
     const char kMethod[] = "method";
+    const char kOutputSize[] = "outputSize";
 
     // Common settings.
     const char kWorldSpaceMotion[] = "worldSpaceMotion";
@@ -113,26 +106,22 @@ namespace
     };
 }
 
-NRDPass::SharedPtr NRDPass::create(RenderContext* pRenderContext, const Dictionary& dict)
+NRDPass::NRDPass(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
-    return SharedPtr(new NRDPass(dict));
-}
+    mpDevice->requireD3D12();
 
-NRDPass::NRDPass(const Dictionary& dict)
-    : RenderPass(kInfo)
-{
-#if FALCOR_ENABLE_NRD
     Program::DefineList definesRelax;
     definesRelax.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
     definesRelax.add("NRD_USE_MATERIAL_ID", "0");
     definesRelax.add("NRD_METHOD", "0"); // NRD_METHOD_RELAX_DIFFUSE_SPECULAR
-    mpPackRadiancePassRelax = ComputePass::create(kShaderPackRadiance, "main", definesRelax);
+    mpPackRadiancePassRelax = ComputePass::create(mpDevice, kShaderPackRadiance, "main", definesRelax);
 
     Program::DefineList definesReblur;
     definesReblur.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
     definesReblur.add("NRD_USE_MATERIAL_ID", "0");
     definesReblur.add("NRD_METHOD", "1"); // NRD_METHOD_REBLUR_DIFFUSE_SPECULAR
-    mpPackRadiancePassReblur = ComputePass::create(kShaderPackRadiance, "main", definesReblur);
+    mpPackRadiancePassReblur = ComputePass::create(mpDevice, kShaderPackRadiance, "main", definesReblur);
 
     // Override some defaults coming from the NRD SDK.
     mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius = 16.0f;
@@ -164,6 +153,7 @@ NRDPass::NRDPass(const Dictionary& dict)
     {
         if (key == kEnabled) mEnabled = value;
         else if (key == kMethod) mDenoisingMethod = value;
+        else if (key == kOutputSize) mOutputSizeSelection = value;
 
         // Common settings.
         else if (key == kWorldSpaceMotion) mWorldSpaceMotion = value;
@@ -240,16 +230,15 @@ NRDPass::NRDPass(const Dictionary& dict)
             logWarning("Unknown field '{}' in NRD dictionary.", key);
         }
     }
-#endif // FALCOR_ENABLE_NRD
 }
 
-Falcor::Dictionary NRDPass::getScriptingDictionary()
+Dictionary NRDPass::getScriptingDictionary()
 {
     Dictionary dict;
 
-#if FALCOR_ENABLE_NRD
     dict[kEnabled] = mEnabled;
     dict[kMethod] = mDenoisingMethod;
+    dict[kOutputSize] = mOutputSizeSelection;
 
     // Common settings.
     dict[kWorldSpaceMotion] = mWorldSpaceMotion;
@@ -313,7 +302,6 @@ Falcor::Dictionary NRDPass::getScriptingDictionary()
         dict[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion;
         dict[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSettings.enableMaterialTest;
     }
-#endif // FALCOR_ENABLE_NRD
 
     return dict;
 }
@@ -321,6 +309,8 @@ Falcor::Dictionary NRDPass::getScriptingDictionary()
 RenderPassReflection NRDPass::reflect(const CompileData& compileData)
 {
     RenderPassReflection reflector;
+
+    const uint2 sz = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, mScreenSize, compileData.defaultTexDims);
 
     if (mDenoisingMethod == DenoisingMethod::RelaxDiffuseSpecular || mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
     {
@@ -330,8 +320,8 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float);
-        reflector.addOutput(kOutputFilteredSpecularRadianceHitDist, "Filtered specular radiance and hit distance").format(ResourceFormat::RGBA16Float);
+        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputFilteredSpecularRadianceHitDist, "Filtered specular radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
     {
@@ -340,7 +330,7 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float);
+        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
     {
@@ -349,7 +339,7 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputReflectionMotionVectors, "Reflection motion vectors in screen space").format(ResourceFormat::RG16Float);
+        reflector.addOutput(kOutputReflectionMotionVectors, "Reflection motion vectors in screen space").format(ResourceFormat::RG16Float).texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularDeltaMv)
     {
@@ -357,7 +347,7 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputDeltaSecondaryPosW, "Delta secondary world position");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputDeltaMotionVectors, "Delta motion vectors in screen space").format(ResourceFormat::RG16Float);
+        reflector.addOutput(kOutputDeltaMotionVectors, "Delta motion vectors in screen space").format(ResourceFormat::RG16Float).texture2D(sz.x, sz.y);
     }
     else
     {
@@ -369,11 +359,11 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
 
 void NRDPass::compile(RenderContext* pRenderContext, const CompileData& compileData)
 {
-    mScreenSize = compileData.defaultTexDims;
+    mScreenSize = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, mScreenSize, compileData.defaultTexDims);
+    if (mScreenSize.x == 0 || mScreenSize.y == 0)
+        mScreenSize = compileData.defaultTexDims;
     mFrameIndex = 0;
-#if FALCOR_ENABLE_NRD
     reinit();
-#endif
 }
 
 void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
@@ -381,9 +371,7 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
     if (!mpScene) return;
 
     bool enabled = false;
-#if FALCOR_ENABLE_NRD
     enabled = mEnabled;
-#endif
 
     if (enabled)
     {
@@ -393,33 +381,33 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
     {
         if (mDenoisingMethod == DenoisingMethod::RelaxDiffuseSpecular || mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
         {
-            pRenderContext->blit(renderData[kInputDiffuseRadianceHitDist]->asTexture()->getSRV(), renderData[kOutputFilteredDiffuseRadianceHitDist]->asTexture()->getRTV());
-            pRenderContext->blit(renderData[kInputSpecularRadianceHitDist]->asTexture()->getSRV(), renderData[kOutputFilteredSpecularRadianceHitDist]->asTexture()->getRTV());
+            pRenderContext->blit(renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV());
+            pRenderContext->blit(renderData.getTexture(kInputSpecularRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredSpecularRadianceHitDist)->getRTV());
         }
         else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
         {
-            pRenderContext->blit(renderData[kInputDiffuseRadianceHitDist]->asTexture()->getSRV(), renderData[kOutputFilteredDiffuseRadianceHitDist]->asTexture()->getRTV());
+            pRenderContext->blit(renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV());
         }
         else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
         {
             if (mWorldSpaceMotion)
             {
-                pRenderContext->clearRtv(renderData[kOutputReflectionMotionVectors]->asTexture()->getRTV().get(), float4(0.f));
+                pRenderContext->clearRtv(renderData.getTexture(kOutputReflectionMotionVectors)->getRTV().get(), float4(0.f));
             }
             else
             {
-                pRenderContext->blit(renderData[kInputMotionVectors]->asTexture()->getSRV(), renderData[kOutputReflectionMotionVectors]->asTexture()->getRTV());
+                pRenderContext->blit(renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputReflectionMotionVectors)->getRTV());
             }
         }
         else if (mDenoisingMethod == DenoisingMethod::SpecularDeltaMv)
         {
             if (mWorldSpaceMotion)
             {
-                pRenderContext->clearRtv(renderData[kOutputDeltaMotionVectors]->asTexture()->getRTV().get(), float4(0.f));
+                pRenderContext->clearRtv(renderData.getTexture(kOutputDeltaMotionVectors)->getRTV().get(), float4(0.f));
             }
             else
             {
-                pRenderContext->blit(renderData[kInputMotionVectors]->asTexture()->getSRV(), renderData[kOutputDeltaMotionVectors]->asTexture()->getRTV());
+                pRenderContext->blit(renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputDeltaMotionVectors)->getRTV());
             }
         }
     }
@@ -427,7 +415,6 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
 
 void NRDPass::renderUI(Gui::Widgets& widget)
 {
-#if FALCOR_ENABLE_NRD
     const nrd::LibraryDesc& nrdLibraryDesc = nrd::GetLibraryDesc();
     char name[256];
     _snprintf_s(name, 255, "NRD Library v%u.%u.%u", nrdLibraryDesc.versionMajor, nrdLibraryDesc.versionMinor, nrdLibraryDesc.versionBuild);
@@ -599,17 +586,12 @@ void NRDPass::renderUI(Gui::Widgets& widget)
     {
         widget.text(mWorldSpaceMotion ? "Motion: world space" : "Motion: screen space");
     }
-#else // FALCOR_ENABLE_NRD
-    widget.textWrapped("NRD is not setup and enabled in `Source/Core/FalcorConfig.h` so this pass is disabled. Please configure NRD and then recompile to use this pass.");
-#endif // FALCOR_ENABLE_NRD
 }
 
-void NRDPass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void NRDPass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
 }
-
-#if FALCOR_ENABLE_NRD
 
 static void* nrdAllocate(void* userArg, size_t size, size_t alignment)
 {
@@ -626,54 +608,54 @@ static void nrdFree(void* userArg, void* memory)
     free(memory);
 }
 
-static Falcor::ResourceFormat getFalcorFormat(nrd::Format format)
+static ResourceFormat getFalcorFormat(nrd::Format format)
 {
     switch (format)
     {
-    case nrd::Format::R8_UNORM:             return Falcor::ResourceFormat::R8Unorm;
-    case nrd::Format::R8_SNORM:             return Falcor::ResourceFormat::R8Snorm;
-    case nrd::Format::R8_UINT:              return Falcor::ResourceFormat::R8Uint;
-    case nrd::Format::R8_SINT:              return Falcor::ResourceFormat::R8Int;
-    case nrd::Format::RG8_UNORM:            return Falcor::ResourceFormat::RG8Unorm;
-    case nrd::Format::RG8_SNORM:            return Falcor::ResourceFormat::RG8Snorm;
-    case nrd::Format::RG8_UINT:             return Falcor::ResourceFormat::RG8Uint;
-    case nrd::Format::RG8_SINT:             return Falcor::ResourceFormat::RG8Int;
-    case nrd::Format::RGBA8_UNORM:          return Falcor::ResourceFormat::RGBA8Unorm;
-    case nrd::Format::RGBA8_SNORM:          return Falcor::ResourceFormat::RGBA8Snorm;
-    case nrd::Format::RGBA8_UINT:           return Falcor::ResourceFormat::RGBA8Uint;
-    case nrd::Format::RGBA8_SINT:           return Falcor::ResourceFormat::RGBA8Int;
-    case nrd::Format::RGBA8_SRGB:           return Falcor::ResourceFormat::RGBA8UnormSrgb;
-    case nrd::Format::R16_UNORM:            return Falcor::ResourceFormat::R16Unorm;
-    case nrd::Format::R16_SNORM:            return Falcor::ResourceFormat::R16Snorm;
-    case nrd::Format::R16_UINT:             return Falcor::ResourceFormat::R16Uint;
-    case nrd::Format::R16_SINT:             return Falcor::ResourceFormat::R16Int;
-    case nrd::Format::R16_SFLOAT:           return Falcor::ResourceFormat::R16Float;
-    case nrd::Format::RG16_UNORM:           return Falcor::ResourceFormat::RG16Unorm;
-    case nrd::Format::RG16_SNORM:           return Falcor::ResourceFormat::RG16Snorm;
-    case nrd::Format::RG16_UINT:            return Falcor::ResourceFormat::RG16Uint;
-    case nrd::Format::RG16_SINT:            return Falcor::ResourceFormat::RG16Int;
-    case nrd::Format::RG16_SFLOAT:          return Falcor::ResourceFormat::RG16Float;
-    case nrd::Format::RGBA16_UNORM:         return Falcor::ResourceFormat::RGBA16Unorm;
-    case nrd::Format::RGBA16_SNORM:         return Falcor::ResourceFormat::Unknown; // Not defined in Falcor
-    case nrd::Format::RGBA16_UINT:          return Falcor::ResourceFormat::RGBA16Uint;
-    case nrd::Format::RGBA16_SINT:          return Falcor::ResourceFormat::RGBA16Int;
-    case nrd::Format::RGBA16_SFLOAT:        return Falcor::ResourceFormat::RGBA16Float;
-    case nrd::Format::R32_UINT:             return Falcor::ResourceFormat::R32Uint;
-    case nrd::Format::R32_SINT:             return Falcor::ResourceFormat::R32Int;
-    case nrd::Format::R32_SFLOAT:           return Falcor::ResourceFormat::R32Float;
-    case nrd::Format::RG32_UINT:            return Falcor::ResourceFormat::RG32Uint;
-    case nrd::Format::RG32_SINT:            return Falcor::ResourceFormat::RG32Int;
-    case nrd::Format::RG32_SFLOAT:          return Falcor::ResourceFormat::RG32Float;
-    case nrd::Format::RGB32_UINT:           return Falcor::ResourceFormat::RGB32Uint;
-    case nrd::Format::RGB32_SINT:           return Falcor::ResourceFormat::RGB32Int;
-    case nrd::Format::RGB32_SFLOAT:         return Falcor::ResourceFormat::RGB32Float;
-    case nrd::Format::RGBA32_UINT:          return Falcor::ResourceFormat::RGBA32Uint;
-    case nrd::Format::RGBA32_SINT:          return Falcor::ResourceFormat::RGBA32Int;
-    case nrd::Format::RGBA32_SFLOAT:        return Falcor::ResourceFormat::RGBA32Float;
-    case nrd::Format::R10_G10_B10_A2_UNORM: return Falcor::ResourceFormat::RGB10A2Unorm;
-    case nrd::Format::R10_G10_B10_A2_UINT:  return Falcor::ResourceFormat::RGB10A2Uint;
-    case nrd::Format::R11_G11_B10_UFLOAT:   return Falcor::ResourceFormat::R11G11B10Float;
-    case nrd::Format::R9_G9_B9_E5_UFLOAT:   return Falcor::ResourceFormat::RGB9E5Float;
+    case nrd::Format::R8_UNORM:             return ResourceFormat::R8Unorm;
+    case nrd::Format::R8_SNORM:             return ResourceFormat::R8Snorm;
+    case nrd::Format::R8_UINT:              return ResourceFormat::R8Uint;
+    case nrd::Format::R8_SINT:              return ResourceFormat::R8Int;
+    case nrd::Format::RG8_UNORM:            return ResourceFormat::RG8Unorm;
+    case nrd::Format::RG8_SNORM:            return ResourceFormat::RG8Snorm;
+    case nrd::Format::RG8_UINT:             return ResourceFormat::RG8Uint;
+    case nrd::Format::RG8_SINT:             return ResourceFormat::RG8Int;
+    case nrd::Format::RGBA8_UNORM:          return ResourceFormat::RGBA8Unorm;
+    case nrd::Format::RGBA8_SNORM:          return ResourceFormat::RGBA8Snorm;
+    case nrd::Format::RGBA8_UINT:           return ResourceFormat::RGBA8Uint;
+    case nrd::Format::RGBA8_SINT:           return ResourceFormat::RGBA8Int;
+    case nrd::Format::RGBA8_SRGB:           return ResourceFormat::RGBA8UnormSrgb;
+    case nrd::Format::R16_UNORM:            return ResourceFormat::R16Unorm;
+    case nrd::Format::R16_SNORM:            return ResourceFormat::R16Snorm;
+    case nrd::Format::R16_UINT:             return ResourceFormat::R16Uint;
+    case nrd::Format::R16_SINT:             return ResourceFormat::R16Int;
+    case nrd::Format::R16_SFLOAT:           return ResourceFormat::R16Float;
+    case nrd::Format::RG16_UNORM:           return ResourceFormat::RG16Unorm;
+    case nrd::Format::RG16_SNORM:           return ResourceFormat::RG16Snorm;
+    case nrd::Format::RG16_UINT:            return ResourceFormat::RG16Uint;
+    case nrd::Format::RG16_SINT:            return ResourceFormat::RG16Int;
+    case nrd::Format::RG16_SFLOAT:          return ResourceFormat::RG16Float;
+    case nrd::Format::RGBA16_UNORM:         return ResourceFormat::RGBA16Unorm;
+    case nrd::Format::RGBA16_SNORM:         return ResourceFormat::Unknown; // Not defined in Falcor
+    case nrd::Format::RGBA16_UINT:          return ResourceFormat::RGBA16Uint;
+    case nrd::Format::RGBA16_SINT:          return ResourceFormat::RGBA16Int;
+    case nrd::Format::RGBA16_SFLOAT:        return ResourceFormat::RGBA16Float;
+    case nrd::Format::R32_UINT:             return ResourceFormat::R32Uint;
+    case nrd::Format::R32_SINT:             return ResourceFormat::R32Int;
+    case nrd::Format::R32_SFLOAT:           return ResourceFormat::R32Float;
+    case nrd::Format::RG32_UINT:            return ResourceFormat::RG32Uint;
+    case nrd::Format::RG32_SINT:            return ResourceFormat::RG32Int;
+    case nrd::Format::RG32_SFLOAT:          return ResourceFormat::RG32Float;
+    case nrd::Format::RGB32_UINT:           return ResourceFormat::RGB32Uint;
+    case nrd::Format::RGB32_SINT:           return ResourceFormat::RGB32Int;
+    case nrd::Format::RGB32_SFLOAT:         return ResourceFormat::RGB32Float;
+    case nrd::Format::RGBA32_UINT:          return ResourceFormat::RGBA32Uint;
+    case nrd::Format::RGBA32_SINT:          return ResourceFormat::RGBA32Int;
+    case nrd::Format::RGBA32_SFLOAT:        return ResourceFormat::RGBA32Float;
+    case nrd::Format::R10_G10_B10_A2_UNORM: return ResourceFormat::RGB10A2Unorm;
+    case nrd::Format::R10_G10_B10_A2_UINT:  return ResourceFormat::RGB10A2Uint;
+    case nrd::Format::R11_G11_B10_UFLOAT:   return ResourceFormat::R11G11B10Float;
+    case nrd::Format::R9_G9_B9_E5_UFLOAT:   return ResourceFormat::RGB9E5Float;
     default:
         throw RuntimeError("Unsupported NRD format.");
     }
@@ -694,10 +676,14 @@ static nrd::Method getNrdMethod(NRDPass::DenoisingMethod denoisingMethod)
     }
 }
 
-static void copyMatrix(float* dstMatrix, const glm::mat4x4& srcMatrix)
+/// Copies into col-major layout, as the NRD library works in column major layout,
+/// while Falcor uses row-major layout
+static void copyMatrix(float* dstMatrix, const float4x4& srcMatrix)
 {
-    memcpy(dstMatrix, static_cast<const float*>(glm::value_ptr(srcMatrix)), sizeof(glm::mat4x4));
+    float4x4 col_major = transpose(srcMatrix);
+    memcpy(dstMatrix, static_cast<const float*>(col_major.data()), sizeof(float4x4));
 }
+
 
 void NRDPass::reinit()
 {
@@ -738,13 +724,13 @@ void NRDPass::createPipelines()
     const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
 
     // Create samplers descriptor layout and set.
-    Falcor::D3D12RootSignature::DescriptorSetLayout SamplersDescriptorSetLayout;
+    D3D12DescriptorSetLayout SamplersDescriptorSetLayout;
 
     for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
     {
         SamplersDescriptorSetLayout.addRange(ShaderResourceType::Sampler, denoiserDesc.staticSamplers[j].registerIndex, 1);
     }
-    mpSamplersDescriptorSet = Falcor::D3D12DescriptorSet::create(gpDevice->getD3D12GpuDescriptorPool(), SamplersDescriptorSetLayout);
+    mpSamplersDescriptorSet = D3D12DescriptorSet::create(mpDevice, SamplersDescriptorSetLayout, D3D12DescriptorSetBindingUsage::ExplicitBind);
 
     // Set sampler descriptors right away.
     for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
@@ -759,7 +745,7 @@ void NRDPass::createPipelines()
         const nrd::ComputeShader& nrdComputeShader = nrdPipelineDesc.computeShaderDXIL;
 
         // Initialize descriptor set.
-        Falcor::D3D12RootSignature::DescriptorSetLayout CBVSRVUAVdescriptorSetLayout;
+        D3D12DescriptorSetLayout CBVSRVUAVdescriptorSetLayout;
 
         // Add constant buffer to descriptor set.
         CBVSRVUAVdescriptorSetLayout.addRange(ShaderResourceType::Cbv, denoiserDesc.constantBufferDesc.registerIndex, 1);
@@ -778,13 +764,13 @@ void NRDPass::createPipelines()
         mCBVSRVUAVdescriptorSetLayouts.push_back(CBVSRVUAVdescriptorSetLayout);
 
         // Create root signature for the NRD pass.
-        Falcor::D3D12RootSignature::Desc rootSignatureDesc;
+        D3D12RootSignature::Desc rootSignatureDesc;
         rootSignatureDesc.addDescriptorSet(SamplersDescriptorSetLayout);
         rootSignatureDesc.addDescriptorSet(CBVSRVUAVdescriptorSetLayout);
 
-        const Falcor::D3D12RootSignature::Desc& desc = rootSignatureDesc;
+        const D3D12RootSignature::Desc& desc = rootSignatureDesc;
 
-        Falcor::D3D12RootSignature::SharedPtr pRootSig = Falcor::D3D12RootSignature::create(desc);
+        ref<D3D12RootSignature> pRootSig = D3D12RootSignature::create(mpDevice, desc);
 
         mpRootSignatures.push_back(pRootSig);
 
@@ -799,16 +785,16 @@ void NRDPass::createPipelines()
             defines.add("NRD_COMPILER_DXC");
             defines.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
             defines.add("NRD_USE_MATERIAL_ID", "0");
-            ComputePass::SharedPtr pPass = ComputePass::create(programDesc, defines);
+            ref<ComputePass> pPass = ComputePass::create(mpDevice, programDesc, defines);
 
-            ComputeProgram::SharedPtr pProgram = pPass->getProgram();
-            ProgramKernels::SharedConstPtr pProgramKernels = pProgram->getActiveVersion()->getKernels(pPass->getVars().get());
+            ref<ComputeProgram> pProgram = pPass->getProgram();
+            ref<const ProgramKernels> pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
 
             ComputeStateObject::Desc csoDesc;
             csoDesc.setProgramKernels(pProgramKernels);
             csoDesc.setD3D12RootSignatureOverride(pRootSig);
 
-            ComputeStateObject::SharedPtr pCSO = ComputeStateObject::create(csoDesc);
+            ref<ComputeStateObject> pCSO = ComputeStateObject::create(mpDevice, csoDesc);
 
             mpPasses.push_back(pPass);
             mpCachedProgramKernels.push_back(pProgramKernels);
@@ -832,28 +818,28 @@ void NRDPass::createResources()
     for (uint32_t i = 0; i < denoiserDesc.staticSamplerNum; i++)
     {
         const nrd::StaticSamplerDesc& nrdStaticsampler = denoiserDesc.staticSamplers[i];
-        Falcor::Sampler::Desc samplerDesc;
-        samplerDesc.setFilterMode(Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Point);
+        Sampler::Desc samplerDesc;
+        samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point);
 
         if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::LINEAR_CLAMP)
         {
-            samplerDesc.setAddressingMode(Falcor::Sampler::AddressMode::Clamp, Falcor::Sampler::AddressMode::Clamp, Falcor::Sampler::AddressMode::Clamp);
+            samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
         }
         else
         {
-            samplerDesc.setAddressingMode(Falcor::Sampler::AddressMode::Mirror, Falcor::Sampler::AddressMode::Mirror, Falcor::Sampler::AddressMode::Mirror);
+            samplerDesc.setAddressingMode(Sampler::AddressMode::Mirror, Sampler::AddressMode::Mirror, Sampler::AddressMode::Mirror);
         }
 
         if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::NEAREST_MIRRORED_REPEAT)
         {
-            samplerDesc.setFilterMode(Falcor::Sampler::Filter::Point, Falcor::Sampler::Filter::Point, Falcor::Sampler::Filter::Point);
+            samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
         }
         else
         {
-            samplerDesc.setFilterMode(Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Point);
+            samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point);
         }
 
-        mpSamplers.push_back(Falcor::Sampler::create(samplerDesc));
+        mpSamplers.push_back(Sampler::create(mpDevice, samplerDesc));
     }
 
     // Texture pool.
@@ -867,8 +853,13 @@ void NRDPass::createResources()
             : denoiserDesc.transientPool[i - denoiserDesc.permanentPoolSize];
 
         // Create texture.
-        Falcor::ResourceFormat textureFormat = getFalcorFormat(nrdTextureDesc.format);
-        Falcor::Texture::SharedPtr pTexture = Texture::create2D(nrdTextureDesc.width, nrdTextureDesc.height, textureFormat, 1u, nrdTextureDesc.mipNum, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        ResourceFormat textureFormat = getFalcorFormat(nrdTextureDesc.format);
+        ref<Texture> pTexture = Texture::create2D(
+            mpDevice,
+            nrdTextureDesc.width, nrdTextureDesc.height,
+            textureFormat, 1u, nrdTextureDesc.mipNum,
+            nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
 
         if (isPermanent)
             mpPermanentTextures.push_back(pTexture);
@@ -878,9 +869,10 @@ void NRDPass::createResources()
 
     // Constant buffer.
     mpConstantBuffer = Buffer::create(
+        mpDevice,
         denoiserDesc.constantBufferDesc.maxDataSize,
-        Falcor::ResourceBindFlags::Constant,
-        Falcor::Buffer::CpuAccess::Write,
+        ResourceBindFlags::Constant,
+        Buffer::CpuAccess::Write,
         nullptr);
 }
 
@@ -897,12 +889,12 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     {
         // Run classic Falcor compute pass to pack radiance.
         {
-            FALCOR_PROFILE("PackRadiance");
-            auto perImageCB = mpPackRadiancePassRelax["PerImageCB"];
+            FALCOR_PROFILE(pRenderContext, "PackRadiance");
+            auto perImageCB = mpPackRadiancePassRelax->getRootVar()["PerImageCB"];
 
             perImageCB["gMaxIntensity"] = mMaxIntensity;
-            perImageCB["gDiffuseRadianceHitDist"] = renderData[kInputDiffuseRadianceHitDist]->asTexture();
-            perImageCB["gSpecularRadianceHitDist"] = renderData[kInputSpecularRadianceHitDist]->asTexture();
+            perImageCB["gDiffuseRadianceHitDist"] = renderData.getTexture(kInputDiffuseRadianceHitDist);
+            perImageCB["gSpecularRadianceHitDist"] = renderData.getTexture(kInputSpecularRadianceHitDist);
             mpPackRadiancePassRelax->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
@@ -912,11 +904,11 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     {
         // Run classic Falcor compute pass to pack radiance and hit distance.
         {
-            FALCOR_PROFILE("PackRadianceHitDist");
-            auto perImageCB = mpPackRadiancePassRelax["PerImageCB"];
+            FALCOR_PROFILE(pRenderContext, "PackRadianceHitDist");
+            auto perImageCB = mpPackRadiancePassRelax->getRootVar()["PerImageCB"];
 
             perImageCB["gMaxIntensity"] = mMaxIntensity;
-            perImageCB["gDiffuseRadianceHitDist"] = renderData[kInputDiffuseRadianceHitDist]->asTexture();
+            perImageCB["gDiffuseRadianceHitDist"] = renderData.getTexture(kInputDiffuseRadianceHitDist);
             mpPackRadiancePassRelax->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
@@ -926,15 +918,15 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     {
         // Run classic Falcor compute pass to pack radiance and hit distance.
         {
-            FALCOR_PROFILE("PackRadianceHitDist");
-            auto perImageCB = mpPackRadiancePassReblur["PerImageCB"];
+            FALCOR_PROFILE(pRenderContext, "PackRadianceHitDist");
+            auto perImageCB = mpPackRadiancePassReblur->getRootVar()["PerImageCB"];
 
             perImageCB["gHitDistParams"].setBlob(mReblurSettings.hitDistanceParameters);
             perImageCB["gMaxIntensity"] = mMaxIntensity;
-            perImageCB["gDiffuseRadianceHitDist"] = renderData[kInputDiffuseRadianceHitDist]->asTexture();
-            perImageCB["gSpecularRadianceHitDist"] = renderData[kInputSpecularRadianceHitDist]->asTexture();
-            perImageCB["gNormalRoughness"] = renderData[kInputNormalRoughnessMaterialID]->asTexture();
-            perImageCB["gViewZ"] = renderData[kInputViewZ]->asTexture();
+            perImageCB["gDiffuseRadianceHitDist"] = renderData.getTexture(kInputDiffuseRadianceHitDist);
+            perImageCB["gSpecularRadianceHitDist"] = renderData.getTexture(kInputSpecularRadianceHitDist);
+            perImageCB["gNormalRoughness"] = renderData.getTexture(kInputNormalRoughnessMaterialID);
+            perImageCB["gViewZ"] = renderData.getTexture(kInputViewZ);
             mpPackRadiancePassReblur->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
@@ -957,8 +949,8 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     }
 
     // Initialize common settings.
-    glm::mat4 viewMatrix = mpScene->getCamera()->getViewMatrix();
-    glm::mat4 projMatrix = mpScene->getCamera()->getData().projMatNoJitter;
+    float4x4 viewMatrix = mpScene->getCamera()->getViewMatrix();
+    float4x4 projMatrix = mpScene->getCamera()->getData().projMatNoJitter;
     if (mFrameIndex == 0)
     {
         mPrevViewMatrix = viewMatrix;
@@ -990,7 +982,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     for (uint32_t i = 0; i < dispatchDescNum; i++)
     {
         const nrd::DispatchDesc& dispatchDesc = dispatchDescs[i];
-        FALCOR_PROFILE(dispatchDesc.name);
+        FALCOR_PROFILE(pRenderContext, dispatchDesc.name);
         dispatch(pRenderContext, renderData, dispatchDesc);
     }
 
@@ -1010,10 +1002,11 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
     mpConstantBuffer->setBlob(dispatchDesc.constantBufferData, 0, dispatchDesc.constantBufferDataSize);
 
     // Create descriptor set for the NRD pass.
-    Falcor::D3D12DescriptorSet::SharedPtr CBVSRVUAVDescriptorSet = Falcor::D3D12DescriptorSet::create(gpDevice->getD3D12GpuDescriptorPool(), mCBVSRVUAVdescriptorSetLayouts[dispatchDesc.pipelineIndex]);
+    ref<D3D12DescriptorSet> CBVSRVUAVDescriptorSet = D3D12DescriptorSet::create(mpDevice, mCBVSRVUAVdescriptorSetLayouts[dispatchDesc.pipelineIndex], D3D12DescriptorSetBindingUsage::ExplicitBind);
 
     // Set CBV.
-    CBVSRVUAVDescriptorSet->setCbv(0 /* NB: range #0 is CBV range */, denoiserDesc.constantBufferDesc.registerIndex, mpConstantBuffer->getCBV().get());
+    mpCBV = D3D12ConstantBufferView::create(mpDevice, mpConstantBuffer);
+    CBVSRVUAVDescriptorSet->setCbv(0 /* NB: range #0 is CBV range */, denoiserDesc.constantBufferDesc.registerIndex, mpCBV.get());
 
     uint32_t resourceIndex = 0;
     for (uint32_t descriptorRangeIndex = 0; descriptorRangeIndex < pipelineDesc.descriptorRangeNum; descriptorRangeIndex++)
@@ -1027,45 +1020,45 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
 
             FALCOR_ASSERT(resource.stateNeeded == nrdDescriptorRange.descriptorType);
 
-            Falcor::Texture::SharedPtr texture;
+            ref<Texture> texture;
 
             switch (resource.type)
             {
             case nrd::ResourceType::IN_MV:
-                texture = renderData[kInputMotionVectors]->asTexture();
+                texture = renderData.getTexture(kInputMotionVectors);
                 break;
             case nrd::ResourceType::IN_NORMAL_ROUGHNESS:
-                texture = renderData[kInputNormalRoughnessMaterialID]->asTexture();
+                texture = renderData.getTexture(kInputNormalRoughnessMaterialID);
                 break;
             case nrd::ResourceType::IN_VIEWZ:
-                texture = renderData[kInputViewZ]->asTexture();
+                texture = renderData.getTexture(kInputViewZ);
                 break;
             case nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST:
-                texture = renderData[kInputDiffuseRadianceHitDist]->asTexture();
+                texture = renderData.getTexture(kInputDiffuseRadianceHitDist);
                 break;
             case nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST:
-                texture = renderData[kInputSpecularRadianceHitDist]->asTexture();
+                texture = renderData.getTexture(kInputSpecularRadianceHitDist);
                 break;
             case nrd::ResourceType::IN_SPEC_HITDIST:
-                texture = renderData[kInputSpecularHitDist]->asTexture();
+                texture = renderData.getTexture(kInputSpecularHitDist);
                 break;
             case nrd::ResourceType::IN_DELTA_PRIMARY_POS:
-                texture = renderData[kInputDeltaPrimaryPosW]->asTexture();
+                texture = renderData.getTexture(kInputDeltaPrimaryPosW);
                 break;
             case nrd::ResourceType::IN_DELTA_SECONDARY_POS:
-                texture = renderData[kInputDeltaSecondaryPosW]->asTexture();
+                texture = renderData.getTexture(kInputDeltaSecondaryPosW);
                 break;
             case nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST:
-                texture = renderData[kOutputFilteredDiffuseRadianceHitDist]->asTexture();
+                texture = renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist);
                 break;
             case nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST:
-                texture = renderData[kOutputFilteredSpecularRadianceHitDist]->asTexture();
+                texture = renderData.getTexture(kOutputFilteredSpecularRadianceHitDist);
                 break;
             case nrd::ResourceType::OUT_REFLECTION_MV:
-                texture = renderData[kOutputReflectionMotionVectors]->asTexture();
+                texture = renderData.getTexture(kOutputReflectionMotionVectors);
                 break;
             case nrd::ResourceType::OUT_DELTA_MV:
-                texture = renderData[kOutputDeltaMotionVectors]->asTexture();
+                texture = renderData.getTexture(kOutputDeltaMotionVectors);
                 break;
             case nrd::ResourceType::TRANSIENT_POOL:
                 texture = mpTransientTextures[resource.indexInPool];
@@ -1081,22 +1074,22 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
             FALCOR_ASSERT(texture);
 
             // Set up resource barriers.
-            Falcor::Resource::State newState = resource.stateNeeded == nrd::DescriptorType::TEXTURE ? Falcor::Resource::State::ShaderResource : Falcor::Resource::State::UnorderedAccess;
+            Resource::State newState = resource.stateNeeded == nrd::DescriptorType::TEXTURE ? Resource::State::ShaderResource : Resource::State::UnorderedAccess;
             for (uint16_t mip = 0; mip < resource.mipNum; mip++)
             {
-                const Falcor::ResourceViewInfo viewInfo = Falcor::ResourceViewInfo(resource.mipOffset + mip, 1, 0, 1);
+                const ResourceViewInfo viewInfo = ResourceViewInfo(resource.mipOffset + mip, 1, 0, 1);
                 pRenderContext->resourceBarrier(texture.get(), newState, &viewInfo);
             }
 
             // Set the SRV and UAV descriptors.
             if (nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE)
             {
-                Falcor::ShaderResourceView::SharedPtr pSRV = texture->getSRV(resource.mipOffset, resource.mipNum, 0, 1);
+                ref<ShaderResourceView> pSRV = texture->getSRV(resource.mipOffset, resource.mipNum, 0, 1);
                 CBVSRVUAVDescriptorSet->setSrv(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pSRV.get());
             }
             else
             {
-                Falcor::UnorderedAccessView::SharedPtr pUAV = texture->getUAV(resource.mipOffset, 0, 1);
+                ref<UnorderedAccessView> pUAV = texture->getUAV(resource.mipOffset, 0, 1);
                 CBVSRVUAVDescriptorSet->setUav(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pUAV.get());
             }
 
@@ -1111,9 +1104,9 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
     CBVSRVUAVDescriptorSet->bindForCompute(pRenderContext, mpRootSignatures[dispatchDesc.pipelineIndex].get(), 1);
 
     // Set pipeline state.
-    ComputePass::SharedPtr pPass = mpPasses[dispatchDesc.pipelineIndex];
-    ComputeProgram::SharedPtr pProgram = pPass->getProgram();
-    ProgramKernels::SharedConstPtr pProgramKernels = pProgram->getActiveVersion()->getKernels(pPass->getVars().get());
+    ref<ComputePass> pPass = mpPasses[dispatchDesc.pipelineIndex];
+    ref<ComputeProgram> pProgram = pPass->getProgram();
+    ref<const ProgramKernels> pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
 
     // Check if anything changed.
     bool newProgram = (pProgramKernels.get() != mpCachedProgramKernels[dispatchDesc.pipelineIndex].get());
@@ -1125,18 +1118,17 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
         desc.setProgramKernels(pProgramKernels);
         desc.setD3D12RootSignatureOverride(mpRootSignatures[dispatchDesc.pipelineIndex]);
 
-        ComputeStateObject::SharedPtr pCSO = ComputeStateObject::create(desc);
+        ref<ComputeStateObject> pCSO = ComputeStateObject::create(mpDevice, desc);
         mpCSOs[dispatchDesc.pipelineIndex] = pCSO;
     }
-    pRenderContext->getLowLevelData()->getD3D12CommandList()->SetPipelineState(mpCSOs[dispatchDesc.pipelineIndex]->getD3D12Handle());
+    ID3D12GraphicsCommandList* pCommandList = pRenderContext->getLowLevelData()->getCommandBufferNativeHandle().as<ID3D12GraphicsCommandList*>();
+    ID3D12PipelineState* pPipelineState = mpCSOs[dispatchDesc.pipelineIndex]->getNativeHandle().as<ID3D12PipelineState*>();
+
+    pCommandList->SetPipelineState(pPipelineState);
 
     // Dispatch.
-    pRenderContext->getLowLevelData()->getD3D12CommandList()->Dispatch(dispatchDesc.gridWidth, dispatchDesc.gridHeight, 1);
+    pCommandList->Dispatch(dispatchDesc.gridWidth, dispatchDesc.gridHeight, 1);
 }
-
-#endif FALCOR_ENABLE_NRD
-
-#endif // FALCOR_D3D12_AVAILABLE
 
 static void registerNRDPass(pybind11::module& m)
 {
@@ -1148,16 +1140,8 @@ static void registerNRDPass(pybind11::module& m)
     profile.value("SpecularDeltaMv", NRDPass::DenoisingMethod::SpecularDeltaMv);
 }
 
-// Don't remove this. it's required for hot-reload to function properly.
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(PluginRegistry& registry)
 {
-    return PROJECT_DIR;
-}
-
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary & lib)
-{
-#if FALCOR_D3D12_AVAILABLE
-    lib.registerPass(NRDPass::kInfo, NRDPass::create);
+    registry.registerClass<RenderPass, NRDPass>();
     ScriptBindings::registerBinding(registerNRDPass);
-#endif
 }

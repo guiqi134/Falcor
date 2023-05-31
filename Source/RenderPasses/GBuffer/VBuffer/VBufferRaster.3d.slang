@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@ import Scene.Raster;
 import Utils.Math.MathHelpers;
 
 RasterizerOrderedTexture2D<float2> gMotionVector;
+RasterizerOrderedTexture2D<float>  gMask;
 
 cbuffer PerFrameCB
 {
@@ -63,8 +64,8 @@ VBufferVSOut vsMain(VSIn vsIn)
     const GeometryInstanceID instanceID = { vsIn.instanceID };
 
     float4x4 worldMat = gScene.getWorldMatrix(instanceID);
-    float3 posW = mul(float4(vsIn.pos, 1.f), worldMat).xyz;
-    vsOut.posH = mul(float4(posW, 1.f), gScene.camera.getViewProj());
+    float3 posW = mul(worldMat, float4(vsIn.pos, 1.f)).xyz;
+    vsOut.posH = mul(gScene.camera.getViewProj(), float4(posW, 1.f));
 
     vsOut.texC = vsIn.texC;
     vsOut.instanceID = instanceID;
@@ -79,8 +80,8 @@ VBufferVSOut vsMain(VSIn vsIn)
         uint prevVertexIndex = gScene.meshes[instance.geometryID].prevVbOffset + vsIn.vertexID;
         prevPos = gScene.prevVertices[prevVertexIndex].position;
     }
-    float3 prevPosW = mul(float4(prevPos, 1.f), gScene.getPrevWorldMatrix(instanceID)).xyz;
-    vsOut.prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
+    float3 prevPosW = mul(gScene.getPrevWorldMatrix(instanceID), float4(prevPos, 1.f)).xyz;
+    vsOut.prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
 #endif
 
     return vsOut;
@@ -103,6 +104,8 @@ VBufferPSOut psMain(VBufferVSOut vsOut, uint triangleIndex : SV_PrimitiveID, flo
 
     if (gScene.materials.alphaTest(v, vsOut.materialID, lod)) discard;
 #endif
+
+    if (is_valid(gMask)) gMask[ipos] = 1.f;
 
     // Note on barycentrics:
     // The barycentric weights provided to pixel shader correspond to vertices A, B, C of the rasterized triangle.

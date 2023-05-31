@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,7 +27,9 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
-#include "Utils/Algorithm/ComputeParallelReduction.h"
+#include "Core/Pass/FullScreenPass.h"
+#include "RenderGraph/RenderPass.h"
+#include "Utils/Algorithm/ParallelReduction.h"
 #include "ColorMapParams.slang"
 
 using namespace Falcor;
@@ -35,13 +37,11 @@ using namespace Falcor;
 class ColorMapPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<ColorMapPass>;
+    FALCOR_PLUGIN_CLASS(ColorMapPass, "ColorMapPass", "Pass that applies a color map to the input.");
 
-    static const Info kInfo;
+    static ref<ColorMapPass> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<ColorMapPass>(pDevice, dict); }
 
-    /** Create a new object
-    */
-    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
+    ColorMapPass(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -51,29 +51,27 @@ public:
     static void registerScriptBindings(pybind11::module& m);
 
 private:
-    ColorMapPass(const Dictionary& dict);
-
     ColorMap mColorMap = ColorMap::Jet;
     uint32_t mChannel = 0;
     bool mAutoRange = true;
     float mMinValue = 0.f;
     float mMaxValue = 1.f;
 
-    FullScreenPass::SharedPtr mpColorMapPass;
-    Fbo::SharedPtr mpFbo;
+    ref<FullScreenPass> mpColorMapPass;
+    ref<Fbo> mpFbo;
     bool mRecompile = true;
 
     class AutoRanging
     {
     public:
-        AutoRanging();
+        AutoRanging(ref<Device> pDevice);
 
-        std::optional<std::pair<double, double>> getMinMax(RenderContext* pRenderContext, const Texture::SharedPtr& texture, uint32_t channel);
+        std::optional<std::pair<double, double>> getMinMax(RenderContext* pRenderContext, const ref<Texture>& texture, uint32_t channel);
 
     private:
-        ComputeParallelReduction::SharedPtr mpParallelReduction;
-        Buffer::SharedPtr mpReductionResult;
-        GpuFence::SharedPtr mpFence;
+        std::unique_ptr<ParallelReduction> mpParallelReduction;
+        ref<Buffer> mpReductionResult;
+        ref<GpuFence> mpFence;
         bool mReductionAvailable = false;
     };
 

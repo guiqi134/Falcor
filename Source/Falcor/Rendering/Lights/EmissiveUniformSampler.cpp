@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,17 +25,12 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "EmissiveUniformSampler.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-    EmissiveUniformSampler::SharedPtr EmissiveUniformSampler::create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
-    {
-        return SharedPtr(new EmissiveUniformSampler(pRenderContext, pScene, options));
-    }
-
-    EmissiveUniformSampler::EmissiveUniformSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
+    EmissiveUniformSampler::EmissiveUniformSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options)
         : EmissiveLightSampler(EmissiveLightSamplerType::Uniform, pScene)
         , mOptions(options)
     {

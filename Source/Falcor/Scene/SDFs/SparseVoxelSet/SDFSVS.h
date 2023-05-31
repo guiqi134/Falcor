@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "Scene/SDFs/SDFGrid.h"
 #include "Core/API/Buffer.h"
 #include "Core/API/Texture.h"
+#include "Core/Pass/ComputePass.h"
 
 namespace Falcor
 {
@@ -38,20 +39,18 @@ namespace Falcor
     class FALCOR_API SDFSVS : public SDFGrid
     {
     public:
-        using SharedPtr = std::shared_ptr<SDFSVS>;
+        static ref<SDFSVS> create(ref<Device> pDevice) { return make_ref<SDFSVS>(pDevice); }
 
-        /** Create a new, empty SDF sparse voxel set.
-            \return SDFSVS object, or nullptr if errors occurred.
-        */
-        static SharedPtr create();
+        /// Create am empty SDF sparse voxel set.
+        SDFSVS(ref<Device> pDevice) : SDFGrid(pDevice) {}
 
         virtual size_t getSize() const override;
         virtual uint32_t getMaxPrimitiveIDBits() const override;
-        virtual Type getType() const { return Type::SparseVoxelSet; }
+        virtual Type getType() const override { return Type::SparseVoxelSet; }
 
         virtual void createResources(RenderContext* pRenderContext, bool deleteScratchData = true) override;
 
-        virtual const Buffer::SharedPtr& getAABBBuffer() const override { return mpVoxelAABBBuffer; }
+        virtual const ref<Buffer>& getAABBBuffer() const override { return mpVoxelAABBBuffer; }
         virtual uint32_t getAABBCount() const override { return mVoxelCount; }
 
         virtual void setShaderData(const ShaderVar& var) const override;
@@ -60,24 +59,22 @@ namespace Falcor
         virtual void setValuesInternal(const std::vector<float>& cornerValues) override;
 
     private:
-        SDFSVS() = default;
-
         // CPU data.
         std::vector<int8_t> mValues;
 
         // Specs.
-        Buffer::SharedPtr mpVoxelAABBBuffer;
-        Buffer::SharedPtr mpVoxelBuffer;
+        ref<Buffer> mpVoxelAABBBuffer;
+        ref<Buffer> mpVoxelBuffer;
         uint32_t mVoxelCount = 0;
 
         // Compute passes used to build the SVS.
-        ComputePass::SharedPtr mpCountSurfaceVoxelsPass;
-        ComputePass::SharedPtr mpSDFSVSVoxelizerPass;
+        ref<ComputePass> mpCountSurfaceVoxelsPass;
+        ref<ComputePass> mpSDFSVSVoxelizerPass;
 
         // Scratch data used for building.
-        GpuFence::SharedPtr mpReadbackFence;
-        Buffer::SharedPtr mpSurfaceVoxelCounter;
-        Buffer::SharedPtr mpSurfaceVoxelCounterStagingBuffer;
-        Texture::SharedPtr mpSDFGridTexture;
+        ref<GpuFence> mpReadbackFence;
+        ref<Buffer> mpSurfaceVoxelCounter;
+        ref<Buffer> mpSurfaceVoxelCounterStagingBuffer;
+        ref<Texture> mpSDFGridTexture;
     };
 }

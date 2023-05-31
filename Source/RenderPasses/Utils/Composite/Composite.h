@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 
 using namespace Falcor;
 
@@ -40,9 +41,7 @@ using namespace Falcor;
 class Composite : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<Composite>;
-
-    static const Info kInfo;
+    FALCOR_PLUGIN_CLASS(Composite, "Composite", "Composite pass.");
 
     /** Composite modes.
     */
@@ -52,7 +51,9 @@ public:
         Multiply,
     };
 
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    static ref<Composite> create(ref<Device> pDevice, const Dictionary& dict) { return make_ref<Composite>(pDevice, dict); }
+
+    Composite(ref<Device> pDevice, const Dictionary& dict);
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -63,8 +64,6 @@ public:
     static void registerBindings(pybind11::module& m);
 
 private:
-    Composite(const Dictionary& dict);
-
     Program::DefineList getDefines() const;
 
     uint2                       mFrameDim = { 0, 0 };
@@ -73,5 +72,5 @@ private:
     float                       mScaleB = 1.f;
     ResourceFormat              mOutputFormat = ResourceFormat::RGBA32Float;
 
-    ComputePass::SharedPtr      mCompositePass;
+    ref<ComputePass>            mCompositePass;
 };

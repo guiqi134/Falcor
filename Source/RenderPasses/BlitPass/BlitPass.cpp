@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,37 +27,36 @@
  **************************************************************************/
 #include "BlitPass.h"
 
-const RenderPass::Info BlitPass::kInfo { "BlitPass", "Blit a texture into a different texture." };
-
 namespace
 {
     const char kDst[] = "dst";
     const char kSrc[] = "src";
     const char kFilter[] = "filter";
+    const char kOutputFormat[] = "outputFormat";
 
     void regBlitPass(pybind11::module& m)
     {
-        pybind11::class_<BlitPass, RenderPass, BlitPass::SharedPtr> pass(m, "BlitPass");
+        pybind11::class_<BlitPass, RenderPass, ref<BlitPass>> pass(m, "BlitPass");
         pass.def_property(kFilter, &BlitPass::getFilter, &BlitPass::setFilter);
     }
 }
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
+    registry.registerClass<RenderPass, BlitPass>();
+    ScriptBindings::registerBinding(regBlitPass);
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
+BlitPass::BlitPass(ref<Device> pDevice, const Dictionary& dict)
+    : RenderPass(pDevice)
 {
-    lib.registerPass(BlitPass::kInfo, BlitPass::create);
-    ScriptBindings::registerBinding(regBlitPass);
+    parseDictionary(dict);
 }
 
 RenderPassReflection BlitPass::reflect(const CompileData& compileData)
 {
     RenderPassReflection r;
-    r.addOutput(kDst, "The destination texture");
+    r.addOutput(kDst, "The destination texture").format(mOutputFormat);
     r.addInput(kSrc, "The source texture");
     return r;
 }
@@ -67,32 +66,23 @@ void BlitPass::parseDictionary(const Dictionary& dict)
     for (const auto& [key, value] : dict)
     {
         if (key == kFilter) setFilter(value);
+        if (key == kOutputFormat) mOutputFormat = value;
         else logWarning("Unknown field '{}' in a BlitPass dictionary.", key);
     }
-}
-
-BlitPass::SharedPtr BlitPass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new BlitPass(dict));
-}
-
-BlitPass::BlitPass(const Dictionary& dict)
-    : RenderPass(kInfo)
-{
-    parseDictionary(dict);
 }
 
 Dictionary BlitPass::getScriptingDictionary()
 {
     Dictionary d;
     d[kFilter] = mFilter;
+    if (mOutputFormat != ResourceFormat::Unknown) d[kOutputFormat] = mOutputFormat;
     return d;
 }
 
 void BlitPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& pSrcTex = renderData[kSrc]->asTexture();
-    const auto& pDstTex = renderData[kDst]->asTexture();
+    const auto& pSrcTex = renderData.getTexture(kSrc);
+    const auto& pDstTex = renderData.getTexture(kDst);
 
     if (pSrcTex && pDstTex)
     {

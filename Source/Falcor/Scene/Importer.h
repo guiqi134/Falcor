@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,17 @@
  **************************************************************************/
 #pragma once
 #include "SceneBuilder.h"
+#include "Core/Macros.h"
+#include "Core/Errors.h"
+#include "Core/Plugin.h"
+#include "Core/Platform/OS.h"
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <pybind11/pytypes.h>
 
 namespace Falcor
 {
@@ -49,8 +60,8 @@ namespace Falcor
         {}
 
         template<typename... Args>
-        explicit ImporterError(const std::filesystem::path& path, const std::string_view fmtString, Args&&... args)
-            : ImporterError(path, fmt::format(fmtString, std::forward<Args>(args)...).c_str())
+        explicit ImporterError(const std::filesystem::path& path, fmt::format_string<Args...> format, Args&&... args)
+            : ImporterError(path, fmt::format(format, std::forward<Args>(args)...).c_str())
         {}
 
         virtual ~ImporterError() override
@@ -68,55 +79,43 @@ namespace Falcor
         std::shared_ptr<std::filesystem::path> mpPath;
     };
 
-    /** This class is a global registry for asset importers.
+    /** Base class for importers.
         Importers are bound to a set of file extensions. This allows the right importer to
         be called when importing an asset file.
     */
     class FALCOR_API Importer
     {
     public:
-        using ExtensionList = std::vector<std::string>;
-        using ImportFunction = std::function<void(const std::filesystem::path& path, SceneBuilder& builder, const SceneBuilder::InstanceMatrices& instances, const Dictionary& dict)>;
-
-        /** Description of an importer.
-        */
-        struct Desc
+        using PluginCreate = std::function<std::unique_ptr<Importer>()>;
+        struct PluginInfo
         {
-            std::string name;
-            ExtensionList extensions;
-            ImportFunction import;
+            std::string desc; ///< Importer description.
+            std::vector<std::string> extensions; ///< List of handled file extensions.
         };
 
-        /** Returns a list of file extensions filters for all supported file formats.
-        */
-        static const FileDialogFilterVec& getFileExtensionFilters();
+        FALCOR_PLUGIN_BASE_CLASS(Importer);
 
-        /** Import an asset.
+        virtual ~Importer() {}
+
+        /** Import a scene.
             \param[in] path File path.
             \param[in] builder Scene builder.
-            \param[in] instances Optional list of instance transforms.
             \param[in] dict Optional dictionary.
             Throws an ImporterError if something went wrong.
         */
-        static void import(const std::filesystem::path& path, SceneBuilder& builder, const SceneBuilder::InstanceMatrices& instances, const Dictionary& dict);
+        virtual void importScene(const std::filesystem::path& path, SceneBuilder& builder, const pybind11::dict& dict) = 0;
 
-        /** Registers an importer.
-            \param[in] desc Importer description.
+        // Importer factory
+
+        /** Create an importer for a file of an asset with the given file extension.
+            \param extension File extension.
+            \param pm Plugin manager.
+            \return Returns an instance of the importer or nullptr if no compatible importer was found.
+         */
+        static std::unique_ptr<Importer> create(std::string extension, const PluginManager& pm = PluginManager::instance());
+
+        /** Return a list of supported file extensions by the current set of loaded importer plugins.
         */
-        static void registerImporter(const Desc& desc);
+        static std::vector<std::string> getSupportedExtensions(const PluginManager& pm = PluginManager::instance());
     };
 }
-
-#ifndef _staticlibrary
-#define FALCOR_REGISTER_IMPORTER(_class, _extensions)                               \
-    static struct RegisterImporter##_class {                                        \
-        RegisterImporter##_class()                                                  \
-        {                                                                           \
-            Importer::registerImporter({#_class, _extensions, _class::import});     \
-        }                                                                           \
-    } gRegisterImporter##_class;
-#else
-#define FALCOR_REGISTER_IMPORTER(_class, _extensions) \
-    static_assert(false, "Using FALCOR_REGISTER_IMPORTER() in a static-library is not supported. The C++ linker usually doesn't pull static-initializers into the EXE. " \
-    "Call 'Importer::registerImporter()' yourself from code that is guarenteed to run.");
-#endif

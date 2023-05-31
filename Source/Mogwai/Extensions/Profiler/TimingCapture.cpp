@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
+#include "Falcor.h"
 #include "TimingCapture.h"
 
 namespace Mogwai
@@ -45,6 +45,8 @@ namespace Mogwai
 
     void TimingCapture::registerScriptBindings(pybind11::module& m)
     {
+        using namespace pybind11::literals;
+
         pybind11::class_<TimingCapture> timingCapture(m, "TimingCapture");
 
         // Members
@@ -56,7 +58,7 @@ namespace Mogwai
         return kScriptVar;
     }
 
-    void TimingCapture::beginFrame(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
+    void TimingCapture::beginFrame(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
     {
         recordPreviousFrameTime();
     }
@@ -86,7 +88,7 @@ namespace Mogwai
         if (!mFrameTimeFile.is_open()) return;
 
         // The FrameRate object is updated at the start of each frame, the first valid time is available on the second frame.
-        auto& frameRate = gpFramework->getFrameRate();
+        auto& frameRate = mpRenderer->getFrameRate();
         if (frameRate.getFrameCount() > 1)
             mFrameTimeFile << frameRate.getLastFrameTime() << std::endl;
     }

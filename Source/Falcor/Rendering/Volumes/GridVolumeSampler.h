@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,19 +26,22 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "Scene/Scene.h"
 #include "GridVolumeSamplerParams.slang"
+#include "Core/Macros.h"
+#include "Utils/UI/Gui.h"
+#include "Scene/Scene.h"
 
 namespace Falcor
 {
+    class RenderContext;
+    struct ShaderVar;
+
     /** Grid volume sampler.
         Utily class for evaluating transmittance and sampling scattering in grid volumes.
     */
     class FALCOR_API GridVolumeSampler
     {
     public:
-        using SharedPtr = std::shared_ptr<GridVolumeSampler>;
-
         /** Grid volume sampler configuration options.
         */
         struct Options
@@ -46,16 +49,18 @@ namespace Falcor
             TransmittanceEstimator transmittanceEstimator = TransmittanceEstimator::RatioTrackingLocalMajorant;
             DistanceSampler distanceSampler = DistanceSampler::DeltaTrackingLocalMajorant;
             bool useBrickedGrid = true;
-        };
 
-        virtual ~GridVolumeSampler() = default;
+            // Note: Empty constructor needed for clang due to the use of the nested struct constructor in the parent constructor.
+            Options() {}
+        };
 
         /** Create a new object.
             \param[in] pRenderContext A render-context that will be used for processing.
             \param[in] pScene The scene.
             \param[in] options Configuration options.
         */
-        static SharedPtr create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options = Options());
+        GridVolumeSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options = Options());
+        virtual ~GridVolumeSampler() = default;
 
         /** Get a list of shader defines for using the grid volume sampler.
             \return Returns a list of defines.
@@ -77,9 +82,7 @@ namespace Falcor
         const Options& getOptions() const { return mOptions; }
 
     protected:
-        GridVolumeSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options);
-
-        Scene::SharedPtr        mpScene;            ///< Scene.
+        ref<Scene>              mpScene;            ///< Scene.
 
         Options                 mOptions;
     };

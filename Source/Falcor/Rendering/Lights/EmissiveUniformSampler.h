@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "EmissiveLightSampler.h"
+#include "Core/Macros.h"
 #include "Scene/Lights/LightCollection.h"
 
 namespace Falcor
@@ -38,9 +39,6 @@ namespace Falcor
     class FALCOR_API EmissiveUniformSampler : public EmissiveLightSampler
     {
     public:
-        using SharedPtr = std::shared_ptr<EmissiveUniformSampler>;
-        using SharedConstPtr = std::shared_ptr<const EmissiveUniformSampler>;
-
         /** EmissiveUniformSampler configuration.
             Note if you change options, please update FALCOR_SCRIPT_BINDING in EmissiveUniformSampler.cpp
         */
@@ -50,22 +48,19 @@ namespace Falcor
             //bool        usePreintegration = true;           ///< Use pre-integrated flux per triangle to guide BVH build/sampling. Only relevant if mUseBVHTree == true.
         };
 
-        virtual ~EmissiveUniformSampler() = default;
-
         /** Creates a EmissiveUniformSampler for a given scene.
             \param[in] pRenderContext The render context.
             \param[in] pScene The scene.
             \param[in] options The options to override the default behavior.
         */
-        static SharedPtr create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options = Options());
+        EmissiveUniformSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options = Options());
+        virtual ~EmissiveUniformSampler() = default;
 
         /** Returns the current configuration.
         */
         const Options& getOptions() const { return mOptions; }
 
     protected:
-        EmissiveUniformSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options);
-
         // Configuration
         Options mOptions;
     };
