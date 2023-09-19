@@ -78,6 +78,8 @@ namespace
     const std::string kOutputIsmAfterPush64 = "ism after push 64";
     const std::string kOutputIsmAfterPull32 = "ism after pull 32";
     const std::string kOutputIsmAfterPush32 = "ism after push 32";
+    const std::string kOutputAllIsm512 = "all ism 512";
+    const std::string kOutputAllIsm1k = "all ism 1k";
     const std::string kOutputAllIsm2k = "all ism 2k";
     const std::string kOutputAllIsm4k = "all ism 4k";
     const std::string kOutputAllIsm8k = "all ism 8k";
@@ -189,6 +191,8 @@ RenderPassReflection RTXDITutorialBase::reflect(const CompileData& compileData)
     reflector.addOutput(kOutputIsmAfterPush64, "").texture2D(64, 64).format(ResourceFormat::RGBA32Float);
     reflector.addOutput(kOutputIsmAfterPull32, "").texture2D(32, 32).format(ResourceFormat::RGBA32Float);
     reflector.addOutput(kOutputIsmAfterPush32, "").texture2D(32, 32).format(ResourceFormat::RGBA32Float);
+    reflector.addOutput(kOutputAllIsm512, "").texture2D(512, 512).format(ResourceFormat::RGBA32Float);
+    reflector.addOutput(kOutputAllIsm1k, "").texture2D(1024, 1024).format(ResourceFormat::RGBA32Float);
     reflector.addOutput(kOutputAllIsm2k, "").texture2D(mIsmVisTextureSize, mIsmVisTextureSize).format(ResourceFormat::RGBA32Float);
     reflector.addOutput(kOutputAllIsm4k, "").texture2D(mIsmVisTextureSize * 2u, mIsmVisTextureSize * 2u).format(ResourceFormat::RGBA32Float);
     reflector.addOutput(kOutputAllIsm8k, "").texture2D(mIsmVisTextureSize * 4u, mIsmVisTextureSize * 4u).format(ResourceFormat::RGBA32Float);
@@ -2109,7 +2113,9 @@ void RTXDITutorialBase::prepareIsms(RenderContext* pRenderContext, const RenderD
 
             if (shadowMapType == uint(ShadowMapType::LowIsm))
             {
-                if (resolution <= uint(1 << 22)) texName = kOutputAllIsm2k;
+                if (resolution <= uint(1 << 18)) texName = kOutputAllIsm512;
+                else if (resolution <= uint(1 << 20)) texName = kOutputAllIsm1k;
+                else if (resolution <= uint(1 << 22)) texName = kOutputAllIsm2k;
                 else if (resolution <= uint(1 << 24)) texName = kOutputAllIsm4k;
                 else if (resolution <= uint(1 << 26)) texName = kOutputAllIsm8k;
                 else texName = kOutputAllIsm14k;
