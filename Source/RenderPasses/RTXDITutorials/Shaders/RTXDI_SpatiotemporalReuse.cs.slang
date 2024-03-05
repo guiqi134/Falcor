@@ -58,7 +58,7 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    // printSetPixel(threadId);
+    printSetPixel(threadId);
 
     print("222222222222222222222222", 2);
 
@@ -104,6 +104,7 @@ void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThrea
 
         if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking && gSplitReservoirs && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing) && !gDisableRankingUpdate)
         {
+            print("two reservoir reusing", 1);
             RTXDI_Reservoir curSamples[2] = {
                 curSample,
                 RTXDI_LoadReservoir(params, launchIdx, gCurFrameInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET)

@@ -355,6 +355,7 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     widget.checkbox("Rotate Samples?", mPcfParams.useRotation, true);
     if (mRtxdiFrameParams.frameIndex >= mWarmUpFrameCount)
         widget.checkbox("Disable Ranking Update? (for fixed PSMs comparison)", mDisableRankingUpdate);
+    resourcesChanged |= widget.checkbox("Use all shadow maps for ranking", mUseAllShadowMapsForRanking);
 
 
     // ISM parameters
@@ -531,6 +532,8 @@ void RTXDITutorialBase::renderUI(Gui::Widgets& widget)
     }
 
     printValues.release();
+
+    widget.checkbox("Use fixed seed", mUseFixedSeed);
 
     mpPixelDebug->renderUI(widget);
 
@@ -980,6 +983,7 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
     vars["SharedCB"]["gPlaceForRankingData"] = mPlaceForRankingData;
     vars["SharedCB"]["gDisableRankingUpdate"] = mDisableRankingUpdate;
     vars["SharedCB"]["gShadowFadeInFrameLength"] = mShadowFadeInFrameLength;
+    vars["SharedCB"]["gUseAllShadowMapsForRanking"] = mUseAllShadowMapsForRanking;
     mPcfParams.setShaderData(vars["SharedCB"]["gPcfParams"]);
 
     vars["SharedCB"]["gDebugLightID"] = mDebugLightID;
@@ -1012,7 +1016,7 @@ void RTXDITutorialBase::setupRTXDIBridgeVars(ShaderVar& vars, const RenderData& 
 void RTXDITutorialBase::allocateShadowTextureArrays(RenderContext* pContext)
 {
     // Create shadow map texture array (for each light).
-    uint totalShadowMaps = mCaptureParams.enabled ? mTotalIsmCount : mLightFaceTopN * mTemporalReusingLength;
+    uint totalShadowMaps = mCaptureParams.enabled || mUseAllShadowMapsForRanking ? mTotalIsmCount : mLightFaceTopN * mTemporalReusingLength;
     uint maxSupportedShadowMaps1024 = kMaxSupportedLights1024 * kShadowMapsPerPointLight;
     uint numPsmTexArrays = totalShadowMaps / maxSupportedShadowMaps1024 + 1u;
     if (numPsmTexArrays > 1)
@@ -1094,7 +1098,7 @@ void RTXDITutorialBase::allocateStochasticSmResources(RenderContext* pRenderCont
     mpLightHistogramBuffer = Buffer::createTyped<uint>(elementCount, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpSortedLightsBuffer = Buffer::createTyped<uint2>(elementCount, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpTotalValidPixels = Buffer::createTyped<uint>(4, kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpReusingLightIndexBuffer = Buffer::createTyped<uint>(mCaptureParams.enabled ? maxShadowMaps : mLightFaceTopN * mTemporalReusingLength, kBufferBindFlags,
+    mpReusingLightIndexBuffer = Buffer::createTyped<uint>(mCaptureParams.enabled || mUseAllShadowMapsForRanking ? maxShadowMaps : mLightFaceTopN * mTemporalReusingLength, kBufferBindFlags,
         Buffer::CpuAccess::Read);
     pRenderContext->clearUAV(mpReusingLightIndexBuffer->getUAV().get(), uint4(-1));
     mpBoundaryVarianceBuffer = Buffer::createTyped<float>(3, kBufferBindFlags, Buffer::CpuAccess::Read);
@@ -1137,7 +1141,7 @@ void RTXDITutorialBase::allocateStochasticSmResources(RenderContext* pRenderCont
     mpHighIsmPerFaceCountingBuffer = Buffer::createTyped<uint>(mTotalIsmCount, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpExtraPointsCountBuffer = Buffer::createTyped<uint>(10000, kBufferBindFlags, Buffer::CpuAccess::Read);
     mpShadowMapSizeBuffer = Buffer::createTyped<uint>(6, kBufferBindFlags, Buffer::CpuAccess::Read);
-    mpRecordReusingLightData = Buffer::createTyped<float4>(mCaptureParams.enabled ? maxShadowMaps : mLightFaceTopN * mTemporalReusingLength, kBufferBindFlags,
+    mpRecordReusingLightData = Buffer::createTyped<float4>(mCaptureParams.enabled || mUseAllShadowMapsForRanking ? maxShadowMaps : mLightFaceTopN * mTemporalReusingLength, kBufferBindFlags,
         Buffer::CpuAccess::Read);
 }
 
@@ -2448,7 +2452,9 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
             auto pStagingDepthTexture = Texture::create2D(mShadowMapSize, mShadowMapSize, ResourceFormat::D32Float, 1, 1, nullptr, kShadowMapFlags);
             mShadowMapPass.pFbo->attachDepthStencilTarget(pStagingDepthTexture, 0, 0, 1);
 
-            for (uint pass = 0; pass < mLightFaceTopN; pass++)
+            auto numShadowMapsToRender = mUseAllShadowMapsForRanking ? mTotalIsmCount : mLightFaceTopN;
+
+            for (uint pass = 0; pass < numShadowMapsToRender; pass++)
             {
                 shadowVars["shadowMapCB"]["gRank"] = pass;
 
@@ -2535,9 +2541,19 @@ void RTXDITutorialBase::prepareStochasticShadowMaps(RenderContext* pRenderContex
         for (uint i = 0; i < sortedLightsBuffer.size(); i++)
         {
             sum += sortedLightsBuffer[i].y;
-            //logInfo(std::format("Light Mesh ID {} = {}", sortedLightsBuffer[i].x, sortedLightsBuffer[i].y));
+            //logInfo(std::format("Sort Light face ID {} = {}", sortedLightsBuffer[i].x, sortedLightsBuffer[i].y));
         }
         //logInfo(std::format("sum = {}, # of pixels = {}", sum, mPassData.screenSize.x * mPassData.screenSize.y));
+
+        auto sortedLightIndexArray = getDeviceResourceData<uint2>(pRenderContext, mpSortedLightsBuffer);
+        std::string sortedArray = "";
+        for (uint i = 0; i < sortedLightIndexArray.size(); i++)
+        {
+            sortedArray += std::to_string(sortedLightIndexArray[i].x) + " ";
+            sortedArray += (i + 1) % 10 == 0 ? "\n" : "";
+        }
+        logInfo(std::format("Sorted light face array = [\n{}\n]", sortedArray));
+
 
         // Print total valid pixels on screen
         auto totalValidPixels = getDeviceResourceData<uint>(pRenderContext, mpTotalValidPixels);

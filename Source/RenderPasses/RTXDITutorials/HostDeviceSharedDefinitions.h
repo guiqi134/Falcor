@@ -81,8 +81,8 @@ struct PCF_Parameters
     bool usePCF = true;
     bool usePoisson = false;
     bool useRotation = false;
-    //float kernelRadius = 1.0f;
-    float kernelRadius = 0.0f;
+    float kernelRadius = 1.0f;
+    //float kernelRadius = 0.0f;
     uint numPcfPoissonSamples = 32u;
 };
 

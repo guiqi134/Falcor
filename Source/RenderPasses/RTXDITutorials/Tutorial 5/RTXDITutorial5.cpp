@@ -165,6 +165,8 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     }
 
     // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
+
+    mRtxdiFrameParams.frameIndex = mUseFixedSeed && mRtxdiFrameParams.frameIndex > mWarmUpFrameCount ? 21u : mRtxdiFrameParams.frameIndex;
     if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
 
     // When we do temporal reuse, we need a G-buffer for this frame *and* last frame to compute shading.  We have
@@ -216,7 +218,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         visVars["SampleCB"]["gReservoirIndex"] = uint(2);
         visVars["SampleCB"]["gVisMode"] = uint(mVisibility);
         setupRTXDIBridgeVars(visVars, renderData);
-        //mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
+        mpPixelDebug->prepareProgram(mShader.initialCandidateVisibility->getProgram(), visVars);
         mShader.initialCandidateVisibility->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 

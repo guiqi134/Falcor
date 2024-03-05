@@ -166,6 +166,7 @@ cbuffer SharedCB
     uint gPlaceForRankingData;
     bool gDisableRankingUpdate;
     uint gShadowFadeInFrameLength;
+    bool gUseAllShadowMapsForRanking;
     PCF_Parameters gPcfParams;
 
     int gDebugLightID;
@@ -190,7 +191,8 @@ Texture2DArray<float> gSortedLightsHighResISMs[NUM_ISM_TEXTURE_ARRAYS];
 RWTexture2D<float4> gDebugScreenMotion;
 
 // Global evaluate visiblity functions for two stages in RTXDI
-float evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, inout RAB_RandomSamplerState rng, out uint shadowOption)
+float evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surface, RAB_LightSample lightSample, uint gVisMode, inout RAB_RandomSamplerState rng, out uint shadowOption,
+    bool forceUseShadowMap = false)
 {
     float visibility = 1.0f;
 
@@ -206,7 +208,8 @@ float evaluateVisibility(uint bufferIndex, uint localLightID, RAB_Surface surfac
     float3 lightToShadingW = posW - lightData.centerPosW;
     uint faceIdx = localLightID < gFirstSpotLightID ? getFaceIndex(normalize(lightToShadingW)) : 0;
     LightFaceData lightFaceData = lightData.lightFaceData[faceIdx];
-    uint lightShadowMapType = lightFaceData.shadowMapType;
+    uint lightShadowMapType = forceUseShadowMap ? uint(ShadowMapType::PSM) : lightFaceData.shadowMapType;
+
 
     // Random rotation for poisson sample
     float2 rotation = 0.0f;

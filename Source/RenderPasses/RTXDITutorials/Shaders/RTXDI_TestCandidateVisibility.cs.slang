@@ -44,7 +44,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 {
     printSetPixel(threadId.xy);
 
-    print("11111111111111111", 1);
+    print("Test Candidate Visibility pass----------------------------------", 1);
 
     print("gVisMode = ", (uint)gVisMode);
 
@@ -86,9 +86,14 @@ void main(uint3 threadId : SV_DispatchThreadID)
             RTXDI_StoreReservoir(reservoir, params, launchIdx, gReservoirIndex);
         }
 
-        // If we are already using ISM to evaluate, then no need to do it again
-        if (shadowOption == uint(ShadowOptions::ISM))
+        print("visMode = ", visMode);
+        print("shadowOption = ", shadowOption);
+
+        // TODO: better implemtation for this parameter
+        if (gUseAllShadowMapsForRanking)
         {
+            print("evalute all shadow maps for ranking reservoir", 1);
+            isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::ShadowMap_ISM, rng, shadowOption, true);
             if (isVisible == 0.0f)
             {
                 RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
@@ -97,18 +102,31 @@ void main(uint3 threadId : SV_DispatchThreadID)
         }
         else
         {
-            // Also evalute the ISM for ranking reservoir, but we need to have:
-            // 1. Ranking is been updated
-            // 2. Light samples are not collected after RIS
-            if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking && gSplitReservoirs
-                && !gDisableRankingUpdate
-                && gPlaceForRankingData != uint(PlacesForRankingData::AfterReusing))
+            // If we are already using ISM to evaluate, then no need to do it again
+            if (shadowOption == uint(ShadowOptions::ISM))
             {
-                isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption);
                 if (isVisible == 0.0f)
                 {
                     RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
                     RTXDI_StoreReservoir(rankingReservoir, params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+                }
+            }
+            else
+            {
+                // Also evalute the ISM for ranking reservoir, but we need to have:
+                // 1. Ranking is been updated
+                // 2. Light samples are not collected after RIS
+                if (gVisMode != uint(Visibility::AllShadowRay) && gOnlyIsmForRanking && gSplitReservoirs
+                    && !gDisableRankingUpdate
+                    && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing))
+                {
+                    print("evalute the ISM for ranking reservoir", 1);
+                    isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption);
+                    if (isVisible == 0.0f)
+                    {
+                        RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
+                        RTXDI_StoreReservoir(rankingReservoir, params, launchIdx, gReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+                    }
                 }
             }
         }

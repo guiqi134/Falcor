@@ -265,12 +265,14 @@ protected:
     bool mEnableRotateLightFace = false;
 
     // Below are the parameters for debugging
+    bool mUseFixedSeed = false;
     bool mFrozenFrame = false;
     bool mDisplayLightSampling = false;
     bool mDrawWireframe = false;
     bool mEnableGpuDebugPrintMode = false;
     bool mEnableVisualization = false;
     bool mVisFaceSamples = false;
+    bool mUseAllShadowMapsForRanking = false;
     int mDebugLightID = -1;
     uint mVisualizeMipLevel = 0;
     uint2 mVisLightFaceID = uint2(6, 3);
