@@ -84,7 +84,7 @@ void generalUpdates(uint3 threadId: SV_DispatchThreadID)
 
     print("gIterationCount =", gIterationCount);
 
-    if (gSortingRules == (uint)SortingRules::LightFaces)
+    if ((gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels))
     {
         uint globalFaceIdx = gSortedLightsBuffer[threadId.x].x;
         uint localLightIdx = globalFaceIdx / gShadowMapsPerLight;
@@ -220,8 +220,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
             else
             {
                 // Get the local light index and face index
-                uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx / gShadowMapsPerLight : prevLightOrGlobalFaceIdx;
-                uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? prevLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+                uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? prevLightOrGlobalFaceIdx / gShadowMapsPerLight : prevLightOrGlobalFaceIdx;
+                uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? prevLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
                 LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx]; // only for read
 
                 // Mark this face as old
@@ -268,8 +268,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
         {
             // Get light and face index
             uint lightOrGlobalFaceIdx = gSortedLightsBuffer[i].x;
-            uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
-            uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+            uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
+            uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
             LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx]; // only for read
 
             // Update old PSM light data and some partial data of new PSM light
@@ -283,7 +283,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 }
                 else
                 {
-                    uint validMaskIndex = (gSortingRules == (uint)SortingRules::LightFaces ? lightFaceData.psmTexArrayIdx : lightFaceData.psmTexArrayIdx / gShadowMapsPerLight) % gTopN;
+                    uint validMaskIndex = ((gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightFaceData.psmTexArrayIdx : lightFaceData.psmTexArrayIdx / gShadowMapsPerLight) % gTopN;
                     validMask[validMaskIndex] = false;
 
                     // print("validMaskIndex = ", validMaskIndex);
@@ -298,7 +298,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
                     uint shadowMapSize;
                     if (gFullSizeShadowMaps)
                     {
-                        uint maxSupportedSize = gSortingRules == (uint)SortingRules::LightFaces ? gMaxSupportedShadowMaps1024 : kMaxSupportedLights1024;
+                        uint maxSupportedSize = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? gMaxSupportedShadowMaps1024 : kMaxSupportedLights1024;
                         shadowMapSize = i < maxSupportedSize ? 1024 : 512;
                     }
                     else
@@ -344,8 +344,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 LightFaceData newLightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx];
 
                 uint oldPsmLightFaceID = gReusingLightIndexBuffer[currReusingBufferIdx];
-                uint oldLocalLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? oldPsmLightFaceID / gShadowMapsPerLight : oldPsmLightFaceID;
-                uint oldFaceIdx = gSortingRules == (uint)SortingRules::LightFaces ? oldPsmLightFaceID % gShadowMapsPerLight : 0u;
+                uint oldLocalLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? oldPsmLightFaceID / gShadowMapsPerLight : oldPsmLightFaceID;
+                uint oldFaceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? oldPsmLightFaceID % gShadowMapsPerLight : 0u;
                 LightFaceData oldLightFaceData = gLightShadowDataBuffer[oldLocalLightIdx].lightFaceData[oldFaceIdx]; // only for read
 
                 // Flicker reduction: reject the change by using the stdDevs
@@ -393,7 +393,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 {
                     // Only update the index for new PSM light face.
                     gReusingLightIndexBuffer[currReusingBufferIdx] = newPsmLightFace.x;
-                    if (gSortingRules == (uint)SortingRules::LightFaces)
+                    if ((gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels))
                     {
                         int globalPsmTexArrayIdx = (int)currReusingBufferIdx;
                         gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].psmTexArrayIdx = globalPsmTexArrayIdx < gMaxSupportedShadowMaps1024 ? globalPsmTexArrayIdx :
@@ -433,7 +433,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     }
 
     // 3. Iterate over face ranking list in this frame. Also update all ISM light face resources
-    if (gVisibility != (uint)Visibility::ShadowMap_FullyLit)
+    if (gVisibility != (uint)Visibility::ShadowMap_FullyLit && gVisibility != (uint)Visibility::ShadowMap_FullyShadowed)
     {
         uint bufferSize;
         gIsmLightIndexBuffer.GetDimensions(bufferSize);
@@ -441,11 +441,11 @@ void main(uint3 threadId : SV_DispatchThreadID)
         {
             // Get light and face index
             uint lightOrGlobalFaceIdx = gSortedLightsBuffer[bufferIdx].x;
-            uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
-            uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+            uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
+            uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
             LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx]; // only for read
 
-            if (gSortingRules == (uint)SortingRules::LightFaces)
+            if ((gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels))
             {
                 int globalIsmTexArrayIdx = int(bufferIdx);
                 gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].ismTexArrayIdx = globalIsmTexArrayIdx % (int)gMaxIsmPerArray;
@@ -490,8 +490,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
     for (uint j = 0; j < gTopN; j++)
     {
         uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[reusingBufferIdx + j];
-        uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx / gShadowMapsPerLight : currLightOrGlobalFaceIdx;
-        uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+        uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? currLightOrGlobalFaceIdx / gShadowMapsPerLight : currLightOrGlobalFaceIdx;
+        uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? currLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
 
         gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].prevRanking = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].currRanking;
     }
@@ -499,7 +499,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Record size data
     for (uint r = 0; r < gTotalBinCount; r++)
     {
-        if (gSortingRules == (uint)SortingRules::LightFaces)
+        if ((gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels))
         {
             for (uint face = 0; face < gShadowMapsPerLight; face++)
             {
@@ -527,8 +527,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
         uint currLightOrGlobalFaceIdx = gReusingLightIndexBuffer[i];
         // if (i > 100)
         //     print("currLightOrGlobalFaceIdx = ", currLightOrGlobalFaceIdx);
-        uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx / gShadowMapsPerLight : currLightOrGlobalFaceIdx;
-        uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? currLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
+        uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? currLightOrGlobalFaceIdx / gShadowMapsPerLight : currLightOrGlobalFaceIdx;
+        uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? currLightOrGlobalFaceIdx % gShadowMapsPerLight : 0u;
         LightFaceData lightFaceData = gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx];
 
         gRecordReusingLightData[i] = uint4(lightFaceData.accumulatedFrames, lightFaceData.currRanking, lightFaceData.frequency, 0);

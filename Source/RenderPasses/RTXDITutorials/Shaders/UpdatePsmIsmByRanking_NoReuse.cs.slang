@@ -156,7 +156,7 @@ void main(uint3 threadID: SV_DispatchThreadID)
             }
 
             // ISM array index should be updated for every face
-            if (gVisibility != (uint)Visibility::ShadowMap_FullyLit)
+            if (gVisibility != (uint)Visibility::ShadowMap_FullyLit && gVisibility != (uint)Visibility::ShadowMap_FullyShadowed)
             {
                 int globalIsmTexArrayIdx = int(rank);
                 gLightShadowDataBuffer[localLightID].lightFaceData[faceIdx].ismTexArrayIdx = globalIsmTexArrayIdx % (int)gMaxIsmPerArray;
@@ -331,7 +331,7 @@ void main(uint3 threadID: SV_DispatchThreadID)
     print("rank = ", rank);
 
     // Process the rest Low-res ISM in the ranking
-    if (gVisibility != uint(Visibility::ShadowMap_FullyLit))
+    if (gVisibility != uint(Visibility::ShadowMap_FullyLit) && gVisibility != (uint)Visibility::ShadowMap_FullyShadowed)
     {
         for (; rank < gTotalLightFaceCount; rank++)
         {

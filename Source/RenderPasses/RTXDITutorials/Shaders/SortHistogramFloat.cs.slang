@@ -11,8 +11,6 @@
 
 import Utils.Debug.PixelDebug;
 
-// #define SORTING_VALUE_TYPE 0
-
 cbuffer sortCB
 {
     uint gTotalElementCount; ///< Total number of elements.
@@ -25,15 +23,10 @@ cbuffer sortCB
     uint gNullItem;
 };
 
-#if SORTING_VALUE_TYPE == 0
-RWBuffer<uint2> gSortBuffer;
-groupshared uint sKeys[2048];
-groupshared uint sValues[2048];
-#else
 RWBuffer<float2> gSortBuffer;
+
 groupshared float sKeys[2048];
 groupshared float sValues[2048];
-#endif
 
 
 // Takes Value and widens it by one bit at the location of the bit
@@ -52,17 +45,10 @@ uint InsertOneBit(uint Value, uint OneBitMask)
 // (effectively a negation) or leave the bits alone.  When the the gNullItem is
 // 0, we are sorting descending, so when A < B, they should swap.  For an
 // ascending sort, ~A < ~B should swap.
-#if SORTING_VALUE_TYPE == 0
-bool ShouldSwap(uint A, uint B)
-{
-    return (A ^ gNullItem) < (B ^ gNullItem);
-}
-#else
 bool ShouldSwap(float A, float B)
 {
     return (asuint(A) ^ gNullItem) < (asuint(B) ^ gNullItem);
 }
-#endif
 
 void fillSortKeys(uint elementIdx, bool innerPass = false)
 {
@@ -71,11 +57,7 @@ void fillSortKeys(uint elementIdx, bool innerPass = false)
     // Unused elements must sort to the end
     if (innerPass || elementIdx < gTotalElementCount)
     {
-#if SORTING_VALUE_TYPE == 0
-        uint2 keyValuePair = gSortBuffer[elementIdx];
-#else
         float2 keyValuePair = gSortBuffer[elementIdx];
-#endif
         sKeys[sharedIdx] = keyValuePair.x;
         sValues[sharedIdx] = keyValuePair.y;
     }
@@ -90,11 +72,7 @@ void storeKeyValuePair(uint elementIdx)
     uint sharedIdx = elementIdx & 2047;
 
     if (elementIdx < gTotalElementCount)
-#if SORTING_VALUE_TYPE == 0
-        gSortBuffer[elementIdx] = uint2(sKeys[sharedIdx], sValues[sharedIdx]);
-#else
         gSortBuffer[elementIdx] = float2(sKeys[sharedIdx], sValues[sharedIdx]);
-#endif
 }
 
 [numthreads(1024, 1, 1)]
@@ -123,13 +101,8 @@ void preSortCS(uint3 groupID: SV_GroupID, uint groupIdx: SV_GroupIndex)
             uint index2 = InsertOneBit(groupIdx, j);
             uint index1 = index2 ^ (k == 2 * j ? k - 1 : j);
 
-#if SORTING_VALUE_TYPE == 0
-            uint A = sValues[index1];
-            uint B = sValues[index2];
-#else
             float A = sValues[index1];
             float B = sValues[index2];
-#endif
 
             if (ShouldSwap(A, B))
             {
@@ -172,13 +145,8 @@ void innerSortCS(uint3 groupID: SV_GroupID, uint groupIdx: SV_GroupIndex)
         uint index2 = InsertOneBit(groupIdx, j);
         uint index1 = index2 ^ j;
 
-#if SORTING_VALUE_TYPE == 0
-        uint A = sValues[index1];
-        uint B = sValues[index2];
-#else
         float A = sValues[index1];
         float B = sValues[index2];
-#endif
 
         if (ShouldSwap(A, B))
         {
@@ -217,13 +185,8 @@ void outerSortCS(uint3 threadId: SV_DispatchThreadID)
     if (index2 >= gTotalElementCount)
         return;
 
-#if SORTING_VALUE_TYPE == 0
-    uint2 A = gSortBuffer[index1];
-    uint2 B = gSortBuffer[index2];
-#else
     float2 A = gSortBuffer[index1];
     float2 B = gSortBuffer[index2];
-#endif
 
     if (ShouldSwap(A.y, B.y))
     {

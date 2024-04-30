@@ -110,6 +110,7 @@ protected:
         // Resources we allocate to store geometry data in whatever format we need it to be to load it in the RTXDI bridge
         Buffer::SharedPtr   gBufferData = nullptr;            // Our packed G-buffer data for both this frame & last frame
         Texture::SharedPtr  emissiveColors = nullptr;         // RTXDI compute reflected color.  This stores emission from directly-seen lights
+        Texture::SharedPtr  bloomEmissiveColors = nullptr;
 
         // Resources we allocate to store light data for the RTXDI bridge
         Buffer::SharedPtr   lightGeometry;                    // Repacked from Falcor data to improve cache coherency during resampling
@@ -140,6 +141,8 @@ protected:
         ComputePass::SharedPtr initialCandidates;
         ComputePass::SharedPtr initialCandidateVisibility;
         ComputePass::SharedPtr shade;
+        ComputePass::SharedPtr bloomEffect;
+        ComputePass::SharedPtr blendBloomResult;
 
         // Shaders that kick off various types of ReSTIR reuse using RTXDI
         ComputePass::SharedPtr spatialReuse;
@@ -256,6 +259,7 @@ protected:
     bool mOnlyIsmForRanking = true;
     bool mSplitReservoirs = true;
     bool mRenderPsmGS = false;
+    bool mUseBloom = false;
     // Some redundent toggles
     bool mUseNearestPointSamples = false;
     bool mUseReconstructPSMs = false;
@@ -328,6 +332,8 @@ protected:
     float mSpotPerspectiveFov = -1.0f;
     uint mShadowFadeInFrameLength = 60u;
     PCF_Parameters mPcfParams;
+    bool mClampLightingRange = false;
+    uint mNumBlurIterations = 5;
 
     uint mSortingRules = (uint)SortingRules::LightFaces;
     uint mShadowDepthBias = (uint)ShadowDepthBias::SlopeScale;
@@ -360,7 +366,7 @@ protected:
     Buffer::SharedPtr mpLightShadowDataBuffer; // mesh lights + point lights 
     Buffer::SharedPtr mpPrevLightSelectionBuffer;
     Buffer::SharedPtr mpLightHistogramBuffer;
-    Buffer::SharedPtr mpSortedLightsBuffer;
+    Buffer::SharedPtr mpSortedLightsBuffer; // global light index + frequency
     Buffer::SharedPtr mpTotalValidPixels;
     Buffer::SharedPtr mpBoundaryVarianceBuffer;
     Buffer::SharedPtr mpFalcorLightIDtoOurs;
@@ -387,12 +393,15 @@ protected:
     Buffer::SharedPtr mpInstTriOffsetBuffer;
     Buffer::SharedPtr mpNonEmisInstTriOffsetBuffer;
 
-    /** Passes for computing and updating the top N lighs 
+    /** Passes for computing and updating the top N lighs
     */
     struct
     {
         ComputePass::SharedPtr computeLightHistogram;
         ComputePass::SharedPtr createKeyValuePairs;
+
+        ComputePass::SharedPtr computeLightsToCameraDist;
+        ComputePass::SharedPtr copyStagingToSource;
 
         struct
         {
@@ -402,6 +411,7 @@ protected:
         } bitonicSort;
 
     } mComputeTopLightsPass;
+
 
     // Pass for updating light shadow data buffer due to different changes
     ComputePass::SharedPtr mpUpdateLightShadowDataCenter;

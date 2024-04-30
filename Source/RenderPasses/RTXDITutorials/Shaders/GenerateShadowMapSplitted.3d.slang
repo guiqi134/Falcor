@@ -83,10 +83,10 @@ void gsMain(triangle VSOut gsIn[3], uint gsInstanceID : SV_GSInstanceID, uint pr
     for (uint psmIdx = 0; psmIdx < gShadowMapsPerLight; psmIdx++)
     {
         // Get light and face index
-        uint offset = gSortingRules == (uint)SortingRules::LightFaces ? psmIdx : 0u;
+        uint offset = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? psmIdx : 0u;
         uint lightOrGlobalFaceIdx = gReusingLightIndexBuffer[gCurrPassReusingStartIdx + offset];
-        uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
-        uint faceIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrGlobalFaceIdx % gShadowMapsPerLight : psmIdx;
+        uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx / gShadowMapsPerLight : lightOrGlobalFaceIdx;
+        uint faceIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrGlobalFaceIdx % gShadowMapsPerLight : psmIdx;
 
         // print("newPsmLightFace = ", gLightShadowDataBuffer[localLightIdx].lightFaceData[faceIdx].newPsmLightFace);
 

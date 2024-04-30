@@ -144,7 +144,7 @@ float PCF_PoissonDiskSamples(PCF_Parameters pcfParams, const Texture2DArray<floa
 
 float evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> shadowMaps, SamplerState linearSampler, float bias, uint faceIdx,
                          uint sortingRules, uint gDepthBiasMode, float constEpsilon, PCF_Parameters pcfParams, SamplerComparisonState compareSampler, Buffer<float2> poissonSamples,
-                         float2 rotation)
+                         float2 rotation, bool forceDisablePCF)
 {
     // Get the max resolution of the texture
     uint2 maxShadowMapSize;
@@ -181,7 +181,7 @@ float evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDa
         // Sample the target face's shadow map
         float3 location = float3(projCoord.xy, lightData.lightFaceData[faceIdx].psmTexArrayIdx);
         float texelSize = 1.0f / shadowMapSize;
-        if (pcfParams.usePCF)
+        if (pcfParams.usePCF && !forceDisablePCF)
         {
             if (pcfParams.usePoisson)
             {
@@ -207,7 +207,8 @@ float evaluateShadowMaps(float3 posW, float3 normalW, LightShadowMapData lightDa
 }
 
 float evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, const Texture2DArray<float> ismTextureArray, SamplerState linearSampler, float2 bias,
-                  uint faceIdx, uint ismArrayIdx, PCF_Parameters pcfParams, SamplerComparisonState compareSampler, Buffer<float2> poissonSamples, float2 rotation)
+                  uint faceIdx, uint ismArrayIdx, PCF_Parameters pcfParams, SamplerComparisonState compareSampler, Buffer<float2> poissonSamples, float2 rotation,
+                  bool forceDisablePCF)
 {
     float2 lightNearFar = lightData.nearFarPlane;
     float3 lightPosW = lightData.centerPosW;
@@ -239,7 +240,7 @@ float evaluateISM(float3 posW, float3 normalW, LightShadowMapData lightData, con
     float3 location = float3(projCoord.xy, ismArrayIdx);
     float texelSize = 1.0f / ismSize.x;
     float visibility = 1.0f;
-    if (pcfParams.usePCF)
+    if (pcfParams.usePCF && !forceDisablePCF)
     {
         visibility = ismTextureArray.SampleCmpLevelZero(compareSampler, location, projCoord.z);
     }

@@ -69,6 +69,8 @@ namespace
         { "viewW",                      "gViewW",                       "View direction in world space",                        true /* optional */, ResourceFormat::RGBA32Float  }, // TODO: Switch to packed 2x16-bit snorm format.
         { "time",                       "gTime",                        "Per-pixel execution time",                             true /* optional */, ResourceFormat::R32Uint      },
         { "disocclusion",               "gDisocclusion",                "Disocclusion mask",                                    true /* optional */, ResourceFormat::R32Float     },
+        { "albedo",          "gAlbedo",           "Albedo",           true /* optional */, ResourceFormat::RGBA32Float },
+        { "pnFwidth",       "gPosNormalFwidth",     "Position and normal filter width",         true /* optional */, ResourceFormat::RG32Float   },
     };
 };
 

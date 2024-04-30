@@ -17,8 +17,8 @@ RWBuffer<float> gLightPdfBuffer;
 void buildPDF(uint3 threadID : SV_DispatchThreadID)
 {
     uint lightOrIsmIdx = threadID.x;
-    uint localLightIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrIsmIdx / gIsmPerLight : lightOrIsmIdx;
-    uint ismIdx = gSortingRules == (uint)SortingRules::LightFaces ? lightOrIsmIdx % gIsmPerLight : 0u;
+    uint localLightIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrIsmIdx / gIsmPerLight : lightOrIsmIdx;
+    uint ismIdx = (gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? lightOrIsmIdx % gIsmPerLight : 0u;
 
     // Sum of pixels belong to ISM lights
     float sum = gTotalValidPixels[1];

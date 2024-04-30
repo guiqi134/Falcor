@@ -58,7 +58,7 @@ cbuffer ReuseCB
 [numthreads(CURRENT_GROUP_SIZE, CURRENT_GROUP_SIZE, 1)]
 void main(uint2 threadId : SV_DispatchThreadID, uint2 groupIndex : SV_GroupThreadID)
 {
-    printSetPixel(threadId);
+    // printSetPixel(threadId);
 
     print("222222222222222222222222", 2);
 

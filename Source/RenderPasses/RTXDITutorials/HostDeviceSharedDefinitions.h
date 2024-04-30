@@ -93,6 +93,7 @@ enum class Visibility : uint
     ShadowMap_FullyLit = 1,
     ShadowMap_ISM = 2,
     AllISM = 3,
+    ShadowMap_FullyShadowed = 4,
 };
 
 enum class ShadowMapType : uint
@@ -110,12 +111,14 @@ enum class ShadowDepthBias : uint
     Dou2014 = 2
 };
 
+// What ReSTIR statistics to use to sort the lights
 enum class SortingRules : uint
 {
     Light = 0,
     Light_OccludedPixels = 1,
-    LightFaces = 2,
-    LightFace_OccludedPixels = 3
+    LightFaces = 2, // -> LitPixels 
+    LightFace_OccludedPixels = 3,
+    LightFaces_NoVisiblity = 4
 };
 
 enum class ShadowOptions : uint
@@ -151,8 +154,10 @@ enum class ISMPushSamplingMode : uint
 enum class RankingImportance : uint
 {
     ReSTIR = 0,
-    onlyUniformRIS = 1,
-    onlyEmissivePowerRIS = 2,
+    ToCameraDistance = 1,
+    // below not used
+    onlyUniformRIS = 2,
+    onlyEmissivePowerRIS = 3,
 };
 
 // Comparison for different three places to collect sampling data

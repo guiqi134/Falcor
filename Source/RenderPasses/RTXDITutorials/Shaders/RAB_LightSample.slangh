@@ -142,7 +142,7 @@ RAB_LightSample RAB_SamplePolymorphicLight(RAB_LightInfo lightInfo, RAB_Surface 
         s.mIsAnalytic = true;
     }
     else
-    {
+    { 
         toLight = lightPos;
         s.mDistToLight = 1.0e30f;
         toLight = normalize(toLight);

@@ -115,13 +115,13 @@ void allIsmCS(uint3 threadID: SV_DispatchThreadID)
     uint2 posInIsm = threadID.xy;
 
     // TODO: this has bugs after changing to point lights, fix this!!!
-    uint lightOrGlobalFaceIdx = gHighResIsmFaceIdxBuffer[gSortingRules == (uint)SortingRules::LightFaces ? ismTexGlobalIdx : ismTexGlobalIdx / gIsmPerLight];
+    uint lightOrGlobalFaceIdx = gHighResIsmFaceIdxBuffer[(gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? ismTexGlobalIdx : ismTexGlobalIdx / gIsmPerLight];
     uint2 localLightIDAndFaceIdx = getLocalLightIdAndFaceIdx(lightOrGlobalFaceIdx, gFirstSpotLightID);
     uint localLightID = localLightIDAndFaceIdx.x;
     uint faceIdx = localLightIDAndFaceIdx.y;
     LightShadowMapData lightShadowData = gLightShadowDataBuffer[localLightID];
     LightFaceData lightFaceData = lightShadowData.lightFaceData[faceIdx];
-    uint lightShadowMapType = lightShadowData.lightFaceData[gSortingRules == (uint)SortingRules::LightFaces ? faceIdx : 0].shadowMapType;
+    uint lightShadowMapType = lightShadowData.lightFaceData[(gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? faceIdx : 0].shadowMapType;
 
     // Get the index for current ISM texture on the output texture
     const uint rowSize = gOutputSize.x / gInputSize.x;
@@ -165,7 +165,7 @@ void allIsmCS2(uint3 threadID: SV_DispatchThreadID)
     uint faceIdx = localLightIDAndFaceIdx.y;
     LightShadowMapData lightShadowData = gLightShadowDataBuffer[localLightID];
     LightFaceData lightFaceData = lightShadowData.lightFaceData[faceIdx];
-    uint lightShadowMapType = lightShadowData.lightFaceData[gSortingRules == (uint)SortingRules::LightFaces ? faceIdx : 0].shadowMapType;
+    uint lightShadowMapType = lightShadowData.lightFaceData[(gSortingRules != (uint)SortingRules::Light && gSortingRules != (uint)SortingRules::Light_OccludedPixels) ? faceIdx : 0].shadowMapType;
 
     // Get the index for current ISM texture on the output texture
     const uint rowSize = gOutputSize.x / gInputSize.x;

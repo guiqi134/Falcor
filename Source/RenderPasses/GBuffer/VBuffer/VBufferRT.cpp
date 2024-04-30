@@ -55,6 +55,12 @@ namespace
         { "mvec",           "gMotionVector",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
         { "viewW",          "gViewW",           "View direction in world space",    true /* optional */, ResourceFormat::RGBA32Float }, // TODO: Switch to packed 2x16-bit snorm format.
         { "time",           "gTime",            "Per-pixel execution time",         true /* optional */, ResourceFormat::R32Uint     },
+        { "linearZ",                    "gLinearZ",                     "Linear Z and slope",                                   true /* optional */, ResourceFormat::RG32Float    },
+        { "emissive",                   "gEmissive",                    "Emissive color",                                       true /* optional */, ResourceFormat::RGBA32Float  },
+        { "posW",           "gPosW",            "World space position",         true /* optional */, ResourceFormat::RGBA32Float },
+        { "normW",          "gNormW",           "World space normal",           true /* optional */, ResourceFormat::RGBA32Float },
+        { "albedo",          "gAlbedo",           "Albedo",           true /* optional */, ResourceFormat::RGBA32Float },
+        { "pnFwidth",       "gPosNormalFwidth",     "Position and normal filter width",         true /* optional */, ResourceFormat::RG32Float   },
     };
 };
 
@@ -276,6 +282,7 @@ void VBufferRT::setShaderData(const ShaderVar& var, const RenderData& renderData
 {
     var["gVBufferRT"]["frameDim"] = mFrameDim;
     var["gVBufferRT"]["frameCount"] = mFrameCount;
+    var["gVBufferRT"]["invFrameDim"] = mInvFrameDim;
 
     // Bind resources.
     var["gVBuffer"] = getOutput(renderData, kVBufferName);

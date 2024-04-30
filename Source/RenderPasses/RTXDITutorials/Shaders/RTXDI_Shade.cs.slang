@@ -44,7 +44,7 @@ RWTexture2D<float4> gOutputColor;     // Full output color (diffuse, specular, e
 Texture2D<PackedHitInfo> gVbuffer;
 
 float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample lightSample, float3 lightEmission, uint lightIndex, uint2 launchIdx, bool shadingVisibility,
-            RAB_RandomSamplerState rng, out float3 dif, out float3 spec)
+            RAB_RandomSamplerState rng, out float3 dif, out float3 spec, out float rankingVisibility)
 {
     // Make sure this sample would actually contribute.
     if (!RTXDI_IsValidReservoir(reservoir)) return 0;
@@ -59,11 +59,13 @@ float Shade(RTXDI_Reservoir reservoir, RAB_Surface surface, RAB_LightSample ligh
     int localLightID = toLocalLightIndex(lightIndex, gTotalLightMeshCount, gRtxdiParams.firstPointLight, gRtxdiParams.environmentLightIndex, gFalcorLightIDtoOurs);
     uint bufferIndex = gScreenSize.x * launchIdx.y + launchIdx.x;
     float isVisible = 1.0f;
+    rankingVisibility = 1.0f;
     if (geomTerm != 0.0f)
     {
         uint shadowOption;
         if (shadingVisibility)
             isVisible = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, gVisMode, rng, shadowOption);
+        rankingVisibility = (float)evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption, true);
     }
 
     print("lightIndex = ", lightIndex);
@@ -120,6 +122,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     // Do shading at this pixel (if we have a valid G-buffer surface and light sample)
     float3 difColor = 0, specColor = 0;
     float visibility = 1.0f;
+    float rankingVisibility = 1.0f;
     if (isValidSurface && RTXDI_IsValidReservoir(reservoir))
     {
         // Lookup the selected light and the specific light sample on it.
@@ -130,21 +133,23 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 lightEmission = lightInfo.getSampleEmission(lightUV);
 
         // Do shading
-        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, rng, difColor, specColor);
+        visibility = Shade(reservoir, surface, lightSample, lightEmission, lightIndex, launchIdx, gShadingVisibility, rng, difColor, specColor, rankingVisibility);
     }
 
-    // Add any directly-visible emission & environment maps, then store our final color
-    float3 outColor = difColor + specColor + gInputEmission[launchIdx].rgb;
-
-    // // Store each pixel's light ID first for later face statistics computation
-    // if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing) && !gDisableRankingUpdate)
-    // {
-    //     RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
-    //     if (!gSplitReservoirs) rankingReservoir = reservoir;
-    //     storeLightSampleForRanking(rankingReservoir, params, isValidSurface, launchIdx, visibility);
-    // }
-
+    // Skip the shading on direct emissive
+    float3 outColor = all(gInputEmission[launchIdx].rgb == 0) ? difColor + specColor : 2.0f * gInputEmission[launchIdx].rgb;
     gOutputColor[launchIdx] = float4(outColor.r, outColor.g, outColor.b, 1.0f);
+
+    // Store each pixel's light ID first for later face statistics computation
+    if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing) && !gDisableRankingUpdate &&
+        gSortingRules == (uint)SortingRules::LightFace_OccludedPixels)
+    {
+        // We need to use only ISMs for ranking ReSTIR with occluded pixels here, since with shadow maps included, it causes flickering
+        RTXDI_Reservoir rankingReservoir = RTXDI_LoadReservoir(params, launchIdx, gInputReservoirIndex + RTXDI_RANKING_RESERVOIR_OFFSET);
+        if (!gSplitReservoirs) rankingReservoir = reservoir;
+        print("rankingVisibility = ", rankingVisibility);
+        storeLightSampleForRanking(rankingReservoir, params, isValidSurface, launchIdx, rankingVisibility);
+    }
 
     // Visual debugging
     // if (false)

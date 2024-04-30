@@ -278,6 +278,7 @@ IsmPointSample unpackIsmPointSample(PackedIsmPointSample packedSample)
 
 
 // TODO: remove all codes below
+
 // float3 sphericalMap(float3 posCam, float far) {
 //     float3 pos = posCam / far;
 //     float pz = length(pos);

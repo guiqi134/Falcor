@@ -42,7 +42,7 @@ cbuffer SampleCB
 [numthreads(16, 16, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    printSetPixel(threadId.xy);
+    // printSetPixel(threadId.xy);
 
     print("Test Candidate Visibility pass----------------------------------", 1);
 
@@ -102,6 +102,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
         }
         else
         {
+            // Use pixels without visibility to rank light faces
+            isVisible = gSortingRules == (uint)SortingRules::LightFaces_NoVisiblity ? 1.0f : isVisible;
+
             // If we are already using ISM to evaluate, then no need to do it again
             if (shadowOption == uint(ShadowOptions::ISM))
             {
@@ -121,7 +124,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
                     && gPlaceForRankingData == uint(PlacesForRankingData::AfterReusing))
                 {
                     print("evalute the ISM for ranking reservoir", 1);
-                    isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption);
+                    if (gSortingRules != (uint)SortingRules::LightFaces_NoVisiblity)
+                        isVisible = evaluateVisibility(bufferIndex, localLightID, surface, lightSample, (uint)Visibility::AllISM, rng, shadowOption);
                     if (isVisible == 0.0f)
                     {
                         RTXDI_StoreVisibilityInReservoir(rankingReservoir, 0, true);
@@ -130,6 +134,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 }
             }
         }
+
+        print("isVisible = ", isVisible);
 
         // Store each pixel's light ID first for later face statistics computation
         if (gVisMode != uint(Visibility::AllShadowRay) && gPlaceForRankingData == uint(PlacesForRankingData::AfterVisibilityCheck) && !gDisableRankingUpdate)

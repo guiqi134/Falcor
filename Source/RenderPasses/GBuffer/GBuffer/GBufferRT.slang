@@ -55,7 +55,9 @@ RWTexture2D<float4> gSpecRough;
 RWTexture2D<float4> gEmissive;
 RWTexture2D<float4> gViewW;
 RWTexture2D<uint>   gTime;
-RWTexture2D<float>  gDisocclusion;
+RWTexture2D<float> gDisocclusion;
+RWTexture2D<float4> gAlbedo;
+RWTexture2D<float2> gPosNormalFwidth;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -248,6 +250,7 @@ struct GBufferRT
 
         // Create BSDF instance.
         let bsdf = gScene.materials.getBSDF(sd, lod);
+        let bsdfProperties = bsdf.getProperties(sd);
 
         const GBufferData gbuf = prepareGBufferData(sd, bsdf);
 
@@ -284,12 +287,21 @@ struct GBufferRT
             gLinearZ[pixel] = float2(curLinearZ, dLinearZ);
         }
 
+        // Length of derivatives of position and normal
+        if (is_valid(gPosNormalFwidth))
+        {
+            gPosNormalFwidth[pixel] = float2(length(fwidth(sd.posW)), length(fwidth(sd.N)));
+        }
+
         // Output a depth buffer similar to raster (NDC).
         if (is_valid(gDepth))
         {
             float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
             gDepth[pixel] = curPosH.z / curPosH.w;
         }
+
+        if (is_valid(gAlbedo)) gAlbedo[pixel] = float4((bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo
+            + bsdfProperties.specularTransmissionAlbedo), 1.0f);
 
         // Output a buffer that packs normal and roughness estimation.
         if (is_valid(gNormalWRoughnessMaterialID))

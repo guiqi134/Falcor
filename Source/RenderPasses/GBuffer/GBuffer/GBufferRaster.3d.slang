@@ -58,6 +58,7 @@ RasterizerOrderedTexture2D<float4> gEmissive;
 RasterizerOrderedTexture2D<float4> gViewW;
 RasterizerOrderedTexture2D<float2> gPosNormalFwidth;
 RasterizerOrderedTexture2D<float2> gLinearZAndDeriv;
+RasterizerOrderedTexture2D<float4> gAlbedo;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -95,6 +96,7 @@ GBufferPSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID, float3 bar
 
     // Create BSDF instance.
     let bsdf = gScene.materials.getBSDF(sd, lod);
+    let bsdfProperties = bsdf.getProperties(sd);
 
     const GBufferData gbuf = prepareGBufferData(sd, bsdf);
 
@@ -131,6 +133,9 @@ GBufferPSOut psMain(VSOut vsOut, uint triangleIndex : SV_PrimitiveID, float3 bar
         const float linearZ = vsOut.posH.z * vsOut.posH.w;
         gLinearZAndDeriv[ipos] = float2(linearZ, max(abs(ddx(linearZ)), abs(ddy(linearZ))));
     }
+
+    if (is_valid(gAlbedo)) gAlbedo[ipos] = float4((bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo
+            + bsdfProperties.specularTransmissionAlbedo), 1.0f);
 
     // Note on barycentrics:
     // The barycentric weights provided to pixel shader correspond to vertices A, B, C of the rasterized triangle.

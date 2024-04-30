@@ -49,6 +49,7 @@ namespace
         { "viewW",          "gViewW",               "View direction in world space",            true /* optional */, ResourceFormat::RGBA32Float }, // TODO: Switch to packed 2x16-bit snorm format.
         { "pnFwidth",       "gPosNormalFwidth",     "Position and normal filter width",         true /* optional */, ResourceFormat::RG32Float   },
         { "linearZ",        "gLinearZAndDeriv",     "Linear z (and derivative)",                true /* optional */, ResourceFormat::RG32Float   },
+        { "albedo",          "gAlbedo",           "Albedo",           true /* optional */, ResourceFormat::RGBA32Float },
     };
 
     const std::string kDepthName = "depth";

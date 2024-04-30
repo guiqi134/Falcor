@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "RTXDITutorial5.h"
 
- /** 
+ /**
  */
 
 using namespace Falcor;
@@ -69,7 +69,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     //}
 
     //logInfo(std::format("Blas Update Mode = {}, Tlas Update Mode = {}", uint(mPassData.scene->getBlasUpdateMode()), uint(mPassData.scene->getTlasUpdateMode())));
-    
+
 
     // If needed, allocate an RTXDI context & resources so we can run our lighting code
     if (!mpRtxdiContext) allocateRtxdiResrouces(pRenderContext, renderData);
@@ -92,7 +92,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
     checkForSceneUpdates();
 
     // Precompute all the point samples for ISM render. If base triangle size changed, this should be called.
-    if (mFirstPrecompute && mVisibility != Visibility::ShadowMap_FullyLit)
+    if (mFirstPrecompute && mVisibility != Visibility::ShadowMap_FullyLit && mVisibility != Visibility::ShadowMap_FullyShadowed)
     {
         precomputeIsmPointSamples(pRenderContext);
         mFirstPrecompute = false;
@@ -116,7 +116,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
         if (!mDisableRankingUpdate)
             computeRestirStatistics(pRenderContext, renderData);
     }
-    else 
+    else
     {
         // For each pixel in our image, randomly select some number of candidate light samples, (optionally) send
         // shadow rays to the selected one, reuse this data spatially between some neighbors, and then accumulate
@@ -164,7 +164,7 @@ void RTXDITutorial5::execute(RenderContext* pRenderContext, const RenderData& re
         }
     }
 
-    // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame 
+    // Increment our frame counter for next frame.  This is used to seed a RNG, which we want to change each frame
 
     mRtxdiFrameParams.frameIndex = mUseFixedSeed && mRtxdiFrameParams.frameIndex > mWarmUpFrameCount ? 21u : mRtxdiFrameParams.frameIndex;
     if (!mFrozenFrame) mRtxdiFrameParams.frameIndex++;
@@ -209,7 +209,7 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         mShader.initialCandidates->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
     }
 
-    // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.  
+    // Step 2: (Optionally, but *highly* recommended) Test visibility for selected candidate.
     if (mLightingParams.traceInitialShadowRay)
     {
         FALCOR_PROFILE("Candidate Visibility");
@@ -282,9 +282,49 @@ void RTXDITutorial5::runSpatioTemporalReuse(RenderContext* pRenderContext, const
         auto shadowOptionsResult = getDeviceResourceData<uint>(pRenderContext, mpShadowOptionsBuffer);
         calcDiffShadowCoverage(shadowOptionsResult, 1);
     }
+
+    // (Optional) Bloom effect
+    if (mUseBloom)
+    {
+        auto copyTexture = [pRenderContext](Texture* pDst, const Texture* pSrc)
+        {
+            if (pDst && pSrc)
+            {
+                FALCOR_ASSERT(pDst && pSrc);
+                FALCOR_ASSERT(pDst->getFormat() == pSrc->getFormat());
+                FALCOR_ASSERT(pDst->getWidth() == pSrc->getWidth() && pDst->getHeight() == pSrc->getHeight());
+                pRenderContext->copyResource(pDst, pSrc);
+            }
+            else if (pDst)
+            {
+                pRenderContext->clearUAV(pDst->getUAV().get(), uint4(0, 0, 0, 0));
+            }
+        };
+
+        FALCOR_PROFILE("Bloom");
+        auto bloomVars = mShader.bloomEffect->getRootVar();
+        for (uint pass = 0; pass < mNumBlurIterations; pass++)
+        {
+            bloomVars["gInputEmission"] = mResources.emissiveColors;
+            bloomVars["gOutputEmission"] = mResources.bloomEmissiveColors;
+            mpPixelDebug->prepareProgram(mShader.bloomEffect->getProgram(), bloomVars);
+            mShader.bloomEffect->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
+
+            if (pass != mNumBlurIterations - 1)
+                std::swap(mResources.emissiveColors, mResources.bloomEmissiveColors);
+        }
+        copyTexture(renderData["emission"]->asTexture().get(), mResources.bloomEmissiveColors.get());
+
+        // Blend bloom results to get final color
+        auto blendVars = mShader.blendBloomResult->getRootVar();
+        blendVars["gInputBloom"] = mResources.bloomEmissiveColors;
+        blendVars["gColor"] = renderData["color"]->asTexture();
+        mpPixelDebug->prepareProgram(mShader.blendBloomResult->getProgram(), blendVars);
+        mShader.blendBloomResult->execute(pRenderContext, mPassData.screenSize.x, mPassData.screenSize.y);
+    }
 }
 
-// RIS Baseline 
+// RIS Baseline (not used)
 void RTXDITutorial5::runBasicRISLighting(RenderContext* pRenderContext, const RenderData& renderData)
 {
     setCurrentFrameRTXDIParameters(renderData);
@@ -318,8 +358,6 @@ void RTXDITutorial5::runBasicRISLighting(RenderContext* pRenderContext, const Re
         calcDiffShadowCoverage(shadowOptionsResult, 1);
     }
 }
-
-// TODO: Traditional (fixed) shadow map baseline
 
 
 

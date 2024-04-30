@@ -14,6 +14,7 @@ cbuffer CB
     bool gCompareToBoundary;
     uint gSortingRules;
     uint gFlickerReduction;
+    // uint gRankingImportance;
 }
 
 RWStructuredBuffer<LightShadowMapData> gLightShadowDataBuffer;

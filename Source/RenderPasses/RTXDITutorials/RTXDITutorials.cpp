@@ -36,10 +36,21 @@ extern "C" __declspec(dllexport) const char* getProjDir()
     return PROJECT_DIR;
 }
 
+static void regRTXDITutorial(pybind11::module& m)
+{
+    pybind11::enum_<Visibility> visibility(m, "Visibility");
+    visibility.value("AllShadowRay", Visibility::AllShadowRay);
+    visibility.value("ShadowMap_FullyLit", Visibility::ShadowMap_FullyLit);
+    visibility.value("ShadowMap_ISM", Visibility::ShadowMap_ISM);
+    visibility.value("AllISM", Visibility::AllISM);
+    visibility.value("ShadowMap_FullyShadowed", Visibility::ShadowMap_FullyShadowed);
+}
+
 // What passes does this DLL expose?  Register them here
 extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
 {
     lib.registerPass(RTXDITutorial5::getClassDescription(), RTXDITutorial5::create);
+    ScriptBindings::registerBinding(regRTXDITutorial);
 }
 
 
