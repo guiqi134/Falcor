@@ -5,7 +5,7 @@ scene = "RTXDITutorialsBistro/BistroExterior.pyscene"
 
 currentTime = 0.0
 paused = True
-useDenoiser = True
+useDenoiser = False
 
 restirPassName = "RTXDITutorial5"
 
@@ -156,3 +156,6 @@ viewport4 = [
     float3( -16.600933, 7.974854, 1.151592 ),
     float3( 0.000000,   1.000000,  0.000000 ) ]
 m.scene.addViewpoint(viewport4[0], viewport4[1], viewport4[2])
+
+# for light in m.scene.lights:
+#     light.intensity *= 10.0

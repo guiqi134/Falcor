@@ -3,7 +3,7 @@ import os
 scene = "EmeraldSquare/EmeraldSquare_Dusk.pyscene"
 currentTime = 0.0
 paused = True
-useDenoiser = True
+useDenoiser = False
 restirPassName = "RTXDITutorial5"
 
 def check_and_create_folder(folder):
@@ -38,7 +38,7 @@ def graph_ImportanceResampling():
         "temporalReusingLength" : 1,
         "extraPointSamples" : 100000000,
         "triAreaClampThreshold" : float2(0.002239, 0.011563),
-        "numPSMs" : 15,
+        "numPSMs" : 10,
         "useBloom" : True,
     }
     gToneMappingParams = {
@@ -63,7 +63,6 @@ def graph_ImportanceResampling():
 
     # Create a renderer (i.e., graph) containing a number of render passes
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
-    tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
     tracer.addPass(createPass(restirPassName, gResamplingParams), "RTXDI Tutorials")
     tracer.addPass(createPass("ToneMapper", gToneMappingParams), "ToneMapping")
     tracer.addPass(createPass("AccumulatePass", gAccumParams), "Accumulation")
@@ -150,6 +149,8 @@ viewport4 = [
     float3(0, 1, 0) ]
 m.scene.addViewpoint(viewport4[0], viewport4[1], viewport4[2])
 
+# for light in m.scene.lights:
+#     light.intensity *= 5.0
 
 # Capturing images under same view
 capturing_animation = False

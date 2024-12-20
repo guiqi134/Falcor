@@ -1,7 +1,7 @@
 scene = "NVIDIA_Internal/Subway/Subway.pyscene"
 currentTime = 0.0
 paused = True
-useDenoiser = True
+useDenoiser = False
 restirPassName = "RTXDITutorial5"
 
 def graph_ImportanceResampling():
@@ -54,7 +54,6 @@ def graph_ImportanceResampling():
 
     # Create a renderer (i.e., graph) containing a number of render passes
     tracer = RenderGraph("Spatiotemporal Importance Resampling")
-    tracer.addPass(createPass("VBufferRT", {}), "VBuffer")
     tracer.addPass(createPass(restirPassName, gResamplingParams), "RTXDI Tutorials")
     tracer.addPass(createPass("ToneMapper", gToneMappingParams), "ToneMapping")
     tracer.addPass(createPass("AccumulatePass", gAccumParams), "Accumulation")
@@ -135,3 +134,7 @@ viewport = [
     float3(33.546528, 9.749392, 36.246582),
     float3(0, 1, 0) ]
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
+
+
+for light in m.scene.lights:
+    light.intensity *= 5.0
