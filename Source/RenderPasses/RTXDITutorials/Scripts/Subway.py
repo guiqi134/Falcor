@@ -136,5 +136,5 @@ viewport = [
 m.scene.addViewpoint(viewport[0], viewport[1], viewport[2])
 
 
-for light in m.scene.lights:
-    light.intensity *= 5.0
+# for light in m.scene.lights:
+#     light.intensity *= 5.0

@@ -56,8 +56,8 @@ def graph_ImportanceResampling():
         'VarianceEpsilon': 9.999999747378752e-05,
         'PhiColor': 1.0,
         'PhiNormal': 50.0,
-        # 'Alpha': 0.02000000074505806,
-        'Alpha': 0.15000000074505806,
+        'Alpha': 0.02000000074505806,
+        # 'Alpha': 0.15000000074505806,
         'MomentsAlpha': 0.50000000298023224
     }
 
